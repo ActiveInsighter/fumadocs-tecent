@@ -1,0 +1,113 @@
+---
+title: MDX 与 JSX
+description: 展示 JavaScript 表达式、自定义组件、主题变量、Tailwind 类和原生 HTML 元素。
+---
+
+export const frameworkName = 'Fumadocs';
+export const versionInfo = { next: 16, react: 19, tailwind: 4 };
+export const surfaces = [
+  ['Background', 'bg-background text-foreground'],
+  ['Card', 'bg-card text-card-foreground'],
+  ['Muted', 'bg-muted text-muted-foreground'],
+  ['Accent', 'bg-accent text-accent-foreground'],
+];
+
+export function StatusBadge({ children }) {
+  return (
+    <span className="inline-flex items-center rounded-full border bg-fd-accent px-2.5 py-1 text-sm font-medium text-fd-accent-foreground">
+      {children}
+    </span>
+  );
+}
+
+<Callout title="MDX 是 Markdown 的超集" type="info">
+  除了普通 Markdown，MDX 还允许导出变量、执行安全的构建期表达式、定义 React 组件，并在正文中混合 JSX。
+</Callout>
+
+## JavaScript 表达式
+
+当前框架名称：**{frameworkName}**。
+
+版本组合：Next.js **{versionInfo.next}**、React **{versionInfo.react}**、Tailwind CSS **{versionInfo.tailwind}**。
+
+字符串表达式：`{'MDX'.toLowerCase()}` 的运行结果是 **{'MDX'.toLowerCase()}**。
+
+简单计算：`21 × 2 =` **{21 * 2}**。
+
+## 自定义组件
+
+下面的 Badge 直接定义在当前 MDX 文件中：
+
+<StatusBadge>Theme ready</StatusBadge>{' '}
+<StatusBadge>MDX enabled</StatusBadge>{' '}
+<StatusBadge>Build-time rendering</StatusBadge>
+
+```mdx title="自定义组件语法"
+export function StatusBadge({ children }) {
+  return <span className="rounded-full border px-2.5 py-1">{children}</span>;
+}
+
+<StatusBadge>Theme ready</StatusBadge>
+```
+
+## 数组渲染
+
+<div className="my-6 grid gap-3 sm:grid-cols-2">
+  {surfaces.map(([name, className]) => (
+    <div key={name} className={`rounded-lg border p-4 ${className}`}>
+      <p className="m-0 font-medium">{name}</p>
+      <p className="mb-0 mt-1 text-sm opacity-75">{className}</p>
+    </div>
+  ))}
+</div>
+
+## Tailwind 响应式布局
+
+<div className="not-prose my-6 grid gap-4 md:grid-cols-3">
+  <div className="rounded-xl border bg-fd-card p-5 shadow-sm">
+    <p className="font-medium text-fd-card-foreground">第一列</p>
+    <p className="mt-2 text-sm leading-6 text-fd-muted-foreground">移动端单列，桌面端三列。</p>
+  </div>
+  <div className="rounded-xl border bg-fd-card p-5 shadow-sm">
+    <p className="font-medium text-fd-card-foreground">第二列</p>
+    <p className="mt-2 text-sm leading-6 text-fd-muted-foreground">使用 Fumadocs 语义颜色。</p>
+  </div>
+  <div className="rounded-xl border bg-fd-card p-5 shadow-sm">
+    <p className="font-medium text-fd-card-foreground">第三列</p>
+    <p className="mt-2 text-sm leading-6 text-fd-muted-foreground">圆角与全局 10px 基准一致。</p>
+  </div>
+</div>
+
+## 原生 HTML 元素
+
+### 键盘按键
+
+按 <kbd>Ctrl</kbd> + <kbd>K</kbd> 打开搜索。
+
+### 折叠内容
+
+<details className="my-5 rounded-lg border bg-fd-card px-4 py-3">
+  <summary className="cursor-pointer font-medium">展开查看详情</summary>
+  <p className="mb-1 mt-3 text-fd-muted-foreground">
+    原生 details 元素不需要客户端状态，也能提供基础折叠交互。
+  </p>
+</details>
+
+### 进度与数值
+
+<label className="mb-2 block text-sm font-medium" htmlFor="build-progress">
+  示例构建进度
+</label>
+<progress id="build-progress" className="h-2 w-full" value="72" max="100">
+  72%
+</progress>
+
+<p>
+  主题完成度：<meter min="0" max="100" value="85">85%</meter>
+</p>
+
+## JSX 注释
+
+{/* 这条注释不会渲染到最终页面。 */}
+
+JSX 注释使用花括号包裹，适合给文档作者留下维护说明，而不会出现在读者看到的正文中。
