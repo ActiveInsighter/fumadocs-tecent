@@ -178,6 +178,21 @@
     }
   }
 
+  /*
+   * Fumadocs Typography defaults to 16px. Chinese prose looks slightly smaller
+   * with the Outfit/system-font combination, so the documentation body is set
+   * to 17px with a relaxed line height while code and tables keep their own
+   * component-level sizes.
+   */
+  #docs-body {
+    font-size: 1.0625rem;
+    line-height: 1.85;
+  }
+
+  #docs-body :where(p, li, blockquote) {
+    line-height: inherit;
+  }
+
   /* Animate UI uses medium-weight documentation headings. */
   #docs-body :where(h1, h2, h3, h4, h5, h6) {
     font-weight: 500;
