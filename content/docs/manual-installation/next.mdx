@@ -12,7 +12,7 @@ Before continuing, make sure you have configured:
 
 We will use [Fumadocs MDX](/docs/mdx) as a content source, you can configure it first:
 
-<include cwd>content/docs/mdx/(integrations)/next.mdx#setup-section</include>
+<include cwd>content/snippets/apps/docs/content/docs/mdx/(integrations)/next.mdx#setup-section</include>
 
 <Callout title='Good to Know'>
 
@@ -66,25 +66,25 @@ Add the following Tailwind CSS styles to `global.css`.
 Create a `lib/layout.shared.tsx` file to put the shared options for our layouts.
 
 <include cwd meta='title="lib/layout.shared.tsx"'>
-  ../../examples/next-min/lib/layout.shared.tsx
+  content/snippets/examples/next-min/lib/layout.shared.tsx
 </include>
 
 Create the following files & routes:
 
 <include cwd meta='tab="components/mdx.tsx"'>
-  ../../examples/next-min/components/mdx.tsx
+  content/snippets/examples/next-min/components/mdx.tsx
 </include>
 
 <include cwd meta='tab="app/docs/layout.tsx"'>
-  ../../examples/next-min/app/docs/layout.tsx
+  content/snippets/examples/next-min/app/docs/layout.tsx
 </include>
 
 <include cwd meta='tab="app/docs/[[...slug]]/page.tsx"'>
-  ../../examples/next-min/app/docs/[[...slug]]/page.tsx
+  content/snippets/examples/next-min/app/docs/[[...slug]]/page.tsx
 </include>
 
 <include cwd meta='tab="app/api/search/route.ts"'>
-  ../../examples/next-min/app/api/search/route.ts
+  content/snippets/examples/next-min/app/api/search/route.ts
 </include>
 
 > The search is powered by ZBSearch, learn more about [Document Search](/docs/headless/search).
