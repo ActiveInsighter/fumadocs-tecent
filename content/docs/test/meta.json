@@ -1,0 +1,5 @@
+{
+  "title": "MDX 渲染测试",
+  "description": "集中预览当前站点支持的 Markdown 与 Fumadocs MDX 渲染效果",
+  "pages": ["index", "markdown", "components", "code", "jsx"]
+}
