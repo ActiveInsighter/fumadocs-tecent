@@ -1,7 +1,14 @@
 import './global.css';
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import type { Metadata } from 'next';
+import { Outfit } from 'next/font/google';
 import type { ReactNode } from 'react';
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-outfit',
+});
 
 export const metadata: Metadata = {
   title: {
@@ -13,8 +20,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
-      <body className="flex min-h-screen flex-col">
+    <html
+      lang="zh-CN"
+      className={outfit.variable}
+      suppressHydrationWarning
+    >
+      <body className="flex min-h-screen flex-col font-sans">
         <RootProvider>{children}</RootProvider>
       </body>
     </html>

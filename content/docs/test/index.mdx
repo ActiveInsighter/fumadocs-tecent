@@ -1,0 +1,63 @@
+---
+title: MDX 渲染测试
+description: 集中检查当前主题、正文排版和 Fumadocs MDX 组件的实际显示效果。
+---
+
+<Callout title="用途" type="info">
+  这个目录既是视觉回归测试页，也是可以直接复制语法的示例库。修改全局主题、Typography、代码块或 MDX 组件后，可以依次检查下面几页。
+</Callout>
+
+## 测试页面
+
+<Cards>
+  <Card title="基础 Markdown" href="/docs/test/markdown">
+    标题、段落、强调、列表、引用、链接、图片、表格和原生 HTML。
+  </Card>
+  <Card title="Fumadocs 组件" href="/docs/test/components">
+    Callout、Cards、Tabs、Accordion、Steps、Files 和 TypeTable。
+  </Card>
+  <Card title="代码块" href="/docs/test/code">
+    标题、行号、行高亮、词高亮、Diff、Focus 和代码标签组。
+  </Card>
+  <Card title="MDX 与 JSX" href="/docs/test/jsx">
+    JavaScript 表达式、自定义组件、Tailwind 类和原生交互元素。
+  </Card>
+</Cards>
+
+## 当前视觉基准
+
+| 项目 | 当前设置 |
+| --- | --- |
+| 主题预设 | Fumadocs `black.css` |
+| 正文字号 | 17px |
+| 正文行高 | 1.85 |
+| 全局圆角基准 | 10px |
+| 英文与数字字体 | Outfit |
+| 中文回退字体 | PingFang SC / Microsoft YaHei / Noto Sans CJK SC |
+| 桌面布局宽度 | 1670px |
+
+## 建议检查顺序
+
+<Steps>
+  <Step>
+
+### 先看基础排版
+
+确认长段落的字号、行高、标题层级、列表缩进和表格密度是否舒适。
+
+  </Step>
+  <Step>
+
+### 再看交互组件
+
+分别切换 Tabs、展开 Accordion，并检查浅色与深色模式下的边框和背景层级。
+
+  </Step>
+  <Step>
+
+### 最后检查代码
+
+确认 Shiki 高亮、复制按钮、长代码横向滚动和代码标签组都能正常工作。
+
+  </Step>
+</Steps>

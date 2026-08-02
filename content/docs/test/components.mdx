@@ -1,0 +1,174 @@
+---
+title: Fumadocs 组件
+description: 展示当前项目已全局注册的 Callout、Cards、Tabs、Accordion、Steps、Files 和 TypeTable。
+---
+
+<Callout title="无需重复导入" type="success">
+  这一页使用的组件已经在 `components/mdx.tsx` 中全局注册。其他 MDX 文档可以直接复制下面的组件语法。
+</Callout>
+
+## Callout
+
+<Callout title="信息" type="info">
+  用于补充背景、解释上下文或给出一般提示。
+</Callout>
+
+<Callout title="注意" type="warn">
+  用于提醒读者可能出现的问题或需要特别留意的条件。
+</Callout>
+
+<Callout title="错误" type="error">
+  用于展示错误条件、危险操作或明确禁止的做法。
+</Callout>
+
+<Callout title="成功" type="success">
+  用于表示某个操作已完成，或者推荐的配置已经生效。
+</Callout>
+
+<Callout title="想法" type="idea">
+  用于展示可选思路、扩展方案或值得尝试的设计。
+</Callout>
+
+## Cards
+
+<Cards>
+  <Card title="基础 Markdown" href="/docs/test/markdown">
+    查看标题、段落、表格和图片渲染。
+  </Card>
+  <Card title="代码块" href="/docs/test/code">
+    查看 Shiki 高亮、Diff 和代码标签组。
+  </Card>
+  <Card title="无链接卡片">
+    `href` 是可选的，卡片也可以只承载说明内容。
+  </Card>
+</Cards>
+
+## Tabs
+
+<Tabs items={['npm', 'pnpm', 'bun']} defaultIndex={1}>
+  <Tab value="npm">
+
+```bash
+npm install fumadocs-ui
+```
+
+  </Tab>
+  <Tab value="pnpm">
+
+```bash
+pnpm add fumadocs-ui
+```
+
+  </Tab>
+  <Tab value="bun">
+
+```bash
+bun add fumadocs-ui
+```
+
+  </Tab>
+</Tabs>
+
+使用 `groupId` 和 `persist` 可以让同一组 Tabs 共享并持久化选择：
+
+<Tabs groupId="mdx-language-demo" persist items={['TypeScript', 'JavaScript']}>
+  <Tab value="TypeScript">TypeScript 提供静态类型检查。</Tab>
+  <Tab value="JavaScript">JavaScript 配置更轻量。</Tab>
+</Tabs>
+
+## Accordion
+
+<Accordions type="single">
+  <Accordion title="Fumadocs 的主题颜色在哪里控制？">
+    主要由 `fumadocs-ui/css/black.css` 和 `app/global.css` 中的 `--color-fd-*` 语义变量控制。
+  </Accordion>
+  <Accordion title="为什么正文可以直接使用 Tabs？">
+    因为 Tabs、Accordion、Steps、Files 和 TypeTable 已经在全局 MDX 映射中注册。
+  </Accordion>
+  <Accordion title="可以在 Accordion 中写 Markdown 吗？">
+
+可以。这里包含 **粗体文本**、`inline code` 和一个列表：
+
+- 第一项
+- 第二项
+
+  </Accordion>
+</Accordions>
+
+## Steps
+
+<Steps>
+  <Step>
+
+### 创建 MDX 文件
+
+在 `content/docs` 下创建 `.mdx` 文件，并添加 YAML Frontmatter。
+
+  </Step>
+  <Step>
+
+### 编写内容
+
+混合使用 Markdown、Fumadocs 组件和 JSX 表达式。
+
+  </Step>
+  <Step>
+
+### 检查渲染
+
+运行构建并检查导航、TOC、代码高亮、深色模式和移动端布局。
+
+  </Step>
+</Steps>
+
+## Files
+
+<Files>
+  <Folder name="app" defaultOpen>
+    <Folder name="docs" defaultOpen>
+      <File name="layout.tsx" />
+      <File name="[[...slug]]/page.tsx" />
+    </Folder>
+    <File name="global.css" />
+    <File name="layout.tsx" />
+  </Folder>
+  <Folder name="content" defaultOpen>
+    <Folder name="docs" defaultOpen>
+      <Folder name="test" defaultOpen>
+        <File name="index.mdx" />
+        <File name="markdown.mdx" />
+        <File name="components.mdx" />
+        <File name="code.mdx" />
+        <File name="jsx.mdx" />
+      </Folder>
+    </Folder>
+  </Folder>
+  <File name="source.config.ts" />
+  <File name="package.json" />
+</Files>
+
+## TypeTable
+
+<TypeTable
+  type={{
+    title: {
+      description: '页面标题，对应 Frontmatter 中的 title。',
+      type: 'string',
+      required: true,
+    },
+    description: {
+      description: '页面描述，通常显示在标题下方并用于页面元数据。',
+      type: 'string',
+    },
+    full: {
+      description: '是否让正文使用完整可用宽度。',
+      type: 'boolean',
+      default: false,
+    },
+    toc: {
+      description: '是否生成和显示右侧目录。',
+      type: 'boolean',
+      default: true,
+    },
+  }}
+/>

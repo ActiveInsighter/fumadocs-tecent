@@ -1,0 +1,102 @@
+---
+title: 基础 Markdown
+description: 检查正文排版、标题层级、列表、引用、链接、图片和表格。
+---
+
+这是一段用于检查正文字号和行高的中文长段落。当前正文基准为 17px，行高为 1.85，目标是在桌面端保持清晰舒展，同时避免中文文档显得过于紧凑。英文和数字使用 Outfit，中文则回退到系统中文字体，例如 Fumadocs、Next.js 16、React 19 和 Tailwind CSS 4。
+
+第二段用于观察段落之间的距离。正文应该比导航、表格和代码稍大，但不能破坏组件自身的字号层级。你可以切换深色模式，确认前景色、弱化文字和链接在两种主题下都具有足够对比度。
+
+## 标题层级
+
+### 三级标题
+
+三级标题适合文档中的主要小节，当前统一使用中等字重。
+
+#### 四级标题
+
+四级标题适合更细的解释，不应比正文显得过重。
+
+##### 五级标题
+
+五级标题通常用于参数说明或补充主题。
+
+###### 六级标题
+
+六级标题是最弱的一层标题。
+
+## 行内文本
+
+普通文本、**粗体文本**、*斜体文本*、***粗斜体文本***、~~删除线文本~~、`inline code`，以及一个[内部链接](/docs/test/components)和一个[外部链接](https://fumadocs.dev)。
+
+键盘操作可以写成 <kbd>Ctrl</kbd> + <kbd>K</kbd>，也可以使用 <mark>高亮文本</mark> 表示值得注意的内容。
+
+## 列表
+
+### 无序列表
+
+- 第一项
+- 第二项
+  - 二级项目 A
+  - 二级项目 B
+    - 三级项目
+- 第三项
+
+### 有序列表
+
+1. 安装依赖
+2. 配置内容源
+3. 创建文档页面
+4. 构建并部署
+
+### 任务列表
+
+- [x] 配置 Fumadocs
+- [x] 迁移 Animate UI 配色
+- [x] 调整正文字号
+- [ ] 继续迁移自定义代码块
+
+## 引用
+
+> 这是一个普通引用块。它适合摘录定义、提醒背景信息，或者突出一段需要单独阅读的内容。
+>
+> 引用块内部也可以包含多个段落、**强调文本**和 `code`。
+
+## 分隔线
+
+上面的内容与下面的内容由水平分隔线隔开。
+
+---
+
+分隔线应使用主题边框颜色，不应该比正文更抢眼。
+
+## 图片
+
+![MDX rendering preview](/mdx-test/preview.svg)
+
+图片用于检查内容宽度、圆角、上下间距和深色图片在浅色页面中的边界表现。
+
+## GFM 表格
+
+| 功能 | 语法 | 当前效果 |
+| --- | --- | --- |
+| 粗体 | `**text**` | **text** |
+| 斜体 | `*text*` | *text* |
+| 删除线 | `~~text~~` | ~~text~~ |
+| 行内代码 | `` `code` `` | `code` |
+| 链接 | `[title](url)` | [Fumadocs](https://fumadocs.dev) |
+
+## 原生 HTML
+
+<details>
+  <summary>点击展开原生 details 元素</summary>
+
+  这里是折叠内容。MDX 允许 Markdown 与 JSX/HTML 混合，但复杂交互通常更适合使用 Fumadocs 官方组件。
+</details>
+
+<div className="my-6 rounded-lg border bg-fd-card p-5 text-fd-card-foreground shadow-sm">
+  <p className="m-0 font-medium">带 Tailwind 类名的原生 JSX 容器</p>
+  <p className="mb-0 mt-2 text-sm text-fd-muted-foreground">
+    这个区域用于确认 MDX 中的 className、主题颜色变量和圆角工具类都能正常生效。
+  </p>
+</div>
