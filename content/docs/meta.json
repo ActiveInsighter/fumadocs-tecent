@@ -1,4 +1,24 @@
 {
-  "title": "文档",
-  "pages": ["index", "getting-started"]
+  "title": "Framework",
+  "description": "The docs framework",
+  "icon": "Building",
+  "root": true,
+  "pages": [
+    "---Introduction---",
+    "index",
+    "what-is-fumadocs",
+    "comparisons",
+    "manual-installation",
+    "guides",
+    "---Writing---",
+    "page-conventions",
+    "markdown",
+    "---Configurations---",
+    "navigation",
+    "deploying",
+    "internationalization",
+    "search",
+    "---Integrations---",
+    "...integrations"
+  ]
 }
