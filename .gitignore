@@ -1,0 +1,34 @@
+# dependencies
+/node_modules
+
+# Next.js
+/.next
+/out
+
+# Fumadocs generated source
+/.source
+
+# Vercel project linkage and local output
+/.vercel
+
+# environment files
+.env
+.env.*
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# workflow metadata
+/.run-metadata
+
+# system files
+.DS_Store
+Thumbs.db
