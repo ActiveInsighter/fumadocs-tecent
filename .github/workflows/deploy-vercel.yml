@@ -1,123 +1,65 @@
-name: Deploy to Vercel
+name: Verify production workflow
 
 on:
   push:
     branches:
-      - '**'
-  pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_dispatch:
+      - chore/verify-production-deployment
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
-concurrency:
-  group: vercel-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: true
-
-env:
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
 jobs:
-  deploy:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    name: ${{ github.ref_name == 'main' && 'Production' || 'Preview' }} deployment
+  capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      VERCEL_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+    timeout-minutes: 5
 
     steps:
-      - name: Checkout repository
+      - name: Checkout verification branch
         uses: actions/checkout@v6
 
-      - name: Capture workflow run ID
-        id: run_metadata
-        uses: ./.github/actions/capture-run-metadata
-        with:
-          github_token: ${{ github.token }}
-          recent_count: '10'
-
-      - name: Validate deployment secrets
+      - name: Capture latest workflow runs
         shell: bash
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 601bf47b1cbcbb385865b95e6ebc5b4c90762b45
         run: |
           set -euo pipefail
-          missing=0
+          sleep 25
+          mkdir -p .verification
 
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required secret: ${name}"
-              missing=1
-            fi
-          done
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=30" \
+            | jq --arg target_sha "${TARGET_SHA}" '{
+                captured_at: (now | todate),
+                target_sha: $target_sha,
+                matching_runs: [
+                  .workflow_runs[]
+                  | select(.head_sha == $target_sha and .event == "push")
+                  | {
+                      id,
+                      name,
+                      status,
+                      conclusion,
+                      run_number,
+                      run_attempt,
+                      head_branch,
+                      head_sha,
+                      html_url,
+                      created_at,
+                      updated_at
+                    }
+                ]
+              }' > .verification/latest-runs.json
 
-          exit "${missing}"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest --no-audit --no-fund
-
-      - name: Pull Vercel environment
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          vercel pull \
-            --yes \
-            --environment="${VERCEL_ENVIRONMENT}" \
-            --token="${VERCEL_TOKEN}"
-
-      - name: Build Vercel output
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          if [ "${VERCEL_ENVIRONMENT}" = "production" ]; then
-            vercel build --prod --token="${VERCEL_TOKEN}"
-          else
-            vercel build --token="${VERCEL_TOKEN}"
-          fi
-
-      - name: Deploy prebuilt output
-        id: deploy
+      - name: Commit verification result
         shell: bash
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-
-          args=(deploy --prebuilt --archive=tgz --token="${VERCEL_TOKEN}")
-          if [ "${VERCEL_ENVIRONMENT}" = "production" ]; then
-            args+=(--prod)
-          fi
-
-          deployment_url="$(vercel "${args[@]}")"
-          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
-          echo "Deployment URL: ${deployment_url}"
-
-      - name: Write deployment summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "## Vercel deployment"
-            echo
-            echo "- Environment: \`${VERCEL_ENVIRONMENT}\`"
-            echo "- GitHub run ID: \`${{ steps.run_metadata.outputs.run_id }}\`"
-            echo "- Commit: \`${GITHUB_SHA}\`"
-            if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
-              echo "- URL: ${{ steps.deploy.outputs.deployment_url }}"
-            else
-              echo "- URL: deployment did not complete"
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .verification/latest-runs.json
+          git commit -m "chore: record production run [skip ci]"
+          git push
