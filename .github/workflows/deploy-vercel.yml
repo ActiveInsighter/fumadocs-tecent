@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Capture workflow run ID
         id: run_metadata
@@ -58,9 +58,10 @@ jobs:
           exit "${missing}"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
