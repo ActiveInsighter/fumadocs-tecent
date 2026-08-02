@@ -270,7 +270,7 @@
   box-shadow: none !important;
 }
 
-#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) figure.shiki {
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) > [role='tabpanel'] > figure.shiki {
   width: auto;
   margin-block: 0;
   margin-inline: 0 !important;
