@@ -1,11 +1,188 @@
+/*
+ * Fumadocs 样式入口与覆盖层
+ *
+ * 加载顺序非常重要：后声明的规则会覆盖前面的同名主题变量或选择器。
+ * 当前项目采用 Tailwind CSS 4 + @fumadocs/base-ui（通过 fumadocs-ui 别名使用）。
+ */
+
+/* 1. Tailwind 的 Preflight、主题系统和工具类。 */
 @import 'tailwindcss';
+
+/*
+ * 2. Fumadocs Neutral 颜色预设。
+ *    它提供 --color-fd-* 语义颜色，并对深色侧边栏做局部修正。
+ */
 @import 'fumadocs-ui/css/neutral.css';
+
+/*
+ * 3. Fumadocs UI 核心样式。
+ *    内部包含基础样式、动画、滚动条、Shiki 代码块、Typography 的 .prose，
+ *    以及 Docs/Home/Notebook/Flux 等布局组件的生成样式。
+ */
 @import 'fumadocs-ui/css/preset.css';
 
+/*
+ * --------------------------------------------------------------------------
+ * 项目级语义颜色
+ * --------------------------------------------------------------------------
+ *
+ * 这些值与当前 neutral 预设保持一致，因此本次整理不会改变页面视觉。
+ * 将变量显式放在项目中后，后续修改主题时只需要调整这里，不必覆盖具体组件。
+ *
+ * 常用关系：
+ * - background / foreground：页面背景与主要正文
+ * - muted：弱化背景，例如次级区域、代码标题栏、禁用状态
+ * - popover：搜索框、菜单、浮层、弹窗
+ * - card：卡片、面板、部分 MDX 容器
+ * - border：全站边框和分隔线
+ * - primary：主按钮、重点文本、选中状态
+ * - secondary：次级按钮和次级背景
+ * - accent：悬停、当前导航项、轻量高亮
+ * - ring：键盘焦点环
+ * - overlay：抽屉或弹窗背后的遮罩
+ */
+@theme {
+  --color-fd-background: hsl(0, 0%, 96%);
+  --color-fd-foreground: hsl(0, 0%, 3.9%);
+  --color-fd-muted: hsl(0, 0%, 96.1%);
+  --color-fd-muted-foreground: hsl(0, 0%, 45.1%);
+  --color-fd-popover: hsl(0, 0%, 98%);
+  --color-fd-popover-foreground: hsl(0, 0%, 15.1%);
+  --color-fd-card: hsl(0, 0%, 94.7%);
+  --color-fd-card-foreground: hsl(0, 0%, 3.9%);
+  --color-fd-border: hsla(0, 0%, 80%, 50%);
+  --color-fd-primary: hsl(0, 0%, 9%);
+  --color-fd-primary-foreground: hsl(0, 0%, 98%);
+  --color-fd-secondary: hsl(0, 0%, 93.1%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 9%);
+  --color-fd-accent: hsla(0, 0%, 82%, 50%);
+  --color-fd-accent-foreground: hsl(0, 0%, 9%);
+  --color-fd-ring: hsl(0, 0%, 63.9%);
+  --color-fd-overlay: hsla(0, 0%, 0%, 0.2);
+}
+
+/* next-themes 会在 html 元素上添加 .dark，Fumadocs 随之切换这些变量。 */
+.dark {
+  --color-fd-background: hsl(0, 0%, 7.04%);
+  --color-fd-foreground: hsl(0, 0%, 92%);
+  --color-fd-muted: hsl(0, 0%, 12.9%);
+  --color-fd-muted-foreground: hsla(0, 0%, 70%, 0.8);
+  --color-fd-popover: hsl(0, 0%, 11.6%);
+  --color-fd-popover-foreground: hsl(0, 0%, 86.9%);
+  --color-fd-card: hsl(0, 0%, 9.8%);
+  --color-fd-card-foreground: hsl(0, 0%, 98%);
+  --color-fd-border: hsla(0, 0%, 40%, 20%);
+  --color-fd-primary: hsl(0, 0%, 98%);
+  --color-fd-primary-foreground: hsl(0, 0%, 9%);
+  --color-fd-secondary: hsl(0, 0%, 12.9%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 92%);
+  --color-fd-accent: hsla(0, 0%, 40.9%, 30%);
+  --color-fd-accent-foreground: hsl(0, 0%, 90%);
+  --color-fd-ring: hsl(0, 0%, 54.9%);
+  --color-fd-overlay: hsla(0, 0%, 0%, 0.2);
+}
+
+/*
+ * --------------------------------------------------------------------------
+ * 全局布局基础值
+ * --------------------------------------------------------------------------
+ */
 :root {
   color-scheme: light dark;
+
+  /* DocsLayout 的最大总宽度；官方默认值约为 97rem。 */
+  --fd-layout-width: 97rem;
 }
 
 body {
   margin: 0;
 }
+
+/*
+ * --------------------------------------------------------------------------
+ * 推荐的局部覆盖入口（示例默认注释，避免无意改变现有页面）
+ * --------------------------------------------------------------------------
+ *
+ * Fumadocs 官方保证程度较高的选择器主要是组件公开的 id 与 data-* 属性。
+ * 应优先使用这些入口，避免依赖内部 div 层级。
+ */
+
+/* 整个文档布局：侧边栏、主内容和目录共同所在的网格容器。 */
+/*
+#nd-docs-layout {
+  --fd-layout-width: 92rem;
+}
+*/
+
+/* 左侧文档侧边栏；neutral.css 也会在深色模式下局部覆盖此区域。 */
+/*
+#nd-sidebar {
+  background: var(--color-fd-background);
+}
+*/
+
+/* 单篇文档的 article 容器，默认最大宽度由 Fumadocs 组件类控制。 */
+/*
+#nd-page {
+  max-width: 960px;
+}
+*/
+
+/* 小屏幕使用的目录弹出层。 */
+/*
+[data-toc-popover] {
+  background: var(--color-fd-popover);
+}
+*/
+
+/*
+ * --------------------------------------------------------------------------
+ * MDX 正文覆盖入口
+ * --------------------------------------------------------------------------
+ *
+ * app/docs/[[...slug]]/page.tsx 使用 <DocsBody> 包裹 MDX。
+ * DocsBody 会添加 .prose，因此普通 Markdown 标签最终都可从 .prose 下覆盖。
+ * 下列示例同样保持注释状态，需要时再逐项启用。
+ */
+
+/* 标题间距与字重。 */
+/*
+.prose :where(h2, h3, h4) {
+  scroll-margin-top: 6rem;
+}
+*/
+
+/* 正文段落与列表行距。 */
+/*
+.prose :where(p, li) {
+  line-height: 1.8;
+}
+*/
+
+/* Markdown 表格。 */
+/*
+.prose :where(table) {
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.prose :where(th) {
+  background: var(--color-fd-muted);
+}
+*/
+
+/* 行内代码；围栏代码块由 CodeBlock + Shiki 样式控制，不应使用此规则覆盖。 */
+/*
+.prose :where(:not(pre) > code) {
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.375rem;
+  background: var(--color-fd-muted);
+}
+*/
+
+/* 引用块。 */
+/*
+.prose :where(blockquote) {
+  border-inline-start-color: var(--color-fd-primary);
+}
+*/

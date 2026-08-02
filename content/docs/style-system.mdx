@@ -1,0 +1,557 @@
+---
+title: Fumadocs 样式系统与 MDX 渲染控制
+summary: 说明当前项目的页面颜色、布局、Typography、MDX 组件和代码高亮分别由哪些文件与 CSS 控制。
+description: 说明当前项目的页面颜色、布局、Typography、MDX 组件和代码高亮分别由哪些文件与 CSS 控制。
+icon: Palette
+---
+
+## 核心结论
+
+当前项目的样式不是由某一个 CSS 文件独立完成，而是由下面五层共同决定：
+
+1. `app/global.css` 决定全局导入顺序、主题变量和项目级覆盖。
+2. `fumadocs-ui/css/neutral.css` 提供当前黑白灰语义色。
+3. `fumadocs-ui/css/preset.css` 提供布局组件、交互组件、`.prose` 排版和 Shiki 代码块样式。
+4. `components/mdx.tsx` 决定 Markdown/MDX 标签最终渲染成什么 React 组件。
+5. `app/docs/[[...slug]]/page.tsx` 使用 `DocsPage`、`DocsBody` 等组件组织单篇文档页面。
+
+可以把它理解为：
+
+```text
+MDX 源文件
+  ↓ fumadocs-mdx 编译
+HTML 标签 + Fumadocs MDX 组件 + Shiki 高亮信息
+  ↓ components/mdx.tsx 决定组件映射
+DocsBody(.prose) 中的 React 内容
+  ↓ preset.css + neutral.css + global.css
+最终页面布局、颜色、字体、间距、边框和交互状态
+```
+
+<Callout type="info" title="最重要的修改原则">
+
+优先修改 `--color-fd-*` 语义变量和组件公开的 props；其次使用公开的 `id`、`data-*` 与 `.prose`；不要依赖复杂的内部 DOM 层级。
+
+</Callout>
+
+## 当前项目的样式入口
+
+根布局 `app/layout.tsx` 导入：
+
+```tsx
+import './global.css';
+```
+
+因此 `app/global.css` 是整个站点唯一的全局 CSS 入口。当前导入链为：
+
+```css
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+```
+
+### `tailwindcss`
+
+负责：
+
+- Tailwind CSS 4 的 Preflight；
+- Tailwind 工具类；
+- `@theme` 主题变量注册；
+- `bg-fd-background`、`text-fd-foreground`、`border-fd-border` 等由主题变量生成的工具类。
+
+### `neutral.css`
+
+负责当前主题的颜色值。它主要定义：
+
+- 浅色模式下的 `--color-fd-*`；
+- `.dark` 下的深色变量；
+- 深色模式侧边栏的局部颜色修正。
+
+切换到其他官方预设，本质上就是替换这一行：
+
+```css
+@import 'fumadocs-ui/css/neutral.css';
+```
+
+例如：
+
+```css
+@import 'fumadocs-ui/css/black.css';
+```
+
+### `preset.css`
+
+这是 Fumadocs UI 的主要样式包，内部可概括为：
+
+```css
+/* 基础颜色应用、动画、滚动条和工具类 */
+@import './lib/base.css';
+
+/* Shiki 代码行、diff、高亮词、行号等 */
+@import './lib/shiki.css';
+
+/* Fumadocs 自带的 Typography 插件，生成 .prose */
+@plugin '../dist/tailwind/typography.js';
+
+/* 各种页面布局与共享组件的生成样式 */
+@import './generated/flux.css';
+@import './generated/docs.css';
+@import './generated/home.css';
+@import './generated/notebook.css';
+@import './generated/shared.css';
+```
+
+因此，下列外观默认都来自 `preset.css`：
+
+- 文档侧边栏、移动端导航、页内目录；
+- 搜索弹窗、按钮、菜单、主题切换器；
+- `DocsPage`、面包屑、上一页/下一页；
+- `.prose` 内的标题、段落、列表、表格、引用和行内代码；
+- Fumadocs 的 Callout、Cards 和默认 MDX 组件；
+- Shiki 围栏代码块的行高亮、diff、行号和聚焦效果。
+
+## 语义颜色变量
+
+Fumadocs 组件不应到处写死颜色，而是使用一组 `--color-fd-*` 变量。当前项目已在 `app/global.css` 中显式列出与 `neutral` 预设一致的值，后续修改时可以直接调整。
+
+| 变量 | 主要用途 | 常见位置 |
+| --- | --- | --- |
+| `--color-fd-background` | 页面基础背景 | `body`、主内容区、侧边栏背景 |
+| `--color-fd-foreground` | 主要前景文字 | 正文、标题、图标 |
+| `--color-fd-muted` | 弱化背景 | 次级区域、代码标题栏、禁用状态 |
+| `--color-fd-muted-foreground` | 次要文字 | 描述、时间、辅助说明、未激活导航 |
+| `--color-fd-popover` | 浮层背景 | 搜索、下拉菜单、Popover、Dialog |
+| `--color-fd-popover-foreground` | 浮层文字 | 搜索结果、菜单文字 |
+| `--color-fd-card` | 卡片背景 | Cards、面板、部分组件容器 |
+| `--color-fd-card-foreground` | 卡片文字 | 卡片标题与正文 |
+| `--color-fd-border` | 通用边框 | 分隔线、表格、卡片、输入框 |
+| `--color-fd-primary` | 主要强调色 | 主按钮、选中状态、代码高亮边线 |
+| `--color-fd-primary-foreground` | 主色上的文字 | 主按钮文字 |
+| `--color-fd-secondary` | 次级背景 | 次级按钮、步骤编号、轻量面板 |
+| `--color-fd-secondary-foreground` | 次级背景上的文字 | 次级按钮文字 |
+| `--color-fd-accent` | 悬停与当前项背景 | 侧边栏 hover、菜单 active |
+| `--color-fd-accent-foreground` | 强调背景上的文字 | 当前导航项、悬停项 |
+| `--color-fd-ring` | 焦点环 | 键盘 focus-visible |
+| `--color-fd-overlay` | 遮罩 | 抽屉、弹窗背后的半透明层 |
+
+还有一组状态色：
+
+- `--color-fd-info`
+- `--color-fd-warning`
+- `--color-fd-error`
+- `--color-fd-success`
+- `--color-fd-idea`
+- `--color-fd-diff-add`
+- `--color-fd-diff-remove`
+
+它们主要用于 Callout 和代码 diff，不应拿 `primary` 强行替代所有状态。
+
+### 颜色如何进入组件
+
+Tailwind CSS 4 会根据 `@theme` 变量生成对应工具类。例如：
+
+```tsx
+<div className="bg-fd-card text-fd-card-foreground border-fd-border" />
+```
+
+最终读取的是：
+
+```css
+--color-fd-card
+--color-fd-card-foreground
+--color-fd-border
+```
+
+所以修改语义变量会同时影响多个组件；直接覆盖某个内部按钮的颜色只会影响一个局部位置。
+
+## 页面布局由什么控制
+
+### `DocsLayout`
+
+`app/docs/layout.tsx` 使用：
+
+```tsx
+<DocsLayout tree={source.getPageTree()} {...baseOptions()}>
+  {children}
+</DocsLayout>
+```
+
+它负责：
+
+- 左侧文档侧边栏；
+- 移动端头部；
+- 内容区与右侧 TOC 的网格布局；
+- 侧边栏折叠状态；
+- 导航标题、GitHub 链接等共享选项。
+
+文档布局根节点公开了：
+
+```css
+#nd-docs-layout
+```
+
+常用布局变量包括：
+
+| 变量 | 作用 | 建议 |
+| --- | --- | --- |
+| `--fd-layout-width` | 侧边栏、正文和 TOC 的总最大宽度 | 可以安全覆盖 |
+| `--fd-sidebar-width` | 侧边栏宽度 | 由布局组件动态维护，不宜全局写死 |
+| `--fd-toc-width` | 右侧目录宽度 | 由布局组件维护 |
+| `--fd-header-height` | 移动端头部高度 | 参与 sticky 偏移计算 |
+| `--fd-toc-popover-height` | TOC Popover 占用高度 | 参与 sticky 偏移计算 |
+
+只调整总宽度时使用：
+
+```css
+:root {
+  --fd-layout-width: 92rem;
+}
+```
+
+不要同时写死内部网格列宽，否则容易破坏侧边栏折叠、响应式布局和 sticky 计算。
+
+### `DocsPage`
+
+`app/docs/[[...slug]]/page.tsx` 使用：
+
+```tsx
+<DocsPage toc={page.data.toc} full={page.data.full}>
+  <DocsTitle>{page.data.title}</DocsTitle>
+  <DocsDescription>{page.data.description}</DocsDescription>
+  <DocsBody>{/* MDX */}</DocsBody>
+</DocsPage>
+```
+
+单篇文档的 `article` 根节点公开了：
+
+```css
+#nd-page
+```
+
+默认普通页面最大宽度约为 `900px`；`full` 模式会扩展到更宽的内容区。修改文章宽度可以从 `#nd-page` 入手：
+
+```css
+#nd-page {
+  max-width: 960px;
+}
+```
+
+不过更推荐先通过 `DocsPage` 的 `className` 或 slot 自定义，因为组件 props 比全局覆盖更容易维护。
+
+## MDX 渲染样式由什么控制
+
+### 第一层：MDX 编译
+
+`source.config.ts` 使用默认的 Fumadocs MDX 配置：
+
+```ts
+export default defineConfig();
+```
+
+默认编译过程会完成：
+
+- Markdown/MDX 解析；
+- GFM 表格、删除线等语法；
+- 标题锚点和 TOC 数据；
+- 代码块的 Shiki 语法高亮；
+- 代码块标题、行号、diff、高亮行等元信息转换。
+
+这一步决定“生成什么结构和属性”，但不单独决定最终边框、圆角和间距。
+
+### 第二层：MDX 组件映射
+
+`components/mdx.tsx` 从下面的模块取得默认映射：
+
+```tsx
+import defaultMdxComponents from 'fumadocs-ui/mdx';
+```
+
+当前项目保持最小映射，只注册：
+
+- Fumadocs 默认 MDX 组件；
+- 页面传入的自定义组件。
+
+映射展开顺序很重要：
+
+```tsx
+return {
+  ...defaultMdxComponents,
+  ...components,
+};
+```
+
+最后的 `...components` 优先级最高，因此可以覆盖普通标签：
+
+```tsx
+getMDXComponents({
+  h2: (props) => <h2 className="custom-heading" {...props} />,
+});
+```
+
+也可以全局替换 `pre`、`table`、`img` 或自定义组件。
+
+### 第三层：`DocsBody` 的 `.prose`
+
+Fumadocs 的 `DocsBody` 实际会为容器添加：
+
+```tsx
+<div className="prose flex-1">...</div>
+```
+
+因此普通 Markdown 排版主要由 `.prose` 控制：
+
+```css
+.prose :where(h2) {}
+.prose :where(p) {}
+.prose :where(ul, ol) {}
+.prose :where(blockquote) {}
+.prose :where(table) {}
+.prose :where(:not(pre) > code) {}
+```
+
+`DocsTitle` 和 `DocsDescription` 位于 `DocsBody` 外面，所以它们不属于 `.prose`：
+
+- `DocsTitle` 默认使用组件自身的字号和字重类；
+- `DocsDescription` 默认使用 `text-fd-muted-foreground`；
+- 若要精确修改，应给组件传 `className`，或覆盖它们的页面容器，而不是只改 `.prose h1`。
+
+## 各类 MDX 内容的控制位置
+
+| MDX 内容 | 结构来源 | 主要样式来源 | 推荐修改入口 |
+| --- | --- | --- | --- |
+| 标题、段落、列表 | Markdown 编译 | `.prose` Typography | `.prose :where(...)` |
+| 普通链接 | `fumadocs-ui/mdx` | Typography + Link 组件类 | 自定义 `a` 映射或 `.prose a` |
+| 表格 | GFM + MDX 映射 | `.prose` 与默认 Table 包装 | `.prose table/th/td` 或替换 `table` |
+| 引用块 | Markdown 编译 | `.prose blockquote` | `.prose :where(blockquote)` |
+| 行内代码 | Markdown 编译 | `.prose code` | `.prose :where(:not(pre) > code)` |
+| 围栏代码块 | Rehype Code + Shiki | CodeBlock 组件 + `shiki.css` | 自定义 `pre` 映射或代码块公开类 |
+| Callout | Fumadocs MDX 组件 | `preset.css` + 状态色变量 | 语义色或自定义组件 |
+| Cards | Fumadocs MDX 组件 | `preset.css` + card/border 变量 | card 变量或组件 className |
+
+## 代码块为什么与普通正文不同
+
+围栏代码块经过两套机制：
+
+1. `fumadocs-mdx` 的 Rehype Code 使用 Shiki 生成 token；
+2. Fumadocs `CodeBlock` 和 `shiki.css` 负责容器、复制按钮、行号、diff 和高亮行。
+
+Shiki token 通常生成类似：
+
+```html
+<span style="--shiki-light: #24292f; --shiki-dark: #e6edf3">...</span>
+```
+
+`preset.css` 中的 Shiki 规则读取这些变量：
+
+```css
+.shiki code span {
+  color: var(--shiki-light);
+}
+
+.dark .shiki code span {
+  color: var(--shiki-dark);
+}
+```
+
+因此：
+
+- 改代码块背景、边框、圆角，应修改 CodeBlock 容器样式；
+- 改语法 token 配色，应在 `source.config.ts` 配置 Shiki 主题；
+- 改高亮行、diff、行号，应针对 `.shiki .highlighted`、`.diff`、`[data-line-numbers]` 等结构；
+- 不要用 `.prose code` 覆盖围栏代码，否则容易同时破坏行内代码和代码块。
+
+自定义 Shiki 主题示例：
+
+```ts title="source.config.ts"
+import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
+
+export const docs = defineDocs({
+  dir: 'content/docs',
+});
+
+export default defineConfig({
+  mdxOptions: {
+    rehypeCodeOptions: {
+      themes: {
+        light: 'github-light',
+        dark: 'github-dark',
+      },
+    },
+  },
+});
+```
+
+## 推荐的选择器
+
+官方自定义指南建议优先使用组件公开的 `id` 与 `data-*` 属性：
+
+```css
+/* 文档总布局 */
+#nd-docs-layout {}
+
+/* 左侧侧边栏 */
+#nd-sidebar {}
+
+/* 单篇文档 article */
+#nd-page {}
+
+/* 小屏幕目录浮层 */
+[data-toc-popover] {}
+```
+
+正确思路：
+
+```css
+[data-toc-popover] {
+  background: var(--color-fd-popover);
+}
+```
+
+不推荐依赖内部层级：
+
+```css
+/* 内部 DOM 一变化就可能失效 */
+[data-toc-popover] > div > div:first-child {
+  background: purple;
+}
+```
+
+## 推荐的修改优先级
+
+### 1. 先改语义颜色
+
+适用于整体换主题、明暗模式统一和组件状态色调整。
+
+```css
+@theme {
+  --color-fd-primary: hsl(220, 80%, 50%);
+  --color-fd-accent: hsla(220, 80%, 50%, 0.12);
+}
+```
+
+### 2. 再用组件 props 和 `className`
+
+适用于单个页面、标题、导航或组件。
+
+```tsx
+<DocsPage className="xl:max-w-[960px]" />
+```
+
+### 3. 再用公开选择器
+
+适用于横跨多个页面的局部区域。
+
+```css
+#nd-page {
+  padding-top: 2rem;
+}
+```
+
+### 4. 再覆盖 `.prose`
+
+适用于普通 Markdown 的排版系统。
+
+```css
+.prose :where(p, li) {
+  line-height: 1.8;
+}
+```
+
+### 5. 最后才替换 MDX 组件或安装本地 UI 源码
+
+当默认组件结构不满足需求时，修改 `components/mdx.tsx`：
+
+```tsx
+return {
+  ...defaultMdxComponents,
+  table: CustomTable,
+  pre: CustomCodeBlock,
+  ...components,
+};
+```
+
+若需要大规模改变侧边栏、TOC 或页面布局，使用 Fumadocs CLI 的 `customize`，将对应组件安装到项目后再修改。这样比用大量侵入式 CSS 猜内部 DOM 更稳定。
+
+## 常用覆盖示例
+
+### 调整正文阅读宽度
+
+```css
+#nd-page {
+  max-width: 960px;
+}
+```
+
+### 调整正文行距
+
+```css
+.prose :where(p, li) {
+  line-height: 1.8;
+}
+```
+
+### 调整标题锚点滚动位置
+
+```css
+.prose :where(h2, h3, h4) {
+  scroll-margin-top: 6rem;
+}
+```
+
+### 调整 Markdown 表头
+
+```css
+.prose :where(th) {
+  background: var(--color-fd-muted);
+  color: var(--color-fd-foreground);
+}
+```
+
+### 单独调整行内代码
+
+```css
+.prose :where(:not(pre) > code) {
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.375rem;
+  background: var(--color-fd-muted);
+}
+```
+
+### 调整代码高亮行
+
+```css
+.shiki .highlighted {
+  background: color-mix(
+    in oklab,
+    var(--color-fd-primary) 10%,
+    transparent
+  );
+}
+```
+
+## 本项目文件职责速查
+
+| 文件 | 当前职责 |
+| --- | --- |
+| `app/layout.tsx` | 导入全局 CSS，并通过 `RootProvider` 提供主题状态 |
+| `app/global.css` | 导入 Tailwind/Fumadocs CSS、定义颜色变量、承载全局覆盖 |
+| `app/docs/layout.tsx` | 创建 `DocsLayout`，决定侧边栏和页面网格结构 |
+| `lib/layout.shared.tsx` | 配置导航标题、GitHub 链接等共享布局选项 |
+| `app/docs/[[...slug]]/page.tsx` | 组合 `DocsPage`、标题、描述、正文和 TOC |
+| `components/mdx.tsx` | 统一管理 MDX 标签与组件映射 |
+| `source.config.ts` | 控制 MDX 编译、Remark/Rehype 与 Shiki 配置 |
+| `content/docs/**/*.mdx` | 文档内容与页面级 JSX/组件调用 |
+
+## 维护检查清单
+
+修改样式时按以下顺序检查：
+
+1. 目标是全站语义颜色，还是单个组件？
+2. 是否能通过组件 props 或 `className` 完成？
+3. 是否存在公开 `id` 或 `data-*`？
+4. 内容是否位于 `DocsBody` 的 `.prose` 内？
+5. 代码块问题属于容器样式，还是 Shiki token 主题？
+6. 自定义 CSS 是否依赖了内部子节点层级？
+7. 浅色和深色变量是否同时调整？
+8. 移动端侧边栏、TOC Popover 和键盘焦点是否仍正常？
+
+更多原则可继续参考 Fumadocs 官方文档中的 Customize UI、Markdown 与 Themes 章节。
