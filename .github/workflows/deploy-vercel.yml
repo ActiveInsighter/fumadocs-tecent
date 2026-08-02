@@ -4,16 +4,14 @@ on:
   push:
     branches:
       - '**'
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
-  group: vercel-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: vercel-${{ github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -22,7 +20,6 @@ env:
 
 jobs:
   deploy:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: ${{ github.ref_name == 'main' && 'Production' || 'Preview' }} deployment
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -32,8 +29,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Capture workflow run ID
         id: run_metadata
@@ -63,35 +58,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Commit generated package lock
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-
-          if git diff --cached --quiet; then
-            echo "package-lock.json is already current."
-            exit 0
-          fi
-
-          git commit -m "chore: add npm lockfile [skip ci]"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
-      - name: Upload generated package lock
-        uses: actions/upload-artifact@v7
-        with:
-          name: package-lock-${{ github.run_id }}
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 1
+        run: npm ci --no-audit --no-fund
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest --no-audit --no-fund
