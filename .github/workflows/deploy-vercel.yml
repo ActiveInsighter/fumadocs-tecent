@@ -66,6 +66,14 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Upload generated package lock
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-lock-${{ github.run_id }}
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest --no-audit --no-fund
 
