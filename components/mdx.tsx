@@ -1,5 +1,5 @@
 import * as AccordionComponents from 'fumadocs-ui/components/accordion';
-import { Callout, type CalloutContainerProps } from 'fumadocs-ui/components/callout';
+import { Callout } from 'fumadocs-ui/components/callout';
 import { CodeBlock, Pre } from 'fumadocs-ui/components/codeblock';
 import * as FilesComponents from 'fumadocs-ui/components/files';
 import * as StepsComponents from 'fumadocs-ui/components/steps';
