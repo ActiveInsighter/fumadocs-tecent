@@ -70,7 +70,7 @@
 .dark {
   color-scheme: dark;
 
-  --background: oklch(0.145 0 0);
+  --background: #000;
   --foreground: oklch(0.985 0 0);
 
   --card: oklch(0.205 0 0);
@@ -107,6 +107,7 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 
+  --color-fd-background: #000;
   --color-fd-primary: oklch(1 0 0);
   --color-fd-accent: var(--accent);
   --color-fd-accent-foreground: var(--accent-foreground);
@@ -165,6 +166,11 @@
   ::before,
   ::after {
     border-color: var(--border);
+  }
+
+  html.dark,
+  html.dark body {
+    background: #000;
   }
 
   body {
@@ -265,7 +271,9 @@
 }
 
 #docs-body :where(div):has(> [role='tablist']):has(figure.shiki) figure.shiki {
+  width: auto;
   margin-block: 0;
+  margin-inline: 0 !important;
 }
 
 /* Inline code: larger, quiet and borderless. */
@@ -284,6 +292,10 @@
  * Minimal table style based on the supplied reference: transparent cells,
  * no outer box, no vertical rules, and one restrained horizontal separator.
  */
+#docs-body :where(div):has(> table) {
+  margin-block: 0.625rem !important;
+}
+
 #docs-body table {
   width: 100%;
   border: 0 !important;
@@ -291,7 +303,7 @@
   border-spacing: 0;
   background: transparent !important;
   font-size: inherit;
-  line-height: 1.65;
+  line-height: 1.55;
 }
 
 #docs-body :where(thead, tbody, tr, th, td) {
@@ -301,7 +313,7 @@
 #docs-body :where(th, td) {
   border: 0 !important;
   border-block-end: 1px solid var(--docs-table-rule) !important;
-  padding: 1rem 0.85rem;
+  padding: 0.7rem 0.75rem;
   text-align: start;
   vertical-align: top;
 }
