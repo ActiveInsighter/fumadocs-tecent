@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - '**'
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: vercel-${{ github.ref }}
+  group: vercel-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -20,6 +22,7 @@ env:
 
 jobs:
   deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: ${{ github.ref_name == 'main' && 'Production' || 'Preview' }} deployment
     runs-on: ubuntu-latest
     timeout-minutes: 30
