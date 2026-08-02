@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-08-02T10:54:01Z",
+  "target_sha": "601bf47b1cbcbb385865b95e6ebc5b4c90762b45",
+  "matching_runs": [
+    {
+      "id": 30744589145,
+      "name": "Deploy to Vercel",
+      "status": "completed",
+      "conclusion": "success",
+      "run_number": 21,
+      "run_attempt": 1,
+      "head_branch": "main",
+      "head_sha": "601bf47b1cbcbb385865b95e6ebc5b4c90762b45",
+      "html_url": "https://github.com/ActiveInsighter/fumadocs-vercel/actions/runs/30744589145",
+      "created_at": "2026-08-02T10:52:06Z",
+      "updated_at": "2026-08-02T10:53:12Z"
+    }
+  ]
+}
