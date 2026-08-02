@@ -263,21 +263,35 @@
   background: rgb(255 255 255 / 10%) !important;
 }
 
-/* Code-tab containers should read as one borderless code surface. */
+/* Tabs use one continuous surface instead of a separate white content card. */
+#docs-body :where(div):has(> [role='tablist']):has(> [role='tabpanel']) {
+  background: var(--docs-code-block-background) !important;
+}
+
+#docs-body :where(div):has(> [role='tablist']):has(> [role='tabpanel'])
+  > :where([role='tablist'], [role='tabpanel']) {
+  background: transparent !important;
+}
+
+/* Code tabs remove the content padding so the code block aligns with the tab bar. */
 #docs-body :where(div):has(> [role='tablist']):has(figure.shiki) {
   border: 0 !important;
-  background: var(--docs-code-block-background) !important;
   box-shadow: none !important;
 }
 
-#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) > [role='tabpanel'] > figure.shiki {
-  width: auto;
-  margin-block: 0;
-  margin-inline: 0 !important;
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) > [role='tabpanel'] {
+  padding: 0 !important;
 }
 
-/* Inline code: larger, quiet and borderless. */
-#docs-body :where(:not(pre) > code) {
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki)
+  > [role='tabpanel']
+  > figure.shiki {
+  width: 100%;
+  margin: 0 !important;
+}
+
+/* Inline code: larger, quiet and borderless. Keep component-owned code untouched. */
+#docs-body :where(code):not(:where(pre code, .not-prose code)) {
   border: 0 !important;
   border-radius: 0.35rem;
   background: var(--docs-inline-code-background) !important;
