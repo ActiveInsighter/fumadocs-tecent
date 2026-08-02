@@ -89,7 +89,7 @@ runs:
         echo "metadata_file=${metadata_file}" >> "${GITHUB_OUTPUT}"
 
     - name: Upload run metadata
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: workflow-run-${{ steps.capture.outputs.run_id }}
         path: ${{ steps.capture.outputs.metadata_file }}
