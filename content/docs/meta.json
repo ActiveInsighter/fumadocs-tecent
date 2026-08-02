@@ -1,24 +1,5 @@
 {
   "title": "Framework",
-  "description": "The docs framework",
-  "icon": "Building",
-  "root": true,
-  "pages": [
-    "---Introduction---",
-    "index",
-    "what-is-fumadocs",
-    "comparisons",
-    "manual-installation",
-    "guides",
-    "---Writing---",
-    "page-conventions",
-    "markdown",
-    "---Configurations---",
-    "navigation",
-    "deploying",
-    "internationalization",
-    "search",
-    "---Integrations---",
-    "...integrations"
-  ]
+  "description": "A minimal selection from the official Fumadocs framework docs",
+  "pages": ["index", "what-is-fumadocs", "comparisons"]
 }

@@ -13,13 +13,9 @@
     "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "@fumadocs/story": "1.2.0",
-    "@orama/core": "^1.2.19",
-    "algoliasearch": "5.56.0",
     "fumadocs-core": "16.14.0",
     "fumadocs-mdx": "15.2.2",
     "fumadocs-ui": "npm:@fumadocs/base-ui@16.14.0",
-    "lucide-react": "^1.27.0",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8"

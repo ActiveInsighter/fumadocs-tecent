@@ -32,5 +32,5 @@
     ".next/dev/types/**/*.ts",
     ".source/**/*.ts"
   ],
-  "exclude": ["node_modules", "content/snippets"]
+  "exclude": ["node_modules"]
 }
