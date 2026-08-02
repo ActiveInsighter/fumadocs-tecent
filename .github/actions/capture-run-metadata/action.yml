@@ -1,9 +1,9 @@
 name: Capture workflow run metadata
-description: Save the current run ID and recent workflow runs as an artifact.
+description: Save the current run ID and recent workflow runs as an artifact and issue.
 
 inputs:
   github_token:
-    description: GitHub token with actions:read permission.
+    description: GitHub token with actions:read and issues:write permission.
     required: true
   recent_count:
     description: Number of recent workflow runs to capture.
@@ -38,6 +38,7 @@ runs:
         metadata_dir="${GITHUB_WORKSPACE}/.run-metadata"
         metadata_file="${metadata_dir}/workflow-runs.json"
         recent_file="${metadata_dir}/recent-runs.json"
+        issue_body="${metadata_dir}/workflow-run-index.md"
         mkdir -p "${metadata_dir}"
 
         gh api \
@@ -83,6 +84,45 @@ runs:
               }
             ]
           }' "${recent_file}" > "${metadata_file}"
+
+        {
+          echo "# Workflow run index"
+          echo
+          echo "Current run: [\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          echo
+          echo "| Workflow | Run ID | Event | Status | Branch | Commit | Updated |"
+          echo "| --- | ---: | --- | --- | --- | --- | --- |"
+          jq -r '.recent_runs[] | [
+            (.name // "unknown" | gsub("\\|"; "\\|")),
+            ("[" + (.id | tostring) + "](" + .html_url + ")"),
+            (.event // "-"),
+            ((if (.conclusion // "") == "" then .status else .conclusion end) // "unknown"),
+            ((.head_branch // "-") | gsub("\\|"; "\\|")),
+            ((.head_sha // "-")[0:12]),
+            (.updated_at // .created_at // "-")
+          ] | "| " + join(" | ") + " |"' "${metadata_file}"
+        } > "${issue_body}"
+
+        issue_number="$(
+          gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --search '"Workflow run index" in:title' \
+            --json number,title \
+            --jq '.[] | select(.title == "Workflow run index") | .number' \
+            | head -n 1
+        )"
+
+        if [ -n "${issue_number}" ]; then
+          gh issue edit "${issue_number}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file "${issue_body}"
+        else
+          gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Workflow run index" \
+            --body-file "${issue_body}"
+        fi
 
         rm -f "${recent_file}"
         echo "run_id=${GITHUB_RUN_ID}" >> "${GITHUB_OUTPUT}"
