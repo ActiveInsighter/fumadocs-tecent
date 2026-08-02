@@ -86,12 +86,15 @@ bun add fumadocs-ui
     因为 Tabs、Accordion、Steps、Files 和 TypeTable 已经在全局 MDX 映射中注册。
   </Accordion>
   <Accordion title="可以在 Accordion 中写 Markdown 吗？">
-
-可以。这里包含 **粗体文本**、`inline code` 和一个列表：
-
-- 第一项
-- 第二项
-
+    <div className="space-y-3">
+      <p>
+        可以。这里包含 <strong>粗体文本</strong>、<code>inline code</code> 和一个列表：
+      </p>
+      <ul className="list-disc space-y-1 pl-6">
+        <li>第一项</li>
+        <li>第二项</li>
+      </ul>
+    </div>
   </Accordion>
 </Accordions>
 
