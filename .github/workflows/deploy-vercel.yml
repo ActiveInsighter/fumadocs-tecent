@@ -31,12 +31,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Capture workflow run ID
+      - name: Capture starting workflow Run ID
         id: run_metadata
         uses: ./.github/actions/capture-run-metadata
         with:
           github_token: ${{ github.token }}
           recent_count: '10'
+          phase: start
+          outcome: in_progress
 
       - name: Validate deployment secrets
         shell: bash
@@ -111,7 +113,8 @@ jobs:
             echo "## Vercel deployment"
             echo
             echo "- Environment: \`${VERCEL_ENVIRONMENT}\`"
-            echo "- GitHub run ID: \`${{ steps.run_metadata.outputs.run_id }}\`"
+            echo "- GitHub run ID: [\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
               echo "- URL: ${{ steps.deploy.outputs.deployment_url }}"
@@ -119,3 +122,12 @@ jobs:
               echo "- URL: deployment did not complete"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Refresh completed workflow Run ID
+        if: always()
+        uses: ./.github/actions/capture-run-metadata
+        with:
+          github_token: ${{ github.token }}
+          recent_count: '10'
+          phase: complete
+          outcome: ${{ job.status }}
