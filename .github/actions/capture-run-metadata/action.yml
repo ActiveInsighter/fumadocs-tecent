@@ -1,0 +1,97 @@
+name: Capture workflow run metadata
+description: Save the current run ID and recent workflow runs as an artifact.
+
+inputs:
+  github_token:
+    description: GitHub token with actions:read permission.
+    required: true
+  recent_count:
+    description: Number of recent workflow runs to capture.
+    required: false
+    default: '10'
+
+outputs:
+  run_id:
+    description: Current GitHub Actions run ID.
+    value: ${{ steps.capture.outputs.run_id }}
+  metadata_file:
+    description: Path to the generated metadata JSON file.
+    value: ${{ steps.capture.outputs.metadata_file }}
+
+runs:
+  using: composite
+  steps:
+    - id: capture
+      name: Capture run metadata
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        RECENT_COUNT: ${{ inputs.recent_count }}
+      run: |
+        set -euo pipefail
+
+        if ! [[ "${RECENT_COUNT}" =~ ^[0-9]+$ ]] || [ "${RECENT_COUNT}" -lt 1 ] || [ "${RECENT_COUNT}" -gt 100 ]; then
+          echo "recent-count must be an integer between 1 and 100." >&2
+          exit 1
+        fi
+
+        metadata_dir="${GITHUB_WORKSPACE}/.run-metadata"
+        metadata_file="${metadata_dir}/workflow-runs.json"
+        recent_file="${metadata_dir}/recent-runs.json"
+        mkdir -p "${metadata_dir}"
+
+        gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=${RECENT_COUNT}" \
+          > "${recent_file}"
+
+        jq \
+          --arg captured_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+          --arg repository "${GITHUB_REPOSITORY}" \
+          --arg run_id "${GITHUB_RUN_ID}" \
+          --arg run_number "${GITHUB_RUN_NUMBER}" \
+          --arg run_attempt "${GITHUB_RUN_ATTEMPT}" \
+          --arg workflow "${GITHUB_WORKFLOW}" \
+          --arg ref "${GITHUB_REF}" \
+          --arg sha "${GITHUB_SHA}" \
+          '{
+            captured_at: $captured_at,
+            repository: $repository,
+            current_run: {
+              id: ($run_id | tonumber),
+              number: ($run_number | tonumber),
+              attempt: ($run_attempt | tonumber),
+              workflow: $workflow,
+              ref: $ref,
+              sha: $sha
+            },
+            recent_runs: [
+              .workflow_runs[] | {
+                id,
+                name,
+                event,
+                status,
+                conclusion,
+                run_number,
+                run_attempt,
+                head_branch,
+                head_sha,
+                html_url,
+                created_at,
+                updated_at
+              }
+            ]
+          }' "${recent_file}" > "${metadata_file}"
+
+        rm -f "${recent_file}"
+        echo "run_id=${GITHUB_RUN_ID}" >> "${GITHUB_OUTPUT}"
+        echo "metadata_file=${metadata_file}" >> "${GITHUB_OUTPUT}"
+
+    - name: Upload run metadata
+      uses: actions/upload-artifact@v7
+      with:
+        name: workflow-run-${{ steps.capture.outputs.run_id }}
+        path: ${{ steps.capture.outputs.metadata_file }}
+        if-no-files-found: error
+        retention-days: 30

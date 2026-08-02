@@ -1,0 +1,20 @@
+---
+title: 欢迎
+description: 基于 Next.js 16 与 Fumadocs 的文档站。
+---
+
+## 项目结构
+
+这个项目使用 Fumadocs MDX 作为内容源，并通过 Next.js App Router 渲染文档页面。
+
+- 文档位于 `content/docs`。
+- 文档路由位于 `app/docs`。
+- 搜索接口位于 `app/api/search/route.ts`。
+- GitHub Actions 在 runner 中执行 `vercel build`。
+- Vercel 接收 `.vercel/output` 预构建产物，不再重复构建。
+
+## 部署环境
+
+推送到非 `main` 分支时会生成 Preview Deployment；合并到 `main` 后会使用 Production 环境变量并更新生产部署。
+
+继续阅读 [开始使用](./getting-started)。

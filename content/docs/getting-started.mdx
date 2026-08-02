@@ -1,0 +1,42 @@
+---
+title: 开始使用
+description: 本地开发、构建与部署说明。
+---
+
+## 本地运行
+
+```bash
+npm install
+npm run dev
+```
+
+然后访问 `http://localhost:3000/docs`。
+
+## 构建检查
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## GitHub Actions 部署
+
+仓库需要配置以下 Secrets：
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+工作流会根据分支自动执行对应命令：
+
+```bash
+# Preview
+vercel pull --environment=preview
+vercel build
+vercel deploy --prebuilt
+
+# Production
+vercel pull --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
+```
