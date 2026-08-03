@@ -29,8 +29,13 @@ Deployment environments are selected from the Git branch:
 - manual runs follow the same branch-based environment rule.
 
 Vercel Git-triggered builds remain disabled in `vercel.json` to avoid duplicate
-Vercel builds. The EdgeOne project should use the direct-upload deployment type,
-because GitHub Actions and the EdgeOne CLI own its build and upload process.
+Vercel builds.
+
+EdgeOne CLI direct deployment requires a Makers project whose provider is
+**Upload**. The workflow first tries `EDGEONE_PROJECT_NAME`. If that name belongs
+to an existing Git-connected project, the workflow preserves it and retries with
+`<EDGEONE_PROJECT_NAME>-upload`; the CLI creates that direct-upload project on
+its first successful deployment.
 
 ### Required GitHub Actions configuration
 
@@ -47,4 +52,5 @@ Repository variable:
 
 Each workflow run uploads start and completion metadata artifacts named
 `workflow-run-<run-id>-<phase>`. The workflow summary reports the shared checks,
-Vercel deployment, EdgeOne Makers deployment, and the combined result.
+Vercel deployment, EdgeOne Makers deployment, the actual EdgeOne project name,
+and the combined result.
