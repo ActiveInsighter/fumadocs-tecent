@@ -2,6 +2,7 @@
   "name": "fumadocs-vercel",
   "version": "0.1.0",
   "private": true,
+
   "engines": {
     "node": "22.x"
   },
