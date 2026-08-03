@@ -60,12 +60,17 @@
   --color-fd-primary: oklch(0 0 0);
   --color-fd-accent: var(--accent);
   --color-fd-accent-foreground: var(--accent-foreground);
+
+  /* Documentation surface tokens. */
+  --docs-code-block-background: #f3f3f3;
+  --docs-inline-code-background: #ececec;
+  --docs-table-rule: #e5e5e5;
 }
 
 .dark {
   color-scheme: dark;
 
-  --background: oklch(0.145 0 0);
+  --background: #000;
   --foreground: oklch(0.985 0 0);
 
   --card: oklch(0.205 0 0);
@@ -102,9 +107,14 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 
+  --color-fd-background: #000;
   --color-fd-primary: oklch(1 0 0);
   --color-fd-accent: var(--accent);
   --color-fd-accent-foreground: var(--accent-foreground);
+
+  --docs-code-block-background: #000;
+  --docs-inline-code-background: #2a2a2a;
+  --docs-table-rule: rgb(255 255 255 / 12%);
 }
 
 /* Expose the semantic variables as Tailwind CSS 4 utilities. */
@@ -158,6 +168,11 @@
     border-color: var(--border);
   }
 
+  html.dark,
+  html.dark body {
+    background: #000;
+  }
+
   body {
     margin: 0;
     background: var(--background);
@@ -181,8 +196,7 @@
   /*
    * Fumadocs Typography defaults to 16px. Chinese prose looks slightly smaller
    * with the Outfit/system-font combination, so the documentation body is set
-   * to 17px with a relaxed line height while code and tables keep their own
-   * component-level sizes.
+   * to 17px with a relaxed line height.
    */
   #docs-body {
     font-size: 1.0625rem;
@@ -206,4 +220,135 @@
   #docs-body :where(p, li) {
     text-wrap: pretty;
   }
+}
+
+/*
+ * Borderless code surfaces.
+ *
+ * Fumadocs keeps ownership of Shiki highlighting, copy behavior, titles,
+ * line numbers, code tabs and keyboard scrolling. These selectors only replace
+ * the visual surface, using the stable `.shiki` class and semantic roles.
+ */
+#docs-body figure.shiki {
+  border: 0 !important;
+  background: var(--docs-code-block-background) !important;
+  box-shadow: none !important;
+}
+
+#docs-body figure.shiki :where([role='region'], pre) {
+  background: var(--docs-code-block-background) !important;
+}
+
+#docs-body figure.shiki [role='region'] {
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+#docs-body figure.shiki > div:first-child {
+  border-block-end: 0 !important;
+  background: transparent !important;
+}
+
+#docs-body figure.shiki button {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#docs-body figure.shiki button:hover {
+  background: rgb(0 0 0 / 6%) !important;
+}
+
+.dark #docs-body figure.shiki button:hover {
+  background: rgb(255 255 255 / 10%) !important;
+}
+
+/* Tabs use one continuous surface instead of a separate white content card. */
+#docs-body :where(div):has(> [role='tablist']):has(> [role='tabpanel']) {
+  background: var(--docs-code-block-background) !important;
+}
+
+#docs-body :where(div):has(> [role='tablist']):has(> [role='tabpanel'])
+  > :where([role='tablist'], [role='tabpanel']) {
+  background: transparent !important;
+}
+
+/* Code tabs remove the content padding so the code block aligns with the tab bar. */
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki) > [role='tabpanel'] {
+  padding: 0 !important;
+}
+
+#docs-body :where(div):has(> [role='tablist']):has(figure.shiki)
+  > [role='tabpanel']
+  > figure.shiki {
+  width: 100%;
+  margin: 0 !important;
+}
+
+/* Inline code: larger, quiet and borderless. Keep component-owned code untouched. */
+#docs-body :where(code):not(:where(pre code, .not-prose code)) {
+  border: 0 !important;
+  border-radius: 0.35rem;
+  background: var(--docs-inline-code-background) !important;
+  box-shadow: none !important;
+  padding: 0.12em 0.38em;
+  color: inherit;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+/*
+ * Minimal table style based on the supplied reference: transparent cells,
+ * no outer box, no vertical rules, and one restrained horizontal separator.
+ */
+#docs-body :where(div):has(> table) {
+  margin-block: 0.625rem !important;
+}
+
+#docs-body table {
+  width: 100%;
+  border: 0 !important;
+  border-collapse: collapse;
+  border-spacing: 0;
+  background: transparent !important;
+  font-size: inherit;
+  line-height: 1.55;
+}
+
+#docs-body :where(thead, tbody, tr, th, td) {
+  background: transparent !important;
+}
+
+#docs-body :where(th, td) {
+  border: 0 !important;
+  border-block-end: 1px solid var(--docs-table-rule) !important;
+  padding: 0.7rem 0.75rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+#docs-body th {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+#docs-body :where(th, td):first-child {
+  padding-inline-start: 0;
+}
+
+#docs-body :where(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+#docs-body tbody tr:last-child td {
+  border-block-end: 0 !important;
+}
+
+#docs-body tbody tr:hover {
+  background: transparent !important;
 }
