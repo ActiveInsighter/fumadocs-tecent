@@ -32,11 +32,12 @@ Deployment environments are selected from the Git branch:
 Vercel Git-triggered builds remain disabled in `vercel.json` to avoid duplicate
 Vercel builds.
 
-The existing EdgeOne project named by `EDGEONE_PROJECT_NAME` is Git-connected,
-which cannot receive direct CLI uploads. The workflow preserves that project and
-uses `<EDGEONE_PROJECT_NAME>-upload` as its dedicated Upload-provider project.
-The Upload project was initialized with a production deployment during workflow
-validation, so subsequent branch runs can deploy directly to preview.
+`EDGEONE_PROJECT_NAME` is the exact EdgeOne Makers Upload-provider project name
+used by the CLI. The workflow does not add or remove a suffix. If a new Upload
+project receives a preview deployment before it has any production deployment,
+the workflow initializes production once and then retries the requested preview.
+A Git-connected EdgeOne project cannot receive direct CLI uploads, so the value
+must identify an Upload-provider project.
 
 `edgeone.json` makes the EdgeOne build deterministic by pinning Node.js 22.11.0
 and explicitly setting `npm ci --no-audit --no-fund` and `npm run build` as the
@@ -57,6 +58,6 @@ Repository variable:
 
 Each workflow run uploads start and completion metadata artifacts named
 `workflow-run-<run-id>-<phase>`. The workflow summary reports the shared checks,
-Vercel deployment, EdgeOne Makers deployment, the actual EdgeOne Upload project,
+Vercel deployment, EdgeOne Makers deployment, the configured EdgeOne project,
 and the combined result. EdgeOne preview authentication tokens are redacted from
 workflow logs and summaries.
