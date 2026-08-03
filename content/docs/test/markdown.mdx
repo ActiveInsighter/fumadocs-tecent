@@ -1,6 +1,6 @@
 ---
 title: 基础 Markdown
-description: 检查正文排版、标题层级、列表、引用、链接、图片和表格。
+description: 检查正文排版、标题层级、列表、引用、链接、图片、表格、数学公式和 Mermaid 图表。
 ---
 
 这是一段用于检查正文字号和行高的中文长段落。当前正文基准为 17px，行高为 1.85，目标是在桌面端保持清晰舒展，同时避免中文文档显得过于紧凑。英文和数字使用 Outfit，中文则回退到系统中文字体，例如 Fumadocs、Next.js 16、React 19 和 Tailwind CSS 4。
@@ -54,7 +54,7 @@ description: 检查正文排版、标题层级、列表、引用、链接、图�
 - [x] 配置 Fumadocs
 - [x] 迁移 Animate UI 配色
 - [x] 调整正文字号
-- [ ] 继续迁移自定义代码块
+- [x] 启用 KaTeX 与 Mermaid
 
 ## 引用
 
@@ -85,6 +85,33 @@ description: 检查正文排版、标题层级、列表、引用、链接、图�
 | 删除线 | `~~text~~` | ~~text~~ |
 | 行内代码 | `` `code` `` | `code` |
 | 链接 | `[title](url)` | [Fumadocs](https://fumadocs.dev) |
+
+## 数学公式
+
+行内公式示例：勾股定理满足 $a^2+b^2=c^2$。
+
+块级公式由 KaTeX 在构建阶段渲染：
+
+$$
+\int_a^b f(x)\,\mathrm{d}x = F(b)-F(a)
+$$
+
+也可以使用 `math` 代码块：
+
+```math
+\displaystyle e^x=\sum_{n=0}^{\infty}\frac{x^n}{n!}
+```
+
+## Mermaid 图表
+
+下面的 Mermaid 代码块会被官方 `remarkMdxMermaid` 插件转换为全局 Mermaid 组件，并随明暗主题切换渲染主题。
+
+```mermaid
+graph LR
+  A[Markdown / MDX] --> B[remarkMdxMermaid]
+  B --> C[Mermaid React Component]
+  C --> D[SVG Diagram]
+```
 
 ## 原生 HTML
 
