@@ -35,7 +35,13 @@ EdgeOne CLI direct deployment requires a Makers project whose provider is
 **Upload**. The workflow first tries `EDGEONE_PROJECT_NAME`. If that name belongs
 to an existing Git-connected project, the workflow preserves it and retries with
 `<EDGEONE_PROJECT_NAME>-upload`; the CLI creates that direct-upload project on
-its first successful deployment.
+its first deployment.
+
+A newly created EdgeOne Upload project requires one production deployment before
+it accepts preview deployments. When the CLI returns that exact initialization
+error, the workflow creates the initial production deployment once and then
+immediately performs the requested preview deployment. Later branch runs deploy
+directly to preview without repeating the initialization.
 
 ### Required GitHub Actions configuration
 
