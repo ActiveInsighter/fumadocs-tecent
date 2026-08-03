@@ -18,6 +18,7 @@ concurrency:
 env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  EDGEONE_CLI_VERSION: 1.6.19
 
 jobs:
   quality:
@@ -182,12 +183,9 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
       - name: Install EdgeOne CLI
         run: |
-          npm install --global edgeone@latest --no-audit --no-fund
+          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
           edgeone --version
 
       - name: Build and deploy with EdgeOne CLI
@@ -196,56 +194,34 @@ jobs:
         env:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
-          deploy_project() {
-            local project_name="$1"
-            local deployment_environment="$2"
-            edgeone makers deploy \
-              -n "${project_name}" \
-              -t "${EDGEONE_API_TOKEN}" \
-              -e "${deployment_environment}" \
-              2>&1 | tee edgeone-deploy.log
-          }
+          upload_project_name="${EDGEONE_PROJECT_NAME}-upload"
 
-          actual_project_name="${EDGEONE_PROJECT_NAME}"
-
-          set +e
-          deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}"
-          deploy_status=$?
-          set -e
-
-          if [ "${deploy_status}" -ne 0 ] \
-            && grep -Fq "Provider 'Github'" edgeone-deploy.log \
-            && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
-            actual_project_name="${EDGEONE_PROJECT_NAME}-upload"
-            echo "::warning title=EdgeOne project type mismatch::${EDGEONE_PROJECT_NAME} is Git-connected, so CLI direct deployment will use ${actual_project_name} instead."
-
-            set +e
-            deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}"
-            deploy_status=$?
-            set -e
-          fi
-
-          if [ "${deploy_status}" -ne 0 ]; then
-            if [ "${EDGEONE_ENVIRONMENT}" = "preview" ] \
-              && grep -Fq "Please create a production deployment first" edgeone-deploy.log; then
-              echo "::warning title=Initializing EdgeOne production::${actual_project_name} has no production deployment yet. Creating it once before the requested preview deployment."
-              deploy_project "${actual_project_name}" production
-              deploy_project "${actual_project_name}" preview
-            else
-              exit "${deploy_status}"
-            fi
-          fi
+          edgeone makers deploy \
+            -n "${upload_project_name}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e "${EDGEONE_ENVIRONMENT}" \
+            2>&1 \
+            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
+            | tee edgeone-deploy.log
 
           deployment_url="$(
-            grep -Eo 'https://[^[:space:]]+' edgeone-deploy.log \
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-deploy.log \
               | tail -n 1 \
-              | sed -E 's/[),.;]+$//' \
+              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
               || true
           )"
-          echo "project_name=${actual_project_name}" >> "${GITHUB_OUTPUT}"
+          console_url="$(
+            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-deploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
+              || true
+          )"
+
+          echo "project_name=${upload_project_name}" >> "${GITHUB_OUTPUT}"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
       - name: Write EdgeOne deployment summary
         if: always()
@@ -255,17 +231,18 @@ jobs:
             echo "## EdgeOne Makers deployment"
             echo
             echo "- Environment: \`${EDGEONE_ENVIRONMENT}\`"
-            if [ -n "${{ steps.deploy.outputs.project_name }}" ]; then
-              echo "- Project: \`${{ steps.deploy.outputs.project_name }}\`"
-            else
-              echo "- Project: \`${EDGEONE_PROJECT_NAME}\`"
-            fi
+            echo "- Project: \`${{ steps.deploy.outputs.project_name || format('{0}-upload', env.EDGEONE_PROJECT_NAME) }}\`"
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
-              echo "- URL: ${{ steps.deploy.outputs.deployment_url }}"
-            else
-              echo "- URL: see the EdgeOne CLI log or Makers console"
+              echo "- Site endpoint (preview token removed): ${{ steps.deploy.outputs.deployment_url }}"
+            fi
+            if [ -n "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- Console: ${{ steps.deploy.outputs.console_url }}"
+            fi
+            if [ -z "${{ steps.deploy.outputs.deployment_url }}" ] \
+              && [ -z "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- URL: deployment did not complete"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
