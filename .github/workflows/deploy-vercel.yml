@@ -197,12 +197,11 @@ jobs:
           set -uo pipefail
 
           deploy_project() {
-            local project_name="$1"
-            local deployment_environment="$2"
-            local log_file="$3"
+            local deployment_environment="$1"
+            local log_file="$2"
 
             edgeone makers deploy \
-              -n "${project_name}" \
+              -n "${EDGEONE_PROJECT_NAME}" \
               -t "${EDGEONE_API_TOKEN}" \
               -e "${deployment_environment}" \
               2>&1 \
@@ -210,31 +209,23 @@ jobs:
               | tee "${log_file}"
           }
 
-          actual_project_name="${EDGEONE_PROJECT_NAME}"
-
           set +e
-          deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}" edgeone-deploy.log
+          deploy_project "${EDGEONE_ENVIRONMENT}" edgeone-deploy.log
           deploy_status=$?
           set -e
 
-          if [ "${deploy_status}" -ne 0 ] \
-            && grep -Fq "Provider 'Github'" edgeone-deploy.log \
-            && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
-            actual_project_name="${EDGEONE_PROJECT_NAME}-upload"
-            echo "::notice title=Using EdgeOne Upload project::${EDGEONE_PROJECT_NAME} is Git-connected. Direct CLI deployments will use ${actual_project_name}."
-
-            set +e
-            deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}" edgeone-deploy.log
-            deploy_status=$?
-            set -e
-          fi
-
           if [ "${deploy_status}" -ne 0 ]; then
+            if grep -Fq "Provider 'Github'" edgeone-deploy.log \
+              && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
+              echo "::error title=Invalid EdgeOne project type::Project ${EDGEONE_PROJECT_NAME} is Git-connected. Set EDGEONE_PROJECT_NAME to the exact name of an Upload-provider project."
+              exit "${deploy_status}"
+            fi
+
             if [ "${EDGEONE_ENVIRONMENT}" = "preview" ] \
               && grep -Fq "Please create a production deployment first" edgeone-deploy.log; then
-              echo "::notice title=Initializing EdgeOne production::Project ${actual_project_name} has no production deployment yet. Creating it once before the requested preview deployment."
-              deploy_project "${actual_project_name}" production edgeone-production-init.log
-              deploy_project "${actual_project_name}" preview edgeone-deploy.log
+              echo "::notice title=Initializing EdgeOne production::Project ${EDGEONE_PROJECT_NAME} has no production deployment yet. Creating it once before the requested preview deployment."
+              deploy_project production edgeone-production-init.log
+              deploy_project preview edgeone-deploy.log
             else
               exit "${deploy_status}"
             fi
@@ -253,7 +244,7 @@ jobs:
               || true
           )"
 
-          echo "project_name=${actual_project_name}" >> "${GITHUB_OUTPUT}"
+          echo "project_name=${EDGEONE_PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
