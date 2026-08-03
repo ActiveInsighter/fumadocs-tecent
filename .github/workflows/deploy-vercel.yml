@@ -194,17 +194,36 @@ jobs:
         env:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          upload_project_name="${EDGEONE_PROJECT_NAME}-upload"
+          deploy_project() {
+            local deployment_environment="$1"
+            local log_file="$2"
 
-          edgeone makers deploy \
-            -n "${upload_project_name}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e "${EDGEONE_ENVIRONMENT}" \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
-            | tee edgeone-deploy.log
+            edgeone makers deploy \
+              -n "${EDGEONE_PROJECT_NAME}" \
+              -t "${EDGEONE_API_TOKEN}" \
+              -e "${deployment_environment}" \
+              2>&1 \
+              | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
+              | tee "${log_file}"
+          }
+
+          set +e
+          deploy_project "${EDGEONE_ENVIRONMENT}" edgeone-deploy.log
+          deploy_status=$?
+          set -e
+
+          if [ "${deploy_status}" -ne 0 ]; then
+            if [ "${EDGEONE_ENVIRONMENT}" = "preview" ] \
+              && grep -Fq "Please create a production deployment first" edgeone-deploy.log; then
+              echo "::notice title=Initializing EdgeOne production::Project ${EDGEONE_PROJECT_NAME} has no production deployment yet. Creating it once before the requested preview deployment."
+              deploy_project production edgeone-production-init.log
+              deploy_project preview edgeone-deploy.log
+            else
+              exit "${deploy_status}"
+            fi
+          fi
 
           deployment_url="$(
             grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-deploy.log \
@@ -219,7 +238,7 @@ jobs:
               || true
           )"
 
-          echo "project_name=${upload_project_name}" >> "${GITHUB_OUTPUT}"
+          echo "project_name=${EDGEONE_PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
@@ -231,7 +250,7 @@ jobs:
             echo "## EdgeOne Makers deployment"
             echo
             echo "- Environment: \`${EDGEONE_ENVIRONMENT}\`"
-            echo "- Project: \`${{ steps.deploy.outputs.project_name || format('{0}-upload', env.EDGEONE_PROJECT_NAME) }}\`"
+            echo "- Project: \`${{ steps.deploy.outputs.project_name || env.EDGEONE_PROJECT_NAME }}\`"
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
