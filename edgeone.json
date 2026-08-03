@@ -1,0 +1,6 @@
+{
+  "$schema": "https://edgeone.ai/document/edgeone.json",
+  "installCommand": "npm ci --no-audit --no-fund",
+  "buildCommand": "npm run build",
+  "nodeVersion": "22.11.0"
+}

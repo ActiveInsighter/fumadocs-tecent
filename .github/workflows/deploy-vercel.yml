@@ -1,4 +1,4 @@
-name: Deploy to Vercel
+name: Deploy to Vercel and EdgeOne
 
 on:
   push:
@@ -12,27 +12,27 @@ permissions:
   issues: write
 
 concurrency:
-  group: vercel-${{ github.ref_name }}
+  group: deploy-${{ github.ref_name }}
   cancel-in-progress: true
 
 env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  EDGEONE_CLI_VERSION: 1.6.19
 
 jobs:
-  deploy:
-    name: ${{ github.ref_name == 'main' && 'Production' || 'Preview' }} deployment
+  quality:
+    name: Shared checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      VERCEL_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+    timeout-minutes: 20
+    outputs:
+      deployment_environment: ${{ steps.target.outputs.deployment_environment }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Capture starting workflow Run ID
-        id: run_metadata
         uses: ./.github/actions/capture-run-metadata
         with:
           github_token: ${{ github.token }}
@@ -40,22 +40,64 @@ jobs:
           phase: start
           outcome: in_progress
 
-      - name: Validate deployment secrets
+      - name: Resolve deployment environment
+        id: target
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "deployment_environment=production" >> "${GITHUB_OUTPUT}"
+          else
+            echo "deployment_environment=preview" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Validate deployment configuration
         shell: bash
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
         run: |
           set -euo pipefail
           missing=0
 
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+          for name in \
+            VERCEL_TOKEN \
+            VERCEL_ORG_ID \
+            VERCEL_PROJECT_ID \
+            EDGEONE_API_TOKEN \
+            EDGEONE_PROJECT_NAME
+          do
             if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required secret: ${name}"
+              echo "::error::Missing required GitHub Actions value: ${name}"
               missing=1
             fi
           done
 
           exit "${missing}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check project
+        run: npm run typecheck
+
+  vercel:
+    name: Vercel ${{ needs.quality.outputs.deployment_environment }} deployment
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERCEL_ENVIRONMENT: ${{ needs.quality.outputs.deployment_environment }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -88,7 +130,7 @@ jobs:
             vercel build --token="${VERCEL_TOKEN}"
           fi
 
-      - name: Deploy prebuilt output
+      - name: Deploy prebuilt Vercel output
         id: deploy
         shell: bash
         env:
@@ -105,7 +147,7 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "Deployment URL: ${deployment_url}"
 
-      - name: Write deployment summary
+      - name: Write Vercel deployment summary
         if: always()
         shell: bash
         run: |
@@ -113,7 +155,6 @@ jobs:
             echo "## Vercel deployment"
             echo
             echo "- Environment: \`${VERCEL_ENVIRONMENT}\`"
-            echo "- GitHub run ID: [\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
@@ -123,11 +164,186 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Refresh completed workflow Run ID
+  edgeone:
+    name: EdgeOne ${{ needs.quality.outputs.deployment_environment }} deployment
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EDGEONE_ENVIRONMENT: ${{ needs.quality.outputs.deployment_environment }}
+      EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install EdgeOne CLI
+        run: |
+          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          edgeone --version
+
+      - name: Build and deploy with EdgeOne CLI
+        id: deploy
+        shell: bash
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          deploy_project() {
+            local deployment_environment="$1"
+            local log_file="$2"
+
+            edgeone makers deploy \
+              -n "${EDGEONE_PROJECT_NAME}" \
+              -t "${EDGEONE_API_TOKEN}" \
+              -e "${deployment_environment}" \
+              2>&1 \
+              | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
+              | tee "${log_file}"
+          }
+
+          set +e
+          deploy_project "${EDGEONE_ENVIRONMENT}" edgeone-deploy.log
+          deploy_status=$?
+          set -e
+
+          if [ "${deploy_status}" -ne 0 ]; then
+            if grep -Fq "Provider 'Github'" edgeone-deploy.log \
+              && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
+              echo "::error title=Invalid EdgeOne project type::Project ${EDGEONE_PROJECT_NAME} is Git-connected. Set EDGEONE_PROJECT_NAME to the exact name of an Upload-provider project."
+              exit "${deploy_status}"
+            fi
+
+            if [ "${EDGEONE_ENVIRONMENT}" = "preview" ] \
+              && grep -Fq "Please create a production deployment first" edgeone-deploy.log; then
+              echo "::notice title=Initializing EdgeOne production::Project ${EDGEONE_PROJECT_NAME} has no production deployment yet. Creating it once before the requested preview deployment."
+              deploy_project production edgeone-production-init.log
+              deploy_project preview edgeone-deploy.log
+            else
+              exit "${deploy_status}"
+            fi
+          fi
+
+          deployment_url="$(
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-deploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
+              || true
+          )"
+          console_url="$(
+            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-deploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
+              || true
+          )"
+
+          echo "project_name=${EDGEONE_PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write EdgeOne deployment summary
         if: always()
+        shell: bash
+        run: |
+          {
+            echo "## EdgeOne Makers deployment"
+            echo
+            echo "- Environment: \`${EDGEONE_ENVIRONMENT}\`"
+            echo "- Project: \`${{ steps.deploy.outputs.project_name || env.EDGEONE_PROJECT_NAME }}\`"
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
+              echo "- Site endpoint (preview token removed): ${{ steps.deploy.outputs.deployment_url }}"
+            fi
+            if [ -n "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- Console: ${{ steps.deploy.outputs.console_url }}"
+            fi
+            if [ -z "${{ steps.deploy.outputs.deployment_url }}" ] \
+              && [ -z "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- URL: deployment did not complete"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  finalize:
+    name: Finalize deployment metadata
+    if: always()
+    needs:
+      - quality
+      - vercel
+      - edgeone
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve overall workflow outcome
+        id: outcome
+        shell: bash
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          VERCEL_RESULT: ${{ needs.vercel.result }}
+          EDGEONE_RESULT: ${{ needs.edgeone.result }}
+        run: |
+          set -euo pipefail
+
+          results="${QUALITY_RESULT} ${VERCEL_RESULT} ${EDGEONE_RESULT}"
+          if [[ " ${results} " == *" failure "* ]]; then
+            outcome=failure
+          elif [[ " ${results} " == *" cancelled "* ]]; then
+            outcome=cancelled
+          elif [ "${QUALITY_RESULT}" = "success" ] \
+            && [ "${VERCEL_RESULT}" = "success" ] \
+            && [ "${EDGEONE_RESULT}" = "success" ]; then
+            outcome=success
+          else
+            outcome=skipped
+          fi
+
+          echo "outcome=${outcome}" >> "${GITHUB_OUTPUT}"
+
+      - name: Refresh completed workflow Run ID
         uses: ./.github/actions/capture-run-metadata
         with:
           github_token: ${{ github.token }}
           recent_count: '10'
           phase: complete
-          outcome: ${{ job.status }}
+          outcome: ${{ steps.outcome.outputs.outcome }}
+
+      - name: Write combined deployment summary
+        shell: bash
+        env:
+          DEPLOYMENT_ENVIRONMENT: ${{ needs.quality.outputs.deployment_environment }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          VERCEL_RESULT: ${{ needs.vercel.result }}
+          EDGEONE_RESULT: ${{ needs.edgeone.result }}
+          OVERALL_OUTCOME: ${{ steps.outcome.outputs.outcome }}
+        run: |
+          {
+            echo "## Parallel deployment result"
+            echo
+            echo "- Environment: \`${DEPLOYMENT_ENVIRONMENT:-unknown}\`"
+            echo "- Overall outcome: \`${OVERALL_OUTCOME}\`"
+            echo "- GitHub run ID: [\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| Shared checks | \`${QUALITY_RESULT}\` |"
+            echo "| Vercel | \`${VERCEL_RESULT}\` |"
+            echo "| EdgeOne Makers | \`${EDGEONE_RESULT}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail when a required job failed
+        if: steps.outcome.outputs.outcome != 'success'
+        shell: bash
+        run: |
+          echo "::error::One or more required deployment jobs did not complete successfully."
+          exit 1
