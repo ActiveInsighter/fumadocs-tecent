@@ -196,13 +196,34 @@ jobs:
         env:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          edgeone makers deploy \
-            -n "${EDGEONE_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e "${EDGEONE_ENVIRONMENT}" \
-            2>&1 | tee edgeone-deploy.log
+          deploy_project() {
+            local project_name="$1"
+            edgeone makers deploy \
+              -n "${project_name}" \
+              -t "${EDGEONE_API_TOKEN}" \
+              -e "${EDGEONE_ENVIRONMENT}" \
+              2>&1 | tee edgeone-deploy.log
+          }
+
+          actual_project_name="${EDGEONE_PROJECT_NAME}"
+
+          set +e
+          deploy_project "${actual_project_name}"
+          deploy_status=$?
+          set -e
+
+          if [ "${deploy_status}" -ne 0 ]; then
+            if grep -Fq "Provider 'Github'" edgeone-deploy.log \
+              && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
+              actual_project_name="${EDGEONE_PROJECT_NAME}-upload"
+              echo "::warning title=EdgeOne project type mismatch::${EDGEONE_PROJECT_NAME} is Git-connected, so CLI direct deployment will use ${actual_project_name} instead."
+              deploy_project "${actual_project_name}"
+            else
+              exit "${deploy_status}"
+            fi
+          fi
 
           deployment_url="$(
             grep -Eo 'https://[^[:space:]]+' edgeone-deploy.log \
@@ -210,6 +231,7 @@ jobs:
               | sed -E 's/[),.;]+$//' \
               || true
           )"
+          echo "project_name=${actual_project_name}" >> "${GITHUB_OUTPUT}"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
 
       - name: Write EdgeOne deployment summary
@@ -220,7 +242,11 @@ jobs:
             echo "## EdgeOne Makers deployment"
             echo
             echo "- Environment: \`${EDGEONE_ENVIRONMENT}\`"
-            echo "- Project: \`${EDGEONE_PROJECT_NAME}\`"
+            if [ -n "${{ steps.deploy.outputs.project_name }}" ]; then
+              echo "- Project: \`${{ steps.deploy.outputs.project_name }}\`"
+            else
+              echo "- Project: \`${EDGEONE_PROJECT_NAME}\`"
+            fi
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
