@@ -200,26 +200,39 @@ jobs:
 
           deploy_project() {
             local project_name="$1"
+            local deployment_environment="$2"
             edgeone makers deploy \
               -n "${project_name}" \
               -t "${EDGEONE_API_TOKEN}" \
-              -e "${EDGEONE_ENVIRONMENT}" \
+              -e "${deployment_environment}" \
               2>&1 | tee edgeone-deploy.log
           }
 
           actual_project_name="${EDGEONE_PROJECT_NAME}"
 
           set +e
-          deploy_project "${actual_project_name}"
+          deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}"
           deploy_status=$?
           set -e
 
+          if [ "${deploy_status}" -ne 0 ] \
+            && grep -Fq "Provider 'Github'" edgeone-deploy.log \
+            && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
+            actual_project_name="${EDGEONE_PROJECT_NAME}-upload"
+            echo "::warning title=EdgeOne project type mismatch::${EDGEONE_PROJECT_NAME} is Git-connected, so CLI direct deployment will use ${actual_project_name} instead."
+
+            set +e
+            deploy_project "${actual_project_name}" "${EDGEONE_ENVIRONMENT}"
+            deploy_status=$?
+            set -e
+          fi
+
           if [ "${deploy_status}" -ne 0 ]; then
-            if grep -Fq "Provider 'Github'" edgeone-deploy.log \
-              && grep -Fq "Only projects with Provider 'Upload'" edgeone-deploy.log; then
-              actual_project_name="${EDGEONE_PROJECT_NAME}-upload"
-              echo "::warning title=EdgeOne project type mismatch::${EDGEONE_PROJECT_NAME} is Git-connected, so CLI direct deployment will use ${actual_project_name} instead."
-              deploy_project "${actual_project_name}"
+            if [ "${EDGEONE_ENVIRONMENT}" = "preview" ] \
+              && grep -Fq "Please create a production deployment first" edgeone-deploy.log; then
+              echo "::warning title=Initializing EdgeOne production::${actual_project_name} has no production deployment yet. Creating it once before the requested preview deployment."
+              deploy_project "${actual_project_name}" production
+              deploy_project "${actual_project_name}" preview
             else
               exit "${deploy_status}"
             fi
