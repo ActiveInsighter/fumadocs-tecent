@@ -19,8 +19,9 @@ deployment jobs in parallel:
 - **Vercel** pulls the matching Vercel environment, builds with Vercel CLI, and
   uploads the prebuilt output with `vercel deploy --prebuilt`.
 - **EdgeOne Makers** installs EdgeOne CLI and runs `edgeone makers deploy`
-  without an output-directory argument, so the EdgeOne CLI builds the Next.js
-  project in the GitHub runner and uploads the resulting deployment.
+  without an output-directory argument, so the EdgeOne CLI builds the complete
+  Next.js application in the GitHub runner and uploads the generated `.edgeone`
+  deployment.
 
 Deployment environments are selected from the Git branch:
 
@@ -31,17 +32,15 @@ Deployment environments are selected from the Git branch:
 Vercel Git-triggered builds remain disabled in `vercel.json` to avoid duplicate
 Vercel builds.
 
-EdgeOne CLI direct deployment requires a Makers project whose provider is
-**Upload**. The workflow first tries `EDGEONE_PROJECT_NAME`. If that name belongs
-to an existing Git-connected project, the workflow preserves it and retries with
-`<EDGEONE_PROJECT_NAME>-upload`; the CLI creates that direct-upload project on
-its first deployment.
+The existing EdgeOne project named by `EDGEONE_PROJECT_NAME` is Git-connected,
+which cannot receive direct CLI uploads. The workflow preserves that project and
+uses `<EDGEONE_PROJECT_NAME>-upload` as its dedicated Upload-provider project.
+The Upload project was initialized with a production deployment during workflow
+validation, so subsequent branch runs can deploy directly to preview.
 
-A newly created EdgeOne Upload project requires one production deployment before
-it accepts preview deployments. When the CLI returns that exact initialization
-error, the workflow creates the initial production deployment once and then
-immediately performs the requested preview deployment. Later branch runs deploy
-directly to preview without repeating the initialization.
+`edgeone.json` makes the EdgeOne build deterministic by pinning Node.js 22.11.0
+and explicitly setting `npm ci --no-audit --no-fund` and `npm run build` as the
+install and build commands. EdgeOne CLI is pinned in the workflow as well.
 
 ### Required GitHub Actions configuration
 
@@ -58,5 +57,6 @@ Repository variable:
 
 Each workflow run uploads start and completion metadata artifacts named
 `workflow-run-<run-id>-<phase>`. The workflow summary reports the shared checks,
-Vercel deployment, EdgeOne Makers deployment, the actual EdgeOne project name,
-and the combined result.
+Vercel deployment, EdgeOne Makers deployment, the actual EdgeOne Upload project,
+and the combined result. EdgeOne preview authentication tokens are redacted from
+workflow logs and summaries.
