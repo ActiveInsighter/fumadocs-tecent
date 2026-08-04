@@ -1,5 +1,5 @@
 {
   "title": "Framework",
   "description": "A minimal selection from the official Fumadocs framework docs",
-  "pages": ["index", "what-is-fumadocs", "comparisons", "test"]
+  "pages": ["index", "what-is-fumadocs", "comparisons", "test", "mdx-syntax-example"]
 }
