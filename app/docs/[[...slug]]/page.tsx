@@ -8,6 +8,8 @@ import {
   DocsDescription,
   DocsPage,
   DocsTitle,
+  MarkdownCopyButton,
+  ViewOptionsPopover,
 } from 'fumadocs-ui/layouts/docs/page';
 
 type PageParameters = {
@@ -22,6 +24,7 @@ export default async function Page({ params }: PageParameters) {
   if (!page) notFound();
 
   const MDX = page.data.body;
+  const markdownUrl = `${page.url}.md`;
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
@@ -29,6 +32,13 @@ export default async function Page({ params }: PageParameters) {
       <DocsDescription className="mb-1 font-normal">
         {page.data.description}
       </DocsDescription>
+      <div className="flex items-center justify-end gap-2 border-b pb-6 pt-2">
+        <MarkdownCopyButton markdownUrl={markdownUrl} />
+        <ViewOptionsPopover
+          markdownUrl={markdownUrl}
+          githubUrl={`https://github.com/ActiveInsighter/fumadocs-vercel/blob/main/content/docs/${page.path}`}
+        />
+      </div>
       <DocsBody id="docs-body" className="pb-10 pt-4">
         <MDX
           components={getMDXComponents({

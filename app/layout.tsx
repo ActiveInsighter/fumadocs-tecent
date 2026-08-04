@@ -1,4 +1,6 @@
 import './global.css';
+import 'katex/dist/katex.css';
+import './surface-overrides.css';
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import type { Metadata } from 'next';
 import { Outfit } from 'next/font/google';

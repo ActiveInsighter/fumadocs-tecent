@@ -1,0 +1,53 @@
+/*
+ * Keep Fumadocs' borders and component structure while flattening elevated
+ * documentation surfaces. The imported theme still owns typography and state
+ * colors; this file only normalizes dark surfaces and shadows.
+ */
+.dark {
+  --card: #000;
+  --popover: #000;
+  --secondary: #000;
+  --muted: #000;
+  --accent: #000;
+  --sidebar: #000;
+  --sidebar-accent: #000;
+
+  --color-fd-background: #000;
+  --color-fd-muted: #000;
+  --color-fd-popover: #000;
+  --color-fd-card: #000;
+  --color-fd-secondary: #000;
+  --color-fd-accent: #000;
+}
+
+/* Components such as Callout and card icons use Fumadocs shadow utilities. */
+#docs-body :where(
+    .shadow-sm,
+    .shadow,
+    .shadow-md,
+    .shadow-lg,
+    .shadow-xl,
+    .shadow-2xl
+  ),
+#nd-sidebar :where(
+    .shadow-sm,
+    .shadow,
+    .shadow-md,
+    .shadow-lg,
+    .shadow-xl,
+    .shadow-2xl
+  ) {
+  box-shadow: none !important;
+}
+
+/* Prevent card-like MDX components from introducing lift-on-hover effects. */
+#docs-body [data-card],
+#docs-body [data-card]:hover {
+  transform: none !important;
+}
+
+/* Ensure component-owned dark surfaces do not fall back to charcoal shades. */
+.dark #docs-body [class*='bg-fd-'],
+.dark #nd-sidebar [class*='bg-fd-'] {
+  background-color: #000 !important;
+}
