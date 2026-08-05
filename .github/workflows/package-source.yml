@@ -54,12 +54,24 @@ jobs:
             exit 1
           fi
 
-          echo "file_count=$(find "${project_dir}" -type f | wc -l | tr -d ' ')" >> "${GITHUB_ENV}"
+          safe_branch="$(
+            printf '%s' "${GITHUB_REF_NAME}" \
+              | sed -E 's#[/\\:*?"<>|[:space:]]+#-#g; s/^-+//; s/-+$//'
+          )"
+          [ -n "${safe_branch}" ] || safe_branch="detached"
+
+          artifact_name="${safe_branch}-${GITHUB_RUN_ID}"
+          file_count="$(find "${project_dir}" -type f | wc -l | tr -d ' ')"
+
+          {
+            echo "artifact_name=${artifact_name}"
+            echo "file_count=${file_count}"
+          } >> "${GITHUB_ENV}"
 
       - name: Upload source archive
         uses: actions/upload-artifact@v7
         with:
-          name: fumadocs-vercel-source-${{ github.run_id }}
+          name: ${{ env.artifact_name }}
           path: ${{ runner.temp }}/source-archive
           if-no-files-found: error
           include-hidden-files: true
@@ -72,9 +84,9 @@ jobs:
           {
             echo "## Source archive"
             echo
-            echo "- Artifact: \`fumadocs-vercel-source-${GITHUB_RUN_ID}\`"
+            echo "- Artifact: \`${artifact_name}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Ref: \`${GITHUB_REF_NAME}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
             echo "- Files: \`${file_count}\`"
             echo "- Retention: \`30 days\`"
             echo
