@@ -26,9 +26,6 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# workflow metadata
-/.run-metadata
-
 # system files
 .DS_Store
 Thumbs.db
