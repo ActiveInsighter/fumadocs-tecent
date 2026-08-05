@@ -93,13 +93,17 @@ jobs:
           package_dir="${RUNNER_TEMP}/dependency-package"
           archive_name="node_modules-${PLATFORM}-${ARCHITECTURE}.tar.gz"
           archive_path="${package_dir}/${archive_name}"
+          archive_listing="${RUNNER_TEMP}/dependency-archive-contents.txt"
 
           rm -rf "${package_dir}"
+          rm -f "${archive_listing}"
           mkdir -p "${package_dir}"
 
           tar -czf "${archive_path}" node_modules
-          tar -tzf "${archive_path}" | grep -Fxq 'node_modules/.bin/tsc'
-          tar -tzf "${archive_path}" | grep -Fxq 'node_modules/.bin/next'
+          tar -tzf "${archive_path}" > "${archive_listing}"
+          grep -Fxq 'node_modules/.bin/tsc' "${archive_listing}"
+          grep -Fxq 'node_modules/.bin/next' "${archive_listing}"
+          rm -f "${archive_listing}"
 
           node_modules_bytes="$(du -sb node_modules | awk '{print $1}')"
           archive_bytes="$(stat -c '%s' "${archive_path}")"
