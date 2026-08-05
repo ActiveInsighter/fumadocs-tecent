@@ -1,0 +1,69 @@
+name: Package source archive
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package repository source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Prepare clean source directory
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive_root="${RUNNER_TEMP}/source-archive"
+          project_dir="${archive_root}/fumadocs-vercel"
+
+          rm -rf "${archive_root}"
+          mkdir -p "${project_dir}"
+
+          git archive --format=tar "${GITHUB_SHA}" | tar -xf - -C "${project_dir}"
+
+          test -f "${project_dir}/package.json"
+          test -f "${project_dir}/package-lock.json"
+          test -d "${project_dir}/.github"
+
+          if find "${project_dir}" -type d \( -name node_modules -o -name .next -o -name .vercel -o -name .git \) -print -quit | grep -q .; then
+            echo "::error::Unexpected generated or repository metadata directory found in source archive."
+            exit 1
+          fi
+
+          echo "file_count=$(find "${project_dir}" -type f | wc -l | tr -d ' ')" >> "${GITHUB_ENV}"
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: fumadocs-vercel-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/source-archive
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 6
+          retention-days: 30
+
+      - name: Write archive summary
+        shell: bash
+        run: |
+          {
+            echo "## Source archive"
+            echo
+            echo "- Artifact: \`fumadocs-vercel-source-${GITHUB_RUN_ID}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Ref: \`${GITHUB_REF_NAME}\`"
+            echo "- Files: \`${file_count}\`"
+            echo "- Retention: \`30 days\`"
+            echo
+            echo "The downloaded artifact is a Windows-compatible ZIP containing the tracked repository files under \`fumadocs-vercel/\`."
+          } >> "${GITHUB_STEP_SUMMARY}"
