@@ -32,7 +32,7 @@ export default async function Page({ params }: PageParameters) {
       <DocsDescription className="mb-1 font-normal">
         {page.data.description}
       </DocsDescription>
-      <div className="flex items-center justify-end gap-2 border-b pb-6 pt-2">
+      <div className="flex items-center gap-2 border-b pb-6 pt-2">
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover
           markdownUrl={markdownUrl}

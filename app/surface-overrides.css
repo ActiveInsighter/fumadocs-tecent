@@ -51,3 +51,25 @@
 .dark #nd-sidebar [class*='bg-fd-'] {
   background-color: #000 !important;
 }
+
+/*
+ * Restore the restrained navigation feedback intentionally hidden by the
+ * pure-black surface override. Fumadocs exposes data-active on page links and
+ * aria-expanded on folder triggers, so these states remain narrowly scoped to
+ * the sidebar navigation instead of affecting its utility controls.
+ */
+#nd-sidebar :where(a[data-active], button[aria-expanded]):hover {
+  background-color: rgb(0 0 0 / 5%) !important;
+}
+
+#nd-sidebar [data-active='true'] {
+  background-color: rgb(0 0 0 / 8%) !important;
+}
+
+.dark #nd-sidebar :where(a[data-active], button[aria-expanded]):hover {
+  background-color: rgb(255 255 255 / 7%) !important;
+}
+
+.dark #nd-sidebar [data-active='true'] {
+  background-color: rgb(255 255 255 / 10%) !important;
+}
