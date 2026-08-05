@@ -1,4 +1,5 @@
 import { Mermaid } from '@/components/mdx/mermaid';
+import * as TwoslashComponents from 'fumadocs-twoslash/ui';
 import * as AccordionComponents from 'fumadocs-ui/components/accordion';
 import * as FilesComponents from 'fumadocs-ui/components/files';
 import * as StepsComponents from 'fumadocs-ui/components/steps';
@@ -12,12 +13,13 @@ import type { MDXComponents } from 'mdx/types';
  *
  * Cards and Callout are included by Fumadocs' default mapping. The additional
  * official component groups below are registered globally so documentation can
- * use Tabs, Accordions, Steps, Files, TypeTable and Mermaid without repeating
- * imports in every MDX file.
+ * use Tabs, Accordions, Steps, Files, TypeTable, Mermaid and Twoslash without
+ * repeating imports in every MDX file.
  */
 export function getMDXComponents(components?: MDXComponents) {
   return {
     ...defaultMdxComponents,
+    ...TwoslashComponents,
     ...AccordionComponents,
     ...FilesComponents,
     ...StepsComponents,

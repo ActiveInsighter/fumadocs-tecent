@@ -1,4 +1,5 @@
 import './global.css';
+import 'fumadocs-twoslash/twoslash.css';
 import 'katex/dist/katex.css';
 import './surface-overrides.css';
 import { RootProvider } from 'fumadocs-ui/provider/next';
