@@ -1,0 +1,197 @@
+name: Package dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**'
+    paths:
+      - package.json
+      - package-lock.json
+      - .github/workflows/package-dependencies.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  package:
+    name: Package Linux dependency snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Compute dependency identity
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          lock_hash="$(sha256sum package-lock.json | awk '{print $1}')"
+          lock_hash_short="${lock_hash:0:16}"
+          node_version="$(node --version | sed 's/^v//')"
+          node_major="${node_version%%.*}"
+          npm_version="$(npm --version)"
+          platform="$(node -p 'process.platform')"
+          architecture="$(node -p 'process.arch')"
+          artifact_name="deps-${platform}-${architecture}-node${node_major}-${lock_hash_short}"
+
+          {
+            echo "lock_hash=${lock_hash}"
+            echo "lock_hash_short=${lock_hash_short}"
+            echo "node_version=${node_version}"
+            echo "node_major=${node_major}"
+            echo "npm_version=${npm_version}"
+            echo "platform=${platform}"
+            echo "architecture=${architecture}"
+            echo "artifact_name=${artifact_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify dependency tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d node_modules
+          test -x node_modules/.bin/tsc
+          test -x node_modules/.bin/next
+          node_modules/.bin/tsc --version
+          node_modules/.bin/next --version
+
+      - name: Create dependency package
+        id: package
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}
+          LOCK_HASH: ${{ steps.metadata.outputs.lock_hash }}
+          LOCK_HASH_SHORT: ${{ steps.metadata.outputs.lock_hash_short }}
+          NODE_VERSION_RESOLVED: ${{ steps.metadata.outputs.node_version }}
+          NPM_VERSION_RESOLVED: ${{ steps.metadata.outputs.npm_version }}
+          PLATFORM: ${{ steps.metadata.outputs.platform }}
+          ARCHITECTURE: ${{ steps.metadata.outputs.architecture }}
+        run: |
+          set -euo pipefail
+
+          package_dir="${RUNNER_TEMP}/dependency-package"
+          archive_name="node_modules-${PLATFORM}-${ARCHITECTURE}.tar.gz"
+          archive_path="${package_dir}/${archive_name}"
+
+          rm -rf "${package_dir}"
+          mkdir -p "${package_dir}"
+
+          tar -czf "${archive_path}" node_modules
+          tar -tzf "${archive_path}" | grep -Fxq 'node_modules/.bin/tsc'
+          tar -tzf "${archive_path}" | grep -Fxq 'node_modules/.bin/next'
+
+          node_modules_bytes="$(du -sb node_modules | awk '{print $1}')"
+          archive_bytes="$(stat -c '%s' "${archive_path}")"
+          archive_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"
+          generated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg artifactName "${ARTIFACT_NAME}" \
+            --arg lockHash "${LOCK_HASH}" \
+            --arg lockHashShort "${LOCK_HASH_SHORT}" \
+            --arg nodeVersion "${NODE_VERSION_RESOLVED}" \
+            --arg npmVersion "${NPM_VERSION_RESOLVED}" \
+            --arg platform "${PLATFORM}" \
+            --arg architecture "${ARCHITECTURE}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg ref "${GITHUB_REF}" \
+            --arg branch "${GITHUB_REF_NAME}" \
+            --arg runId "${GITHUB_RUN_ID}" \
+            --arg generatedAt "${generated_at}" \
+            --arg archive "${archive_name}" \
+            --arg archiveSha256 "${archive_sha256}" \
+            --argjson nodeModulesBytes "${node_modules_bytes}" \
+            --argjson archiveBytes "${archive_bytes}" \
+            '{
+              schemaVersion: 1,
+              repository: $repository,
+              artifactName: $artifactName,
+              lockHash: $lockHash,
+              lockHashShort: $lockHashShort,
+              runtime: {
+                node: $nodeVersion,
+                npm: $npmVersion,
+                platform: $platform,
+                architecture: $architecture
+              },
+              source: {
+                commit: $commit,
+                ref: $ref,
+                branch: $branch,
+                runId: ($runId | tonumber)
+              },
+              package: {
+                archive: $archive,
+                archiveSha256: $archiveSha256,
+                nodeModulesBytes: $nodeModulesBytes,
+                archiveBytes: $archiveBytes
+              },
+              generatedAt: $generatedAt
+            }' > "${package_dir}/manifest.json"
+
+          cp package.json package-lock.json "${package_dir}/"
+
+          cat > "${package_dir}/README.txt" <<EOF
+          Dependency snapshot for ${GITHUB_REPOSITORY}
+
+          1. Verify that your package-lock.json SHA-256 is ${LOCK_HASH}.
+          2. Extract ${archive_name} in the repository root.
+          3. Use ./node_modules/.bin/tsc or run npm scripts without reinstalling dependencies.
+          4. This snapshot is only compatible with ${PLATFORM}/${ARCHITECTURE} and Node.js ${NODE_VERSION_RESOLVED}.
+          EOF
+
+          {
+            echo "archive_name=${archive_name}"
+            echo "archive_sha256=${archive_sha256}"
+            echo "node_modules_bytes=${node_modules_bytes}"
+            echo "archive_bytes=${archive_bytes}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload dependency artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: ${{ runner.temp }}/dependency-package
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Write dependency summary
+        shell: bash
+        run: |
+          {
+            echo "## Dependency snapshot"
+            echo
+            echo "- Artifact: \`${{ steps.metadata.outputs.artifact_name }}\`"
+            echo "- Lock SHA-256: \`${{ steps.metadata.outputs.lock_hash }}\`"
+            echo "- Runtime: \`${{ steps.metadata.outputs.platform }}/${{ steps.metadata.outputs.architecture }}\`, Node \`${{ steps.metadata.outputs.node_version }}\`, npm \`${{ steps.metadata.outputs.npm_version }}\`"
+            echo "- Source branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Source commit: \`${GITHUB_SHA}\`"
+            echo "- Run ID: \`${GITHUB_RUN_ID}\`"
+            echo "- node_modules size: \`${{ steps.package.outputs.node_modules_bytes }} bytes\`"
+            echo "- Compressed archive size: \`${{ steps.package.outputs.archive_bytes }} bytes\`"
+            echo "- Archive SHA-256: \`${{ steps.package.outputs.archive_sha256 }}\`"
+            echo "- Retention: \`90 days\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
