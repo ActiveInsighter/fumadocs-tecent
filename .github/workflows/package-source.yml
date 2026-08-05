@@ -41,6 +41,19 @@ jobs:
             exit 1
           fi
 
+          sensitive_files="$(
+            find "${project_dir}" -type f \
+              \( -name '.env' -o -name '.env.*' \) \
+              ! -name '.env.example' \
+              -print
+          )"
+
+          if [ -n "${sensitive_files}" ]; then
+            echo "::error::Refusing to upload tracked environment files:"
+            printf '%s\n' "${sensitive_files}"
+            exit 1
+          fi
+
           echo "file_count=$(find "${project_dir}" -type f | wc -l | tr -d ' ')" >> "${GITHUB_ENV}"
 
       - name: Upload source archive
