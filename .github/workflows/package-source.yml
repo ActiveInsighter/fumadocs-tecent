@@ -1,0 +1,96 @@
+name: Package source archive
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package repository source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Prepare clean source directory
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive_root="${RUNNER_TEMP}/source-archive"
+          project_dir="${archive_root}/fumadocs-vercel"
+
+          rm -rf "${archive_root}"
+          mkdir -p "${project_dir}"
+
+          git archive --format=tar "${GITHUB_SHA}" | tar -xf - -C "${project_dir}"
+
+          test -f "${project_dir}/package.json"
+          test -f "${project_dir}/package-lock.json"
+          test -d "${project_dir}/.github"
+
+          if find "${project_dir}" -type d \( -name node_modules -o -name .next -o -name .vercel -o -name .git \) -print -quit | grep -q .; then
+            echo "::error::Unexpected generated or repository metadata directory found in source archive."
+            exit 1
+          fi
+
+          sensitive_files="$(
+            find "${project_dir}" -type f \
+              \( -name '.env' -o -name '.env.*' \) \
+              ! -name '.env.example' \
+              -print
+          )"
+
+          if [ -n "${sensitive_files}" ]; then
+            echo "::error::Refusing to upload tracked environment files:"
+            printf '%s\n' "${sensitive_files}"
+            exit 1
+          fi
+
+          # Artifact names cannot safely contain branch separators or Windows-reserved
+          # filename characters, so normalize them while preserving readability.
+          safe_branch="$(
+            printf '%s' "${GITHUB_REF_NAME}" \
+              | sed -E 's#[/\\:*?"<>|[:space:]]+#-#g; s/^-+//; s/-+$//'
+          )"
+          [ -n "${safe_branch}" ] || safe_branch="detached"
+
+          artifact_name="${safe_branch}-${GITHUB_RUN_ID}"
+          file_count="$(find "${project_dir}" -type f | wc -l | tr -d ' ')"
+
+          {
+            echo "artifact_name=${artifact_name}"
+            echo "file_count=${file_count}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.artifact_name }}
+          path: ${{ runner.temp }}/source-archive
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 6
+          retention-days: 30
+
+      - name: Write archive summary
+        shell: bash
+        run: |
+          {
+            echo "## Source archive"
+            echo
+            echo "- Artifact: \`${artifact_name}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Files: \`${file_count}\`"
+            echo "- Retention: \`30 days\`"
+            echo
+            echo "The downloaded artifact is a Windows-compatible ZIP containing the tracked repository files under \`fumadocs-vercel/\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

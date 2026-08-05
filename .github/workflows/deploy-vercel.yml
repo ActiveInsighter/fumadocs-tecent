@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  issues: write
 
 concurrency:
   group: vercel-${{ github.ref_name }}
@@ -30,15 +28,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Capture starting workflow Run ID
-        id: run_metadata
-        uses: ./.github/actions/capture-run-metadata
-        with:
-          github_token: ${{ github.token }}
-          recent_count: '10'
-          phase: start
-          outcome: in_progress
 
       - name: Validate deployment secrets
         shell: bash
@@ -122,12 +111,3 @@ jobs:
               echo "- URL: deployment did not complete"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Refresh completed workflow Run ID
-        if: always()
-        uses: ./.github/actions/capture-run-metadata
-        with:
-          github_token: ${{ github.token }}
-          recent_count: '10'
-          phase: complete
-          outcome: ${{ job.status }}
