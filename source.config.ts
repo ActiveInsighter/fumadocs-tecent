@@ -22,6 +22,7 @@ export default defineConfig({
     // KaTeX must run before Fumadocs' syntax highlighter.
     rehypePlugins: (plugins) => [rehypeKatex, ...plugins],
     rehypeCodeOptions: {
+      ...rehypeCodeDefaultOptions,
       transformers: [
         ...(rehypeCodeDefaultOptions.transformers ?? []),
         transformerTwoslash(),
