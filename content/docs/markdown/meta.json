@@ -1,0 +1,5 @@
+{
+  "title": "Markdown",
+  "defaultOpen": true,
+  "pages": ["index", "math", "mermaid", "twoslash"]
+}
