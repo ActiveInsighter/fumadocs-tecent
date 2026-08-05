@@ -54,6 +54,8 @@ jobs:
             exit 1
           fi
 
+          # Artifact names cannot safely contain branch separators or Windows-reserved
+          # filename characters, so normalize them while preserving readability.
           safe_branch="$(
             printf '%s' "${GITHUB_REF_NAME}" \
               | sed -E 's#[/\\:*?"<>|[:space:]]+#-#g; s/^-+//; s/-+$//'
