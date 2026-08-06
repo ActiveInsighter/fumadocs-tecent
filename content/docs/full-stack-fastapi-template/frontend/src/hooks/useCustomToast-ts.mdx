@@ -1,0 +1,94 @@
+---
+title: "useCustomToast.ts：业务通知文案封装"
+description: "在 Sonner 之上统一成功与错误通知的标题、级别和调用方式。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是一个很薄但有价值的边界：服务层只产生错误，页面只决定何时提示，通知的固定标题和类型在这里统一。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提供成功通知函数。
+- 提供错误通知函数。
+- 统一标题和 Sonner 级别。
+- 让调用方只传具体描述。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 业务操作完成或失败。
+
+  </Step>
+  <Step>
+
+### 2. 组件/Hook 调用对应函数。
+
+  </Step>
+  <Step>
+
+### 3. 函数选择 toast.success 或 toast.error。
+
+  </Step>
+  <Step>
+
+### 4. 全局 Toaster 渲染通知。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `sonner toast API` | 创建通知记录。 |
+| `ui/sonner Toaster` | 统一通知容器和视觉。 |
+| `handleError` | 把 API 错误文本传给 showErrorToast。 |
+| `认证和设置页面` | 复用成功/失败反馈。 |
+
+## 通知分层
+
+<Tabs items={['成功', '错误']}>
+  <Tab>`Success!` 是稳定标题，description 描述刚完成的动作。</Tab>
+  <Tab>`Something went wrong!` 是稳定标题，description 给出可操作的失败原因。</Tab>
+</Tabs>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/hooks/useCustomToast.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="useCustomToast.ts" lineNumbers
+import { toast } from "sonner"
+
+// 将通知标题与级别集中定义，业务组件只传具体描述。
+const useCustomToast = () => {
+  // 成功消息用于确认操作已经完成。
+  const showSuccessToast = (description: string) => {
+    toast.success("Success!", {
+      description,
+    })
+  }
+
+  // 错误消息使用统一标题，具体原因放入 description。
+  const showErrorToast = (description: string) => {
+    toast.error("Something went wrong!", {
+      description,
+    })
+  }
+
+  return { showSuccessToast, showErrorToast }
+}
+
+export default useCustomToast
+```
+
+## 阅读重点
+
+- 函数本身不依赖 React state，未来可改为普通工具对象；保留 Hook 形式便于扩展上下文。
+- 错误标题固定，具体后端消息放 description，视觉层级清晰。
+- 敏感错误不应原样展示给用户，应在 handleError 或服务层做安全映射。
+- 如需 i18n，应把固定标题迁移到翻译资源。

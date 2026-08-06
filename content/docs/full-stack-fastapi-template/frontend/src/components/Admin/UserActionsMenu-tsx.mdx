@@ -1,0 +1,100 @@
+---
+title: "UserActionsMenu.tsx：用户行操作菜单"
+description: "为每个用户表格行组合编辑和删除操作，并隐藏当前用户自己的危险入口。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这个小组件是表格列与具体编辑/删除弹窗之间的协调层。它管理下拉菜单打开状态，把目标用户传给子组件，并在操作完成后关闭菜单。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 渲染无障碍的省略号操作按钮。
+- 组合 EditUser 与 DeleteUser。
+- 阻止当前登录用户从此处操作自己。
+- 在子操作成功后关闭下拉菜单。
+
+## 执行思路
+
+1. 表格为每行渲染 UserActionsMenu。
+2. 若该行是当前用户则返回 null。
+3. 点击按钮打开菜单。
+4. 编辑或删除成功后子组件触发 onSuccess。
+5. 菜单状态设为 false。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `columns.tsx` | 在 actions 列中实例化。 |
+| `useAuth` | 提供当前登录用户。 |
+| `EditUser / DeleteUser` | 具体操作实现。 |
+| `DropdownMenu` | 浮层与键盘交互。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `open` | DropdownMenu 的受控状态。 |
+| `user` | 当前表格行对应的 UserPublic。 |
+| `currentUser` | 登录用户，用于当前行保护。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Admin/UserActionsMenu.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="UserActionsMenu.tsx" lineNumbers
+import { EllipsisVertical } from "lucide-react"
+import { useState } from "react"
+
+import type { UserPublic } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import useAuth from "@/hooks/useAuth"
+import DeleteUser from "./DeleteUser"
+import EditUser from "./EditUser"
+
+// 每一行只需要传入完整 UserPublic，子操作自行读取 id 和默认值。
+interface UserActionsMenuProps {
+  user: UserPublic
+}
+
+export const UserActionsMenu = ({ user }: UserActionsMenuProps) => {
+  // 受控 Dropdown 可在子操作成功后显式关闭。
+  const [open, setOpen] = useState(false)
+  const { user: currentUser } = useAuth()
+
+  // UI 层隐藏“编辑/删除自己”的入口，减少误操作。后端仍需强制授权。
+  if (user.id === currentUser?.id) {
+    return null
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <EllipsisVertical />
+        </Button>
+      </DropdownMenuTrigger>
+      {/* 子 Dialog 成功后调用 setOpen(false)，关闭操作菜单。 */}
+      <DropdownMenuContent align="end">
+        <EditUser user={user} onSuccess={() => setOpen(false)} />
+        <DeleteUser id={user.id} onSuccess={() => setOpen(false)} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+```
+
+## 阅读重点
+
+- 返回 null 是体验保护，不是安全边界；API 必须独立校验权限。
+- 受控 open 状态使嵌套 Dialog 的关闭顺序可预测。
+- 图标按钮最好补充 tooltip；当前已有 Button 但只依赖图标，屏幕阅读器名称应由下层按钮或额外 sr-only 提供。
+- 相对导入 `../Items` 在 Item 版本中可简化为同目录导入，保持一致性。

@@ -1,0 +1,64 @@
+---
+title: "client/core：OpenAPI 请求运行时"
+description: "理解生成 SDK 底层的请求描述、全局配置、响应适配、异常和取消机制。"
+---
+
+<Callout type="idea" title="目录定位">
+
+`src/client/core/` 是自动生成客户端的运行时内核。`sdk.gen.ts` 中每个业务方法最终都会落到这里：构造请求选项、读取全局配置、发送 Axios 请求、处理取消，并把错误转换为统一类型。
+
+</Callout>
+
+## 文件结构
+
+<Files>
+  <Folder name="core" defaultOpen>
+    <File name="ApiRequestOptions.ts — 端点请求的统一描述" />
+    <File name="OpenAPI.ts — Base URL、认证和拦截器配置" />
+    <File name="request.ts — 参数序列化、Axios 调用和错误映射" />
+    <File name="CancelablePromise.ts — 请求取消与 Promise 兼容" />
+    <File name="ApiResult.ts — 标准化响应快照" />
+    <File name="ApiError.ts — 结构化失败信息" />
+  </Folder>
+</Files>
+
+## 完整调用链
+
+```mermaid
+sequenceDiagram
+  participant UI as React / Query
+  participant SDK as sdk.gen.ts
+  participant Opt as ApiRequestOptions
+  participant Cfg as OpenAPI Config
+  participant Req as request.ts
+  participant HTTP as Axios / FastAPI
+  UI->>SDK: 调用业务方法
+  SDK->>Opt: 构造 method/url/body
+  SDK->>Req: request(options)
+  Req->>Cfg: 解析 BASE/TOKEN/HEADERS
+  Req->>HTTP: 发送 HTTP 请求
+  alt 2xx
+    HTTP-->>Req: AxiosResponse
+    Req-->>UI: typed body
+  else 非成功状态
+    HTTP-->>Req: error response
+    Req-->>UI: throw ApiError
+  end
+```
+
+## 文件导航
+
+<Cards>
+  <Card href="./ApiRequestOptions-ts" title="请求选项">理解生成端点如何表达请求。</Card>
+  <Card href="./OpenAPI-ts" title="全局配置">理解环境与认证如何注入 SDK。</Card>
+  <Card href="./CancelablePromise-ts" title="可取消 Promise">理解请求生命周期。</Card>
+  <Card href="./ApiResult-ts" title="响应结果">理解传输层适配。</Card>
+  <Card href="./ApiError-ts" title="结构化异常">理解 UI 如何按状态码处理失败。</Card>
+  <Card href="./request-ts" title="请求执行器">下一批重点：阅读参数序列化与 Axios 调用。</Card>
+</Cards>
+
+<Callout type="warn" title="自动生成目录">
+
+这些文件由 OpenAPI 生成工具维护。学习时可以详细阅读，但真实项目中应优先调整生成器配置或模板；直接修改后，下一次 `generate-client` 可能覆盖所有改动。
+
+</Callout>

@@ -1,0 +1,219 @@
+---
+title: "table.tsx：原生语义表格组件族"
+description: "在保留 table 语义的前提下，统一滚动容器、表头、行、单元格和选中态样式。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件是视觉与语义适配层。它不负责排序、分页、过滤或列定义，这些行为由 DataTable 和 TanStack Table 管理。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 保留原生 table/thead/tbody/tr/th/td/caption 语义。
+- 提供横向滚动容器，适配窄屏。
+- 统一表头、表尾、行和单元格间距。
+- 支持 hover 与 `data-state=selected` 选中态。
+- 允许每个子组件继续接收原生 HTML 属性。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. DataTable 计算表头和行模型。
+
+  </Step>
+  <Step>
+
+### 2. Table 创建滚动与边框容器。
+
+  </Step>
+  <Step>
+
+### 3. Header/Body 组织语义区域。
+
+  </Step>
+  <Step>
+
+### 4. Row 根据交互状态写入 data-state。
+
+  </Step>
+  <Step>
+
+### 5. Head/Cell 渲染内容并保持列对齐。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `DataTable` | 提供数据、列模型和交互逻辑。 |
+| `@tanstack/react-table` | 计算表格状态，但不在本文件直接导入。 |
+| `Checkbox` | 表格选择列通过 role=checkbox 触发对齐规则。 |
+| `cn` | 合并默认样式和业务覆盖。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Table` | `component` | 滚动容器与 table 根节点。 |
+| `TableHeader / TableBody / TableFooter` | `components` | 表格语义区域。 |
+| `TableRow` | `component` | 支持 hover 和 selected 状态的行。 |
+| `TableHead / TableCell` | `components` | 标题单元格与数据单元格。 |
+| `TableCaption` | `component` | 表格说明文本。 |
+
+## 组合结构
+
+<Files>
+  <Folder name="Table container" defaultOpen>
+    <File name="Table">
+      <File name="TableHeader → TableRow → TableHead" />
+      <File name="TableBody → TableRow → TableCell" />
+      <File name="TableFooter → TableRow → TableCell" />
+      <File name="TableCaption" />
+    </File>
+  </Folder>
+</Files>
+
+<Callout type="info" title="职责边界">
+
+样式组件只负责结构和视觉。排序、筛选、分页、列可见性与行选择应继续放在 DataTable 层，避免基础原语依赖特定数据方案。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/table.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="table.tsx" lineNumbers
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+// 外层容器承担横向滚动和边框，table 本身保持原生语义。
+function Table({ className, ...props }: React.ComponentProps<"table">) {
+  return (
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto rounded-lg border"
+    >
+      <table
+        data-slot="table"
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    </div>
+  )
+}
+
+// Header 统一标题区背景，并让内部行显示分隔线。
+function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+  return (
+    <thead
+      data-slot="table-header"
+      className={cn("bg-muted/50 [&_tr]:border-b", className)}
+      {...props}
+    />
+  )
+}
+
+function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
+  return (
+    <tbody
+      data-slot="table-body"
+      className={cn("[&_tr:last-child]:border-0", className)}
+      {...props}
+    />
+  )
+}
+
+function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
+  return (
+    <tfoot
+      data-slot="table-footer"
+      className={cn(
+        "bg-muted/50 border-t font-medium [&>tr]:last:border-b-0",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// data-state=selected 由上层表格逻辑写入，用于选中态反馈。
+function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+  return (
+    <tr
+      data-slot="table-row"
+      className={cn(
+        "hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// Head 与 Cell 对 checkbox 列做对齐修正。
+function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+  return (
+    <th
+      data-slot="table-head"
+      className={cn(
+        "text-muted-foreground h-11 px-4 text-left align-middle text-xs font-semibold uppercase tracking-wider whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// 单元格默认禁止换行，长表格交给外层横向滚动。
+function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+  return (
+    <td
+      data-slot="table-cell"
+      className={cn(
+        "px-4 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function TableCaption({
+  className,
+  ...props
+}: React.ComponentProps<"caption">) {
+  return (
+    <caption
+      data-slot="table-caption"
+      className={cn("text-muted-foreground mt-4 text-sm", className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableCaption,
+}
+```
+
+## 阅读重点
+
+- 外层 `overflow-x-auto` 比强制压缩列更适合数据表。
+- `whitespace-nowrap` 能保持字段完整，但长文本列可由业务 className 改为换行。
+- 表头使用 uppercase 与 tracking，适合短标签；长句标题应按场景覆盖。
+- `data-slot` 可用于测试、主题定制或后续组件选择器。

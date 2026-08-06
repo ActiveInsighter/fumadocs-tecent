@@ -1,0 +1,11 @@
+{
+  "title": "Generated API Client",
+  "pages": [
+    "index",
+    "core",
+    "index-ts",
+    "schemas-gen-ts",
+    "sdk-gen-ts",
+    "types-gen-ts"
+  ]
+}

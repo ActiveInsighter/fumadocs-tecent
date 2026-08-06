@@ -1,0 +1,57 @@
+---
+title: "test_email.mjml：SMTP 测试邮件"
+description: "使用最小模板验证发件配置、模板渲染和邮件投递链路。"
+---
+
+<Callout type="idea" title="模板定位">
+
+这是一封面向管理员或开发者的诊断邮件，不承载业务操作。它只显示项目名和目标邮箱，便于快速确认 SMTP 配置是否可用。
+
+</Callout>
+
+## 渲染数据
+
+| 变量 | 含义 |
+| --- | --- |
+| `{{ project_name }}` | 标识当前部署实例。 |
+| `{{ email }}` | 显示本次测试的目标收件地址。 |
+
+## 内容组织思路
+
+1. 展示项目名称，确认邮件来自正确环境。
+2. 展示测试邮箱，确认模板变量成功渲染。
+3. 用分隔线结束内容，保持模板最小化。
+
+<Callout type="warn" title="发现一个可读性问题">
+
+此模板的第二段文本使用 `font-family=", sans-serif"`，首选字体为空。文档保留原始源码不改逻辑，但实际维护时建议统一为 `Arial, Helvetica, sans-serif` 后重新编译。
+
+</Callout>
+
+## 带注释模板
+
+> 原始路径：`backend/app/email-templates/src/test_email.mjml`。`{{ ... }}` 会在发送前由模板引擎替换。
+
+```xml title="test_email.mjml" lineNumbers
+<mjml>
+  <!-- 最小诊断模板仍复用正式邮件的背景与内容容器。 -->
+  <mj-body background-color="#fafbfc">
+    <mj-section background-color="#fff" padding="40px 20px">
+      <mj-column vertical-align="middle" width="100%">
+        <!-- 用项目名区分 local、staging 与 production 环境。 -->
+        <mj-text align="center" padding="35px" font-size="20px" font-family="Arial, Helvetica, sans-serif" color="#333">{{ project_name }}</mj-text>
+        <!-- email 变量证明 Jinja 渲染与参数传递成功。 -->
+        <mj-text align="center" font-size="16px" padding-left="25px" padding-right="25px" font-family=", sans-serif" color="#555"><span>Test email for: {{ email }}</span></mj-text>
+        <mj-divider border-color="#ccc" border-width="2px"></mj-divider>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
+```
+
+## 阅读重点
+
+- 收到邮件只能证明基础投递成功，仍应检查 SPF、DKIM、DMARC 和垃圾邮件评分。
+- 测试接口应限制为超级管理员，避免成为垃圾邮件转发器。
+- 模板中的 `font-family=", sans-serif"` 看起来缺少首选字体，可在后续源码维护时修正。
+- 生产日志应记录消息 ID 和结果，不应记录 SMTP 密码。

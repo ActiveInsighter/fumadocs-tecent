@@ -1,0 +1,91 @@
+---
+title: "input.tsx：通用文本输入框"
+description: "保留原生 input 属性，同时统一尺寸、主题、焦点、disabled、文件上传和 aria-invalid 样式。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Input 是对原生 `<input>` 的最薄封装。它不持有 value，也不决定校验规则，因此既可非受控使用，也可交给 React Hook Form。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 透传所有原生 input 属性。
+- 统一高度、间距和字体。
+- 支持 file input 子按钮样式。
+- 显示 focus-visible ring。
+- 响应 disabled 与 aria-invalid。
+
+## 执行思路
+
+1. 接收 type 与原生 props。
+2. cn 合并基础类和 className。
+3. 浏览器或表单库管理输入值。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `FormControl` | 注入 id 与 ARIA。 |
+| `React Hook Form` | 通过 register/field 控制。 |
+| `cn` | 样式合并。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Input` | `component` | 原生 input 的样式包装。 |
+
+## 组合结构
+
+```tsx title="usage.tsx"
+<FormField
+  name="email"
+  render={({ field }) => (
+    <FormItem>
+      <FormLabel>Email</FormLabel>
+      <FormControl>
+        <Input type="email" autoComplete="email" {...field} />
+      </FormControl>
+      <FormMessage />
+    </FormItem>
+  )}
+/>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/input.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="input.tsx" lineNumbers
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+// 轻量包装：保留原生 input API，只统一主题、焦点、文件和错误样式。
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
+    <input
+      type={type}
+      data-slot="input"
+      className={cn(
+        "file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Input }
+```
+
+## 阅读重点
+
+- Label 与错误说明不属于 Input，自身仍需放入完整表单结构。
+- 受控输入要传 value/onChange，非受控输入使用 defaultValue。
+- 不要仅靠 placeholder 充当标签。
+- type 会影响浏览器键盘、自动填充和校验行为。

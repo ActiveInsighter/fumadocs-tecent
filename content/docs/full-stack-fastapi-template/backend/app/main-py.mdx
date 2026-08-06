@@ -1,0 +1,88 @@
+---
+title: "main.py：应用组装入口"
+description: "创建 FastAPI 实例，接入监控、CORS、API 路由和编译后的前端静态资源。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是后端进程真正加载的应用入口。它不实现具体业务，而是把各个基础设施与路由模块组装成一个可运行的 ASGI 应用。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 统一创建并配置 `FastAPI` 实例。
+- 根据环境启用 Sentry 与 CORS。
+- 给 OpenAPI 操作生成稳定且可读的唯一 ID。
+- 挂载 `/api/v1` 路由，并在根路径提供构建后的前端。
+
+## 核心执行流程
+
+1. 导入集中配置与 API 路由。
+2. 在非本地环境且配置 DSN 时初始化 Sentry。
+3. 创建 FastAPI 应用并设置 OpenAPI 地址。
+4. 按允许来源添加 CORS 中间件。
+5. 注册 API 路由并挂载静态前端。
+
+## 与其他模块的关系
+
+- **`core/config.py`**：提供项目名、环境、CORS、Sentry 与 API 前缀。
+- **`api/main.py`**：提供已聚合的业务路由。
+- **前端构建目录**：生产镜像会把编译结果复制到 `app/frontend`。
+
+## 带注释源码
+
+> 原始路径：`backend/app/main.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="main.py" lineNumbers
+from pathlib import Path
+
+import sentry_sdk
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+from starlette.middleware.cors import CORSMiddleware
+
+from app.api.main import api_router
+from app.core.config import settings
+
+# 生产镜像会把 Vite 构建产物复制到该目录，后端直接提供静态站点。
+FRONTEND_DIR = Path(__file__).parent / "frontend"  # [!code highlight]
+
+
+def custom_generate_unique_id(route: APIRoute) -> str:
+    """用“首个标签 + 函数名”生成稳定的 OpenAPI operationId。"""
+    return f"{route.tags[0]}-{route.name}"
+
+
+# 本地开发通常不发送监控事件，避免污染生产可观测数据。
+if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":  # [!code focus]
+    sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
+
+# 应用对象由 ASGI 服务器导入，例如 `fastapi run app/main.py`。
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    generate_unique_id_function=custom_generate_unique_id,
+)
+
+# 浏览器跨域请求必须明确允许来源；身份认证仍由 JWT 负责。
+if settings.all_cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.all_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# 所有业务 API 统一放在版本前缀下，便于未来演进。
+app.include_router(api_router, prefix=settings.API_V1_STR)  # [!code highlight]
+# 根路径交给已编译前端，实现同域部署。
+app.frontend("/", directory=FRONTEND_DIR)  # [!code highlight]
+```
+
+## 阅读重点
+
+- 入口文件应只做组装，复杂业务留在路由或服务层。
+- CORS 是浏览器安全策略，不是后端身份认证。
+- 唯一操作 ID 会影响自动生成的前端客户端函数名。

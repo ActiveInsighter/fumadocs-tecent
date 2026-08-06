@@ -1,0 +1,67 @@
+---
+title: "prestart.sh：后端启动前初始化链"
+description: "严格按数据库探活、Alembic 迁移、初始数据创建的顺序准备运行环境。"
+---
+
+<Callout type="idea" title="启动链定位">
+
+应用进程启动前必须完成的三个步骤被集中到这里。顺序很重要：数据库不可用时不能迁移，表结构未升级时也不能写初始数据。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 阻止应用在数据库未就绪时启动。
+- 把数据库结构升级到 `head`。
+- 创建可重复执行的初始业务数据。
+- 任何步骤失败时立即终止，避免以半初始化状态提供服务。
+
+## 执行思路
+
+1. 运行数据库连接探活脚本。
+2. 执行 `alembic upgrade head`。
+3. 执行 `initial_data.py`。
+4. 全部成功后，容器入口再启动 FastAPI。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/backend_pre_start.py` | 实现带重试的数据库探活。 |
+| `app/alembic/versions` | 定义从旧结构到 head 的迁移链。 |
+| `app/initial_data.py` | 创建最小初始数据。 |
+| `Dockerfile / Compose` | 通常在启动应用进程前调用本脚本。 |
+
+<Steps>
+  <Step><strong>探活</strong>：确认 PostgreSQL 可连接。</Step>
+  <Step><strong>迁移</strong>：升级到最新数据库结构。</Step>
+  <Step><strong>种子数据</strong>：确保初始管理员存在。</Step>
+</Steps>
+
+## 带注释源码
+
+> 原始路径：`backend/scripts/prestart.sh`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```bash title="prestart.sh" lineNumbers
+#! /usr/bin/env bash
+
+# 任一步失败都阻止应用继续启动。
+set -e
+# 在容器日志中回显命令。
+set -x
+
+# 第 1 步：等待 PostgreSQL 真正接受查询，而不只看容器状态。
+python app/backend_pre_start.py
+
+# 第 2 步：把数据库升级到迁移链最新 revision。
+alembic upgrade head  # [!code highlight]
+
+# 第 3 步：以幂等方式保证首个超级管理员等初始数据存在。
+python app/initial_data.py
+```
+
+## 阅读重点
+
+- 迁移必须先于初始数据，否则 ORM 查询可能访问不存在的列。
+- 多副本同时启动时，最好只让一个受控任务执行迁移，避免并发 DDL。
+- 脚本成功只代表初始化完成，应用进程仍需独立健康检查。

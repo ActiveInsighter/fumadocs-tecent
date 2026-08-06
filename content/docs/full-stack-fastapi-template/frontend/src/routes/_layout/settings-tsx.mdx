@@ -1,0 +1,168 @@
+---
+title: "settings.tsx：配置驱动的用户设置页"
+description: "把个人资料、密码和危险区设置组件组织为由配置数组生成的标签页。"
+---
+
+<Callout type="idea" title="文件定位">
+
+设置页本身不实现更新逻辑，而是负责页面级导航和三个独立设置组件的组合。配置数组让 Trigger 与 Content 保持同步。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 定义设置标签配置。
+- 读取当前用户。
+- 用户未加载时避免渲染表单。
+- 生成 TabsList 与 TabsContent。
+- 组合 UserInformation、ChangePassword、DeleteAccount。
+- 设置页面标题和说明。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 进入 /settings。
+
+  </Step>
+  <Step>
+
+### 2. useAuth 获取 currentUser。
+
+  </Step>
+  <Step>
+
+### 3. 根据用户计算 finalTabs。
+
+  </Step>
+  <Step>
+
+### 4. Tabs 默认激活 my-profile。
+
+  </Step>
+  <Step>
+
+### 5. 同一配置数组生成触发器与内容。
+
+  </Step>
+  <Step>
+
+### 6. 具体子组件执行各自 Mutation。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `useAuth` | 提供 currentUser。 |
+| `ui/tabs` | 负责标签状态和键盘交互。 |
+| `UserInformation` | 更新个人资料。 |
+| `ChangePassword` | 修改密码。 |
+| `DeleteAccount` | 危险操作。 |
+
+## 路由契约
+
+| 配置 | 作用 |
+| --- | --- |
+| `path` | `/settings`。 |
+| `default tab` | `my-profile`。 |
+| `data dependency` | currentUser。 |
+| `head` | Settings 页面标题。 |
+
+<Callout type="warn" title="代码审查发现：权限分支没有实际效果">
+
+`tabsConfig` 只有 3 项，超级用户分支执行 `slice(0, 3)` 后仍然得到全部 3 项，普通用户也直接得到全部数组。当前代码行为一致；如果设计目标是隐藏某个标签，需要重新明确规则。
+
+</Callout>
+
+<Files>
+  <Folder name="Tabs defaultValue=my-profile" defaultOpen>
+    <File name="My profile → UserInformation" />
+    <File name="Password → ChangePassword" />
+    <File name="Danger zone → DeleteAccount" />
+  </Folder>
+</Files>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/routes/_layout/settings.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="settings.tsx" lineNumbers
+import { createFileRoute } from "@tanstack/react-router"
+
+import ChangePassword from "@/components/UserSettings/ChangePassword"
+import DeleteAccount from "@/components/UserSettings/DeleteAccount"
+import UserInformation from "@/components/UserSettings/UserInformation"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import useAuth from "@/hooks/useAuth"
+
+// 用数据描述标签页，避免手写重复 Trigger/Content 配对。
+const tabsConfig = [
+  { value: "my-profile", title: "My profile", component: UserInformation },
+  { value: "password", title: "Password", component: ChangePassword },
+  { value: "danger-zone", title: "Danger zone", component: DeleteAccount },
+]
+
+export const Route = createFileRoute("/_layout/settings")({
+  component: UserSettings,
+  head: () => ({
+    meta: [
+      {
+        title: "Settings - FastAPI Template",
+      },
+    ],
+  }),
+})
+
+// 当前用户决定可见标签，并为各设置组件提供会话上下文。
+function UserSettings() {
+  const { user: currentUser } = useAuth()
+  // 当前表达式对 superuser 和普通用户实际返回同样三个标签，见文档审查提示。
+  const finalTabs = currentUser?.is_superuser
+    ? tabsConfig.slice(0, 3)
+    : tabsConfig
+
+  // 用户查询尚未就绪时不渲染依赖用户信息的设置表单。
+  if (!currentUser) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">User Settings</h1>
+        <p className="text-muted-foreground">
+          Manage your account settings and preferences
+        </p>
+      </div>
+
+      <Tabs defaultValue="my-profile">
+        <TabsList>
+          {/* Trigger 与 Content 从同一配置生成，确保 value 始终匹配。 */}
+          {finalTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.title}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {finalTabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value}>
+            <tab.component />
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
+  )
+}
+```
+
+## 阅读重点
+
+- 配置驱动方式可避免新增标签时漏写 Content 或 value 不一致。
+- 当前 `tabsConfig.slice(0, 3)` 与原数组长度相同，因此 superuser 与普通用户可见标签没有差异。
+- 若意图按权限隐藏标签，应明确过滤条件并添加测试。
+- 返回 null 简洁但没有加载反馈；可使用 Skeleton 或在上级预取 currentUser。
+- Danger zone 应使用明确视觉和二次确认，具体逻辑已拆到 DeleteAccount。

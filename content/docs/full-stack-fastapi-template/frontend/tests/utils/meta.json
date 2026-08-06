@@ -1,0 +1,10 @@
+{
+  "title": "Utilities",
+  "pages": [
+    "index",
+    "mailcatcher-ts",
+    "privateApi-ts",
+    "random-ts",
+    "user-ts"
+  ]
+}

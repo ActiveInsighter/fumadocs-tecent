@@ -1,0 +1,11 @@
+{
+  "title": "Item Components",
+  "pages": [
+    "index",
+    "AddItem-tsx",
+    "DeleteItem-tsx",
+    "EditItem-tsx",
+    "ItemActionsMenu-tsx",
+    "columns-tsx"
+  ]
+}

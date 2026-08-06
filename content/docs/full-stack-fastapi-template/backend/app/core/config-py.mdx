@@ -1,0 +1,174 @@
+---
+title: "config.py：强类型应用配置"
+description: "使用 Pydantic Settings 解析环境变量，计算 CORS、数据库 DSN、邮件能力并阻止生产环境使用默认密钥。"
+---
+
+<Callout type="idea" title="文件定位">
+
+配置模块是整个后端的“单一配置入口”。其他文件只导入 `settings`，无需重复解析环境变量或拼接数据库地址。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 把字符串环境变量验证为 URL、邮箱、整数和环境枚举。
+- 兼容逗号分隔与列表形式的 CORS 配置。
+- 通过计算字段生成可直接使用的 CORS 列表和数据库 DSN。
+- 在非本地环境拒绝危险的默认密钥。
+
+## 核心执行流程
+
+1. 读取 `../.env` 与进程环境变量。
+2. 运行字段验证器和 CORS 预处理。
+3. 计算派生配置，如数据库 URI 与邮件开关。
+4. 运行模型级校验，检查默认密钥。
+5. 实例化全局只读风格的 `settings`。
+
+## 与其他模块的关系
+
+- **根目录 `.env`**：提供原始字符串配置。
+- **`main.py`**：消费项目名、环境、CORS 与 Sentry。
+- **`db.py`**：消费数据库 DSN。
+- **`security.py`**：消费 JWT 密钥。
+- **`utils.py`**：消费 SMTP 和前端地址。
+
+## 带注释源码
+
+> 原始路径：`backend/app/core/config.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="config.py" lineNumbers
+import secrets
+import warnings
+from typing import Annotated, Any, Literal, Self
+
+from pydantic import (
+    AnyUrl,
+    BeforeValidator,
+    EmailStr,
+    HttpUrl,
+    PostgresDsn,
+    computed_field,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def parse_cors(v: Any) -> list[str] | str:
+    """兼容 `a,b` 与 JSON 列表两种 CORS 环境变量写法。"""
+    if isinstance(v, str) and not v.startswith("["):
+        return [i.strip() for i in v.split(",") if i.strip()]
+    elif isinstance(v, list | str):
+        return v
+    raise ValueError(v)
+
+
+class Settings(BaseSettings):
+    """应用全部运行配置；字段类型本身就是启动时校验规则。"""
+    model_config = SettingsConfigDict(
+        # Use top level .env file (one level above ./backend/)
+        env_file="../.env",
+        env_ignore_empty=True,
+        extra="ignore",
+    )
+    # HTTP API 的统一版本前缀。
+    API_V1_STR: str = "/api/v1"
+    # 未提供时随机生成只适合临时本地运行；生产必须显式持久化。
+    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # 60 minutes * 24 hours * 8 days = 8 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    FRONTEND_HOST: str = "http://localhost:5173"
+    ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+
+    BACKEND_CORS_ORIGINS: Annotated[
+        list[AnyUrl] | str, BeforeValidator(parse_cors)
+    ] = []
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def all_cors_origins(self) -> list[str]:
+        """去掉尾部斜杠并自动加入前端地址，避免等价 URL 重复。"""
+        return [str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS] + [
+            self.FRONTEND_HOST
+        ]
+
+    PROJECT_NAME: str
+    SENTRY_DSN: HttpUrl | None = None
+    POSTGRES_SERVER: str
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def SQLALCHEMY_DATABASE_URI(self) -> PostgresDsn:
+        """用结构化字段安全构建 SQLAlchemy/psycopg 连接串。"""
+        return PostgresDsn.build(
+            scheme="postgresql+psycopg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_SERVER,
+            port=self.POSTGRES_PORT,
+            path=self.POSTGRES_DB,
+        )
+
+    SMTP_TLS: bool = True
+    SMTP_SSL: bool = False
+    SMTP_PORT: int = 587
+    SMTP_HOST: str | None = None
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    EMAILS_FROM_EMAIL: EmailStr | None = None
+    EMAILS_FROM_NAME: str | None = None
+
+    @model_validator(mode="after")
+    def _set_default_emails_from(self) -> Self:
+        """未指定发件人名称时使用项目名。"""
+        if not self.EMAILS_FROM_NAME:
+            self.EMAILS_FROM_NAME = self.PROJECT_NAME
+        return self
+
+    EMAIL_RESET_TOKEN_EXPIRE_HOURS: int = 48
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def emails_enabled(self) -> bool:
+        """只有主机和发件地址同时存在时才认为邮件能力可用。"""
+        return bool(self.SMTP_HOST and self.EMAILS_FROM_EMAIL)
+
+    EMAIL_TEST_USER: EmailStr = "test@example.com"
+    FIRST_SUPERUSER: EmailStr
+    FIRST_SUPERUSER_PASSWORD: str
+
+    def _check_default_secret(self, var_name: str, value: str | None) -> None:
+        """本地发出警告，staging/production 直接阻止危险启动。"""
+        if value == "changethis":
+            message = (
+                f'The value of {var_name} is "changethis", '
+                "for security, please change it, at least for deployments."
+            )
+            if self.ENVIRONMENT == "local":
+                warnings.warn(message, stacklevel=1)
+            else:
+                raise ValueError(message)
+
+    @model_validator(mode="after")
+    def _enforce_non_default_secrets(self) -> Self:
+        self._check_default_secret("SECRET_KEY", self.SECRET_KEY)
+        self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
+        self._check_default_secret(
+            "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD
+        )
+
+        return self
+
+
+# 模块导入时完成一次配置加载，供全应用复用。
+settings = Settings()  # type: ignore  # [!code focus]
+```
+
+## 阅读重点
+
+- 配置验证应尽早失败，使错误在启动阶段暴露。
+- 生产密钥不能使用仓库默认值。
+- `computed_field` 适合从多个原始配置派生运行时值。

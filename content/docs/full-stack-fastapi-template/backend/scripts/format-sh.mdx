@@ -1,0 +1,57 @@
+---
+title: "format.sh：自动修复与格式化 Python"
+description: "依次运行 Ruff 自动修复和格式化，使 app 与 scripts 目录保持统一风格。"
+---
+
+<Callout type="idea" title="脚本定位">
+
+这是会修改源码的格式化入口。它先修复 Ruff 可安全处理的规则，再运行格式化器统一排版。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 遇到命令失败立即退出。
+- 在终端打印每条命令，方便定位。
+- 对 `app` 和 `scripts` 应用可自动修复的 Ruff 规则。
+- 统一 Python 排版并减少无意义代码差异。
+
+## 执行思路
+
+1. Shell 开启失败即退出和命令回显。
+2. `ruff check --fix` 修复可自动处理的问题。
+3. `ruff format` 重排代码。
+4. 开发者检查 Git diff 后再提交。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `pyproject.toml` | 定义 Ruff 规则和格式化配置。 |
+| `lint.sh` | 只验证格式，不主动修改文件。 |
+| `pre-commit` | 可在提交前自动调用同类检查。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/scripts/format.sh`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```bash title="format.sh" lineNumbers
+#!/bin/sh -e
+# shebang 中的 `-e`：任意命令失败立即退出，避免继续处理不一致状态。
+# `-x`：把实际命令打印到终端，便于 CI 日志定位。
+set -x
+
+# 先应用可自动修复的 lint 规则，例如导入排序与简单风格问题。
+ruff check app scripts --fix
+
+# 再统一代码排版；顺序固定可减少重复 diff。
+ruff format app scripts
+```
+
+## 阅读重点
+
+- 格式化脚本会改文件，运行后应检查差异。
+- 先 fix 再 format 可让导入、语句和排版一次收敛。
+- 只覆盖 `app` 与 `scripts`；测试目录是否格式化取决于项目配置和其他命令。

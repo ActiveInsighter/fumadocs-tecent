@@ -1,0 +1,81 @@
+---
+title: "frontend/tests：浏览器端到端测试目录"
+description: "组织 Playwright 认证准备、业务场景测试、环境配置与复用工具。"
+---
+
+<Callout type="idea" title="目录定位">
+
+该目录从浏览器视角验证完整产品链路。文件按业务页面拆分，`utils/` 保存跨场景动作和数据工厂，`auth.setup.ts` 提供默认登录状态。
+
+</Callout>
+
+## 目录结构
+
+<Files>
+  <Folder name="tests" defaultOpen>
+    <File name="auth.setup.ts" />
+    <File name="config.ts" />
+    <File name="login.spec.ts" />
+    <File name="sign-up.spec.ts" />
+    <File name="reset-password.spec.ts" />
+    <File name="admin.spec.ts" />
+    <File name="items.spec.ts" />
+    <File name="user-settings.spec.ts" />
+    <Folder name="utils" defaultOpen>
+      <File name="mailcatcher.ts" />
+      <File name="privateApi.ts" />
+      <File name="random.ts" />
+      <File name="user.ts" />
+    </Folder>
+  </Folder>
+</Files>
+
+## 如何组织
+
+测试分成三层：
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 配置层 | `config.ts`, `auth.setup.ts` | 注入环境并生成登录快照 |
+| 场景层 | `*.spec.ts` | 从用户视角描述业务行为 |
+| 工具层 | `utils/*` | 创建数据、轮询邮件、复用用户动作 |
+
+<Callout type="info" title="测试金字塔中的位置">
+
+这些是数量较少但覆盖链路最完整的 E2E 测试。纯函数、校验器和组件细节仍应由更快的单元/组件测试承担。
+
+</Callout>
+
+## 组织原则
+
+- 每个 spec 聚焦一个页面或业务域。
+- 默认复用认证快照，匿名场景显式清空。
+- 优先可访问定位器，必要时使用稳定 test id。
+- 随机数据降低唯一约束冲突。
+- 断言用户可观察结果，不绑定实现细节。
+- 跨文件复用动作放入 utils，避免 spec 变成工具函数集合。
+
+## 推荐阅读顺序
+
+<Steps>
+  <Step>
+
+### 1. 先读 config.ts 和 auth.setup.ts，理解测试环境与默认身份。
+
+  </Step>
+  <Step>
+
+### 2. 阅读 login/sign-up/reset-password，掌握匿名认证流程。
+
+  </Step>
+  <Step>
+
+### 3. 阅读 utils，理解测试数据和复用动作。
+
+  </Step>
+  <Step>
+
+### 4. 阅读 admin/items/user-settings，观察复杂 CRUD 与权限场景。
+
+  </Step>
+</Steps>

@@ -1,0 +1,11 @@
+{
+  "title": "Project Tooling",
+  "pages": [
+    "index",
+    "github",
+    "copier",
+    "vscode",
+    "agent-skills"
+  ],
+  "defaultOpen": true
+}

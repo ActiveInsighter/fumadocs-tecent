@@ -1,0 +1,125 @@
+---
+title: "avatar.tsx：头像与回退内容"
+description: "基于 Radix Avatar 封装圆形根容器、图片与加载失败时的 fallback。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Avatar 将图片加载状态交给 Radix 处理，并统一圆形裁剪和尺寸。业务层只需提供 `AvatarImage` 与 `AvatarFallback`，无需手工监听 onError。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 创建圆形头像容器。
+- 渲染铺满容器的图片。
+- 在图片不可用时显示 fallback。
+- 透传 Radix 原语属性。
+- 提供 data-slot 扩展点。
+
+## 执行思路
+
+1. Root 建立裁剪容器。
+2. Image 尝试加载资源。
+3. 成功时显示图片。
+4. 失败或延迟时显示 Fallback。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `@radix-ui/react-avatar` | 图片/回退状态机。 |
+| `Sidebar/User` | 展示用户姓名缩写。 |
+| `cn` | 样式覆盖。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Avatar` | `component` | 头像根容器。 |
+| `AvatarImage` | `component` | 头像图片。 |
+| `AvatarFallback` | `component` | 图片不可用时的替代内容。 |
+
+## 组合结构
+
+<Files>
+  <Folder name="Avatar" defaultOpen>
+    <File name="AvatarImage — 正常图片" />
+    <File name="AvatarFallback — 缩写或图标" />
+  </Folder>
+</Files>
+
+```tsx title="usage.tsx"
+<Avatar>
+  <AvatarImage src="/avatar.png" alt="Ada Lovelace" />
+  <AvatarFallback>AL</AvatarFallback>
+</Avatar>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/avatar.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="avatar.tsx" lineNumbers
+import * as React from "react"
+import * as AvatarPrimitive from "@radix-ui/react-avatar"
+
+import { cn } from "@/lib/utils"
+
+// Root 固定尺寸、圆形裁剪和 overflow，统一图片与 fallback 边界。
+function Avatar({
+  className,
+  ...props
+}: React.ComponentProps<typeof AvatarPrimitive.Root>) {
+  return (
+    <AvatarPrimitive.Root
+      data-slot="avatar"
+      className={cn(
+        "relative flex size-8 shrink-0 overflow-hidden rounded-full",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// Radix Image 会与 Fallback 协作处理加载成功或失败。
+function AvatarImage({
+  className,
+  ...props
+}: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  return (
+    <AvatarPrimitive.Image
+      data-slot="avatar-image"
+      className={cn("aspect-square size-full", className)}
+      {...props}
+    />
+  )
+}
+
+// 图片未提供或加载失败时显示缩写、图标等替代内容。
+function AvatarFallback({
+  className,
+  ...props
+}: React.ComponentProps<typeof AvatarPrimitive.Fallback>) {
+  return (
+    <AvatarPrimitive.Fallback
+      data-slot="avatar-fallback"
+      className={cn(
+        "bg-muted flex size-full items-center justify-center rounded-full",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Avatar, AvatarImage, AvatarFallback }
+```
+
+## 阅读重点
+
+- AvatarImage 仍应提供有意义的 alt，纯装饰头像可使用空 alt。
+- Fallback 文本要避免暴露不必要个人信息。
+- 尺寸通过 className 覆盖，子元素会自动铺满。
+- 远程头像还要考虑 CSP、缓存和隐私代理。

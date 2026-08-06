@@ -1,0 +1,116 @@
+---
+title: "user.ts：可复用的注册、登录与退出动作"
+description: "把跨场景重复出现的用户级浏览器操作封装为 Playwright helper。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这些函数是“用户动作”而不是页面对象模型：它们封装短而稳定的认证流程，让业务 spec 专注目标场景。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 填写并提交注册表单。
+- 填写并提交登录表单。
+- 等待登录 URL 和欢迎反馈。
+- 从用户菜单执行退出。
+- 接收当前测试的 Page，保持上下文隔离。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. spec 准备姓名、邮箱和密码。
+
+  </Step>
+  <Step>
+
+### 2. helper 导航认证路由。
+
+  </Step>
+  <Step>
+
+### 3. 按 test id 填写字段。
+
+  </Step>
+  <Step>
+
+### 4. 通过 role 点击提交或菜单项。
+
+  </Step>
+  <Step>
+
+### 5. 等待稳定后置状态再返回调用方。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Page` | 承载当前浏览器标签页和会话。 |
+| `sign-up/login routes` | 真实 UI 入口。 |
+| `random.ts` | 为参数提供低冲突值。 |
+| `business specs` | 复用登录/退出以准备场景。 |
+
+## 动作与断言的边界
+
+<Tabs items={['Helper 内', 'Spec 内']}>
+  <Tab>保留确保动作完成的同步断言，例如登录后欢迎文本。</Tab>
+  <Tab>保留与当前业务目标相关的断言，例如管理员权限、条目是否出现。</Tab>
+</Tabs>
+
+## 带注释源码
+
+> 原始路径：`frontend/tests/utils/user.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="user.ts" lineNumbers
+import { expect, type Page } from "@playwright/test"
+
+// 封装完整注册动作，但不在此处断言业务结果，断言留给调用 spec。
+export async function signUpNewUser(
+  page: Page,
+  name: string,
+  email: string,
+  password: string,
+) {
+  await page.goto("/signup")
+
+  await page.getByTestId("full-name-input").fill(name)
+  await page.getByTestId("email-input").fill(email)
+  await page.getByTestId("password-input").fill(password)
+  await page.getByTestId("confirm-password-input").fill(password)
+  await page.getByRole("button", { name: "Sign Up" }).click()
+  await page.goto("/login")
+}
+
+// 登录完成后同时等待 URL 与欢迎文本，确认会话真正可用。
+export async function logInUser(page: Page, email: string, password: string) {
+  await page.goto("/login")
+
+  await page.getByTestId("email-input").fill(email)
+  await page.getByTestId("password-input").fill(password)
+  await page.getByRole("button", { name: "Log In" }).click()
+  await page.waitForURL("/")
+  await expect(
+    page.getByText("Welcome back, nice to see you again!"),
+  ).toBeVisible()
+}
+
+// 从用户菜单触发退出，再显式导航登录页建立稳定后置状态。
+export async function logOutUser(page: Page) {
+  await page.getByTestId("user-menu").click()
+  await page.getByRole("menuitem", { name: "Log out" }).click()
+  await page.goto("/login")
+}
+```
+
+## 阅读重点
+
+- helper 应保持短小；若隐藏大量条件分支，会让失败堆栈难以理解。
+- 关键业务断言通常放在 spec，helper 只保留确认动作完成所必需的同步点。
+- 登录 helper 同时断言欢迎文本，能避免 URL 提前变化但数据尚未加载。
+- 注册 helper 最后导航登录页，意味着调用方需要明确知道这个后置状态。

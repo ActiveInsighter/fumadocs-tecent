@@ -1,0 +1,12 @@
+{
+  "title": "Core",
+  "pages": [
+    "index",
+    "ApiError-ts",
+    "ApiRequestOptions-ts",
+    "ApiResult-ts",
+    "CancelablePromise-ts",
+    "OpenAPI-ts",
+    "request-ts"
+  ]
+}

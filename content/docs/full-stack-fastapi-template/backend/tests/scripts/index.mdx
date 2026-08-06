@@ -1,0 +1,31 @@
+---
+title: "启动脚本测试"
+description: "通过 Mock 验证数据库探活脚本成功路径，而不依赖真实 PostgreSQL。"
+---
+
+<Callout type="idea" title="目录定位">
+
+启动前探活脚本本质上是基础设施胶水代码。测试目标不是再次证明 PostgreSQL 能执行 `SELECT 1`，而是证明脚本正确创建 Session、执行查询并在成功时退出。
+
+</Callout>
+
+## Mock 边界
+
+```mermaid
+flowchart LR
+  Test --> Patch[patch Session]
+  Patch --> FakeSession[MagicMock 上下文管理器]
+  Script[init(engine)] --> FakeSession
+  FakeSession --> Assert[断言 exec 被调用]
+```
+
+<Cards>
+  <Card href="./test_backend_pre_start-py" title="生产探活测试">针对 `backend_pre_start.py`。</Card>
+  <Card href="./test_test_pre_start-py" title="测试探活测试">针对 `tests_pre_start.py`。</Card>
+</Cards>
+
+<Callout type="warn" title="当前覆盖范围">
+
+现有用例只覆盖首次连接成功。高可靠项目还应测试前几次失败后成功、达到最大重试次数以及异常日志行为。
+
+</Callout>

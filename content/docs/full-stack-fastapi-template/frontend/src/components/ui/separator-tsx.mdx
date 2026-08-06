@@ -1,0 +1,89 @@
+---
+title: "separator.tsx：水平与垂直分隔线"
+description: "基于 Radix Separator 在 decorative 与语义分隔之间切换，并按方向设置一像素边界。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Separator 用于视觉分组。默认 `decorative=true`，不会向辅助技术声明额外结构；只有内容语义确实需要分隔时才关闭 decorative。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 支持 horizontal/vertical。
+- 默认作为装饰元素。
+- 透传 Radix 属性。
+- 根据 data-orientation 设置尺寸。
+
+## 执行思路
+
+1. 调用方选择 orientation/decorative。
+2. Radix 输出对应语义属性。
+3. Tailwind 根据 data-orientation 切换宽高。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `@radix-ui/react-separator` | 方向和语义。 |
+| `ButtonGroup` | 组内分隔。 |
+| `Sidebar` | 组与 Footer 分隔。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Separator` | `component` | 水平或垂直分隔。 |
+
+## 组合结构
+
+```tsx title="usage.tsx"
+<div>
+  <section>Profile</section>
+  <Separator className="my-4" />
+  <section>Security</section>
+</div>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/separator.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="separator.tsx" lineNumbers
+import * as React from "react"
+import * as SeparatorPrimitive from "@radix-ui/react-separator"
+
+import { cn } from "@/lib/utils"
+
+// decorative=true 表示纯视觉分隔；语义分组时可显式关闭。
+function Separator({
+  className,
+  orientation = "horizontal",
+  decorative = true,
+  ...props
+}: React.ComponentProps<typeof SeparatorPrimitive.Root>) {
+  return (
+    <SeparatorPrimitive.Root
+      data-slot="separator"
+      decorative={decorative}
+      // Radix 同时写入方向语义和 data-orientation，样式据此切换宽高。
+      orientation={orientation}
+      className={cn(
+        "bg-border shrink-0 data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-px",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Separator }
+```
+
+## 阅读重点
+
+- 不要用 Separator 替代真正的标题层级和分组结构。
+- 垂直分隔线需要父容器提供明确高度。
+- 纯装饰时默认 decorative=true 是更安静的无障碍选择。
+- 颜色来自主题 border token。

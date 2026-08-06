@@ -1,0 +1,9 @@
+{
+  "title": "Source Code",
+  "pages": [
+    "index",
+    "new_account-mjml",
+    "reset_password-mjml",
+    "test_email-mjml"
+  ]
+}

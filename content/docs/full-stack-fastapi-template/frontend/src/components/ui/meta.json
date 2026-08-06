@@ -1,0 +1,30 @@
+{
+  "title": "UI Components",
+  "pages": [
+    "index",
+    "alert-tsx",
+    "avatar-tsx",
+    "badge-tsx",
+    "button-group-tsx",
+    "button-tsx",
+    "card-tsx",
+    "checkbox-tsx",
+    "dialog-tsx",
+    "dropdown-menu-tsx",
+    "form-tsx",
+    "input-tsx",
+    "label-tsx",
+    "loading-button-tsx",
+    "pagination-tsx",
+    "password-input-tsx",
+    "select-tsx",
+    "separator-tsx",
+    "sheet-tsx",
+    "sidebar-tsx",
+    "skeleton-tsx",
+    "sonner-tsx",
+    "table-tsx",
+    "tabs-tsx",
+    "tooltip-tsx"
+  ]
+}

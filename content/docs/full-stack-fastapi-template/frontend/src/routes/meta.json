@@ -1,0 +1,13 @@
+{
+  "title": "Routes",
+  "pages": [
+    "index",
+    "_layout",
+    "__root-tsx",
+    "_layout-tsx",
+    "login-tsx",
+    "recover-password-tsx",
+    "reset-password-tsx",
+    "signup-tsx"
+  ]
+}

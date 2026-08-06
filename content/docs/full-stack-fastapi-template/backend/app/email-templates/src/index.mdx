@@ -1,0 +1,45 @@
+---
+title: "src：MJML 邮件源模板"
+description: "说明三份可维护邮件模板的组织方式、共享变量和编辑原则。"
+---
+
+## 文件组织
+
+<Files>
+  <Folder name="src" defaultOpen>
+    <File name="new_account.mjml — 账户创建后的欢迎与登录信息" />
+    <File name="reset_password.mjml — 找回密码操作与有效期提示" />
+    <File name="test_email.mjml — 最小化 SMTP 链路验证" />
+  </Folder>
+</Files>
+
+## 共同布局
+
+所有模板都采用相似的层级：
+
+```text
+mjml
+└── mj-body            页面背景
+    └── mj-section     600px 左右的邮件内容区
+        └── mj-column  单列布局
+            ├── mj-text
+            ├── mj-button（按需）
+            └── mj-divider
+```
+
+## 模板变量
+
+| 变量 | 使用位置 | 作用 |
+| --- | --- | --- |
+| `project_name` | 所有模板 | 品牌或项目名称 |
+| `username` | 新账户、密码恢复 | 收件人显示名称或登录名 |
+| `password` | 新账户 | 初始密码 |
+| `link` | 新账户、密码恢复 | 前端登录或重置地址 |
+| `valid_hours` | 密码恢复 | 重置令牌有效时长 |
+| `email` | 测试邮件 | 标记实际测试收件地址 |
+
+<Callout type="idea" title="MJML 的价值">
+
+邮件客户端对 CSS 支持极不一致。MJML 允许用较清晰的组件描述布局，再生成表格布局、内联样式和 Outlook 条件注释。
+
+</Callout>

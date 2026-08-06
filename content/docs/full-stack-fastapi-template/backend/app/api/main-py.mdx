@@ -1,0 +1,59 @@
+---
+title: "api/main.py：路由聚合器"
+description: "集中注册登录、用户、工具和条目路由，并仅在本地环境暴露私有接口。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该模块建立 API 的模块化边界。应用入口只挂载一个 `api_router`，具体路由在这里按功能组合。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 让顶层应用入口保持简洁。
+- 统一控制哪些路由进入公开 API。
+- 根据环境条件注册仅用于本地开发的私有路由。
+
+## 核心执行流程
+
+1. 创建根 `APIRouter`。
+2. 依次包含各业务子路由。
+3. 读取环境配置。
+4. 仅本地环境包含 `private` 路由。
+
+## 与其他模块的关系
+
+- **`app/main.py`**：把聚合路由挂载到 `/api/v1`。
+- **`api/routes/*`**：定义具体 URL、依赖和响应模型。
+- **`core/config.py`**：决定私有路由是否可见。
+
+## 带注释源码
+
+> 原始路径：`backend/app/api/main.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="main.py" lineNumbers
+from fastapi import APIRouter
+
+from app.api.routes import items, login, private, users, utils
+from app.core.config import settings
+
+# 顶层路由本身不设置前缀，版本前缀由 app/main.py 统一添加。
+api_router = APIRouter()
+# 按功能聚合子路由，保持每个文件职责单一。
+api_router.include_router(login.router)
+api_router.include_router(users.router)
+api_router.include_router(utils.router)
+api_router.include_router(items.router)
+
+
+# 私有接口不进入 staging/production，避免成为公开后门。
+if settings.ENVIRONMENT == "local":  # [!code focus]
+    api_router.include_router(private.router)
+```
+
+## 阅读重点
+
+- 条件路由可减少生产攻击面。
+- 路由注册顺序通常不影响不同路径，但动态路径与固定路径要注意冲突。
+- 模块化路由便于测试和独立演进。

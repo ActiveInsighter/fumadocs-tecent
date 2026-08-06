@@ -1,0 +1,93 @@
+---
+title: "ErrorComponent.tsx：路由错误兜底页面"
+description: "在页面渲染或路由加载失败时展示稳定错误提示，并提供返回首页的恢复入口。"
+---
+
+<Callout type="idea" title="文件定位">
+
+错误边界不应把堆栈、请求体或内部实现直接暴露给最终用户。该组件提供简洁、安全且可测试的通用失败视图。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 占满视口并居中展示错误状态。
+- 提供不会泄露内部细节的用户文案。
+- 提供返回首页按钮。
+- 暴露稳定 data-testid 供端到端测试。
+
+## 执行思路
+
+1. 路由或组件抛出未处理错误。
+2. TanStack Router 错误边界渲染 ErrorComponent。
+3. 用户看到通用提示。
+4. 用户点击 Go Home 恢复导航。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `TanStack Router errorComponent` | 触发该视图的路由配置。 |
+| `NotFound` | 处理路径不存在，语义不同。 |
+| `observability` | 应在边界外记录真实异常。 |
+| `Button / Link` | 恢复导航。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `data-testid` | Playwright 可稳定定位错误页面。 |
+| `Link to="/"` | 路由级恢复动作。 |
+| `min-h-screen` | 保证错误视图覆盖页面。 |
+
+<Callout type="warn" title="错误页不是日志系统">
+
+用户界面应展示可行动的简短信息；真实异常、堆栈、用户上下文和请求 ID 应发送到服务端日志或错误监控平台，并注意去除密码、令牌等敏感数据。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Common/ErrorComponent.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="ErrorComponent.tsx" lineNumbers
+import { Link } from "@tanstack/react-router"
+import { Button } from "@/components/ui/button"
+
+// 路由错误边界的通用兜底视图，避免直接暴露内部异常。
+const ErrorComponent = () => {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center flex-col p-4"
+      data-testid="error-component"
+    >
+      <div className="flex items-center z-10">
+        <div className="flex flex-col ml-4 items-center justify-center p-4">
+          <span className="text-6xl md:text-8xl font-bold leading-none mb-4">
+            Error
+          </span>
+          <span className="text-2xl font-bold mb-2">Oops!</span>
+        </div>
+      </div>
+
+      {/* 面向用户使用稳定文案；详细错误应记录到监控而不是直接展示。 */}
+      <p className="text-lg text-muted-foreground mb-4 text-center z-10">
+        Something went wrong. Please try again.
+      </p>
+      {/* 提供明确恢复路径，让用户返回应用首页。 */}
+      <Link to="/">
+        <Button>Go Home</Button>
+      </Link>
+    </div>
+  )
+}
+
+export default ErrorComponent
+```
+
+## 阅读重点
+
+- Error 与 404 应使用不同组件，帮助用户区分系统失败和路径不存在。
+- 可以接受 error/reset props，以便展示请求 ID或“重试”按钮，但要避免泄露内部信息。
+- 应确保错误页本身依赖少、不会再次抛错。
+- data-testid 比文本选择器更适合稳定 E2E 测试。

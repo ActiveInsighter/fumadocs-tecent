@@ -1,0 +1,88 @@
+---
+title: "ApiError.ts：结构化 API 异常"
+description: "把错误消息、请求选项和 HTTP 响应上下文封装成可判别异常。"
+---
+
+<Callout type="idea" title="文件定位">
+
+普通 `Error` 只有消息和堆栈，而界面往往还需要状态码、响应体和请求 URL。`ApiError` 将这些字段统一封装，使调用方可以针对 401、403、404 或校验错误采取不同策略。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 继承标准 Error，兼容 `throw`、`catch` 与错误边界。
+- 保存 URL、status、statusText 和响应 body。
+- 保留原始 ApiRequestOptions，帮助调试失败请求。
+- 设置稳定的 `name = "ApiError"`。
+
+## 执行思路
+
+1. 请求层收到非成功响应。
+2. 构造 ApiError 并传入请求、响应与格式化消息。
+3. Promise 被拒绝。
+4. 调用方通过 `instanceof ApiError` 和 status 分支处理。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `request.ts` | 检测失败响应并抛出 ApiError。 |
+| `ApiRequestOptions.ts` | 描述失败请求。 |
+| `ApiResult.ts` | 提供失败响应快照。 |
+| `React Query` | 把异常暴露给 query/mutation 的 error 状态。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`frontend/src/client/core/ApiError.ts`。以下仅增加学习性注释，不改变程序行为。
+
+```ts title="ApiError.ts" lineNumbers
+import type { ApiRequestOptions } from './ApiRequestOptions';
+import type { ApiResult } from './ApiResult';
+
+// 把 HTTP 响应上下文附着到标准 Error，便于 UI 按状态码处理。
+export class ApiError extends Error {
+	public readonly url: string;
+	public readonly status: number;
+	public readonly statusText: string;
+	public readonly body: unknown;
+	public readonly request: ApiRequestOptions;
+
+	constructor(request: ApiRequestOptions, response: ApiResult, message: string) {
+		// 必须先调用 super，才能正确初始化 Error 的 message 与 stack。
+		super(message);
+
+		this.name = 'ApiError';
+		this.url = response.url;
+		this.status = response.status;
+		this.statusText = response.statusText;
+		this.body = response.body;
+		this.request = request;
+	}
+}
+```
+
+## 阅读重点
+
+- 不要只根据错误消息字符串分支，优先使用 `status`。
+- `body` 是 unknown，消费前需要类型收窄。
+- 该目录通常由 OpenAPI 生成器维护，手工修改可能在重新生成时丢失。
+
+## Twoslash：异常类型收窄
+
+```ts twoslash title="api-error-narrowing.ts"
+class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+  }
+}
+
+function handle(error: unknown) {
+  if (error instanceof ApiError) {
+    error.status
+    //    ^?
+  }
+}
+```

@@ -1,0 +1,167 @@
+---
+title: "items.tsx：物品列表与空状态页面"
+description: "用 Suspense Query 获取物品，按空列表或 DataTable 两种状态渲染，并提供新增入口。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该页面展示典型的“页面标题 + 创建按钮 + 异步列表”结构。列表加载、空状态和有数据状态被清晰拆开。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 查询最多 100 个物品。
+- 复用 `items` Query Key。
+- 加载时显示 PendingItems。
+- 无数据时显示可操作空状态。
+- 有数据时渲染 DataTable。
+- 提供 AddItem 入口。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 进入 /items。
+
+  </Step>
+  <Step>
+
+### 2. 页面标题与 AddItem 立即渲染。
+
+  </Step>
+  <Step>
+
+### 3. Suspense 边界显示 PendingItems。
+
+  </Step>
+  <Step>
+
+### 4. Query 获取 items。
+
+  </Step>
+  <Step>
+
+### 5. 长度为 0 显示空状态。
+
+  </Step>
+  <Step>
+
+### 6. 否则把 data 交给 DataTable。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `ItemsService` | 读取物品列表。 |
+| `Items columns` | 定义表格字段与操作。 |
+| `DataTable` | 渲染列表。 |
+| `PendingItems` | 加载占位。 |
+| `AddItem` | 创建物品并通常失效 items Query。 |
+
+## 路由契约
+
+| 配置 | 作用 |
+| --- | --- |
+| `path` | `/items`。 |
+| `queryKey` | `["items"]`。 |
+| `limit` | 当前一次读取 100 条。 |
+| `head` | Items 页面标题。 |
+
+<Tabs items={['加载中', '空列表', '有数据']}>
+  <Tab>`PendingItems` 模拟表格结构，减少布局跳动。</Tab>
+  <Tab>居中空状态解释原因，并引导用户添加第一条数据。</Tab>
+  <Tab>`DataTable` 使用 columns 和 items.data 渲染。</Tab>
+</Tabs>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/routes/_layout/items.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="items.tsx" lineNumbers
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { Search } from "lucide-react"
+import { Suspense } from "react"
+
+import { ItemsService } from "@/client"
+import { DataTable } from "@/components/Common/DataTable"
+import AddItem from "@/components/Items/AddItem"
+import { columns } from "@/components/Items/columns"
+import PendingItems from "@/components/Pending/PendingItems"
+
+// Query Key 与请求函数集中定义，保证列表刷新和失效操作一致。
+function getItemsQueryOptions() {
+  return {
+    queryFn: () => ItemsService.readItems({ skip: 0, limit: 100 }),
+    queryKey: ["items"],
+  }
+}
+
+export const Route = createFileRoute("/_layout/items")({
+  component: Items,
+  head: () => ({
+    meta: [
+      {
+        title: "Items - FastAPI Template",
+      },
+    ],
+  }),
+})
+
+// Suspense 解除后 data 已存在，这里只处理空列表与正常列表。
+function ItemsTableContent() {
+  const { data: items } = useSuspenseQuery(getItemsQueryOptions())
+
+  // 空状态比空表格更明确地告诉用户下一步行动。
+  if (items.data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-12">
+        <div className="rounded-full bg-muted p-4 mb-4">
+          <Search className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <h3 className="text-lg font-semibold">You don't have any items yet</h3>
+        <p className="text-muted-foreground">Add a new item to get started</p>
+      </div>
+    )
+  }
+
+  return <DataTable columns={columns} data={items.data} />
+}
+
+// 独立 Suspense 边界让标题和“新增”按钮无需等待列表。
+function ItemsTable() {
+  return (
+    <Suspense fallback={<PendingItems />}>
+      <ItemsTableContent />
+    </Suspense>
+  )
+}
+
+function Items() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Items</h1>
+          <p className="text-muted-foreground">Create and manage your items</p>
+        </div>
+        <AddItem />
+      </div>
+      <ItemsTable />
+    </div>
+  )
+}
+```
+
+## 阅读重点
+
+- 标题和新增按钮位于 Suspense 外，用户在列表加载时仍能理解页面目的。
+- 空状态同时包含图标、说明和下一步动作，比空白区域更友好。
+- 固定 limit=100 适合模板；真实数据量需要分页、游标或虚拟列表。
+- Query Key 必须与新增、编辑、删除后的 invalidateQueries 一致。
+- DataTable 只在有数据时渲染，避免展示无意义表头。

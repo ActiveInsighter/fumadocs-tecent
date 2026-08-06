@@ -1,0 +1,162 @@
+---
+title: "Items/columns.tsx：Item 表格列与复制交互"
+description: "定义 ID、标题、描述和行操作列，并为 UUID 提供悬停复制与成功反馈。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这个文件把 ItemPublic 转换为适合表格阅读的单元格。最有价值的细节是 `CopyId`：它把 Hook 放在真正的 React 组件中，而不是直接在 ColumnDef 回调顶层违规调用。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 以等宽小字显示 Item UUID。
+- 悬停时显示复制按钮。
+- 复制成功后用 Check 图标反馈。
+- 高亮标题并截断长描述。
+- 为缺失描述提供 No description。
+- 挂载 ItemActionsMenu。
+
+## 执行思路
+
+1. DataTable 调用 ID 列 cell。
+2. CopyId 读取复制 Hook。
+3. 用户点击按钮复制 UUID。
+4. Hook 更新 copiedText。
+5. 当前行切换为成功图标。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `useCopyToClipboard` | 封装 Clipboard API 与状态。 |
+| `Common/DataTable` | 渲染列定义。 |
+| `ItemActionsMenu` | 行级操作。 |
+| `cn` | 条件样式。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `copiedText` | 最近复制成功的字符串。 |
+| `isCopied` | 当前行 id 是否等于 copiedText。 |
+| `columns` | ItemPublic 的 ColumnDef 数组。 |
+| `row.original` | 当前完整 Item。 |
+
+## 为什么把 CopyId 写成组件
+
+React Hook 只能在 React 组件或自定义 Hook 顶层调用。`cell: ({ row }) => ...` 虽然返回 JSX，但把有 Hook 的逻辑抽成 `<CopyId />` 更明确，也更容易独立测试。
+
+## 列呈现策略
+
+| 列 | 关键设计 |
+| --- | --- |
+| ID | 等宽字体、悬停复制、成功图标 |
+| Title | 较强字重，作为主要识别字段 |
+| Description | 最大宽度、截断、缺失占位 |
+| Actions | 右对齐菜单，隐藏视觉表头 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Items/columns.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="columns.tsx" lineNumbers
+import type { ColumnDef } from "@tanstack/react-table"
+import { Check, Copy } from "lucide-react"
+
+import type { ItemPublic } from "@/client"
+import { Button } from "@/components/ui/button"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
+import { cn } from "@/lib/utils"
+import { ItemActionsMenu } from "./ItemActionsMenu"
+
+// 独立单元格组件可以安全使用 Hook，并封装复制后的视觉反馈。
+function CopyId({ id }: { id: string }) {
+  const [copiedText, copy] = useCopyToClipboard()
+  // Hook 保存最近复制的文本；只在当前行 id 匹配时显示成功图标。
+  const isCopied = copiedText === id
+
+  return (
+    <div className="flex items-center gap-1.5 group">
+      <span className="font-mono text-xs text-muted-foreground">{id}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={() => copy(id)}
+      >
+        {isCopied ? (
+          <Check className="size-3 text-green-500" />
+        ) : (
+          <Copy className="size-3" />
+        )}
+        <span className="sr-only">Copy ID</span>
+      </Button>
+    </div>
+  )
+}
+
+// 业务列配置保持在模块顶层，供通用 DataTable 复用。
+export const columns: ColumnDef<ItemPublic>[] = [
+  {
+    accessorKey: "id",
+    header: "ID",
+    cell: ({ row }) => <CopyId id={row.original.id} />,
+  },
+  {
+    accessorKey: "title",
+    header: "Title",
+    cell: ({ row }) => (
+      <span className="font-medium">{row.original.title}</span>
+    ),
+  },
+  {
+    // 描述限制宽度并截断；缺失值使用斜体占位。
+    accessorKey: "description",
+    header: "Description",
+    cell: ({ row }) => {
+      const description = row.original.description
+      return (
+        <span
+          className={cn(
+            "max-w-xs truncate block text-muted-foreground",
+            !description && "italic",
+          )}
+        >
+          {description || "No description"}
+        </span>
+      )
+    },
+  },
+  {
+    // 非数据字段使用显式 id，表头仅对读屏器可见。
+    id: "actions",
+    header: () => <span className="sr-only">Actions</span>,
+    cell: ({ row }) => (
+      <div className="flex justify-end">
+        <ItemActionsMenu item={row.original} />
+      </div>
+    ),
+  },
+]
+```
+
+## 阅读重点
+
+- 复制按钮默认 opacity 0，键盘聚焦时也应显示；可增加 `focus-visible:opacity-100`。
+- 成功状态仅比较文本，多个相同 id 不会出现问题，因为 UUID 唯一。
+- 截断文本应考虑 title 属性或详情视图，避免用户无法读取完整描述。
+- `sr-only` 为纯图标复制按钮提供可访问名称。
+
+## Twoslash：列定义保持行类型
+
+```ts twoslash
+type ItemPublic = { id: string; title: string; description?: string | null }
+type ColumnDef<T> = { cell: (row: T) => unknown }
+
+const titleColumn: ColumnDef<ItemPublic> = {
+  cell: (row) => row.title,
+}
+//                 ^?
+```

@@ -1,0 +1,113 @@
+---
+title: "PendingUsers.tsx：用户表格骨架屏"
+description: "用结构化 Skeleton 模拟姓名、邮箱、角色 Badge、状态和操作按钮。"
+---
+
+<Callout type="idea" title="文件定位">
+
+用户表格包含普通文本、胶囊 Badge、状态圆点和图标按钮。该骨架按真实视觉结构建模，比整块灰色矩形更能稳定布局并传达即将出现的内容。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 复刻用户表格五列。
+- 使用不同形状模拟姓名和邮箱。
+- 使用圆角胶囊模拟角色 Badge。
+- 使用圆点与短线模拟状态。
+- 右对齐操作按钮占位。
+
+## 执行思路
+
+1. users 查询开始。
+2. 页面渲染 PendingUsers。
+3. 表格高度和列宽提前稳定。
+4. 数据完成后切换到用户 DataTable。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Admin route` | 用户查询加载分支。 |
+| `Admin/columns` | 真实列结构。 |
+| `ui/table / ui/skeleton` | 语义表格与占位组件。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `5 rows` | 默认加载占位数量。 |
+| `rounded-full role skeleton` | 模拟 Badge。 |
+| `status dot + line` | 模拟状态组合。 |
+| `sr-only Actions` | 保留表头可访问语义。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Pending/PendingUsers.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="PendingUsers.tsx" lineNumbers
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
+// 骨架结构严格对应用户表格的姓名、邮箱、角色、状态和操作列。
+const PendingUsers = () => (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>Full Name</TableHead>
+        <TableHead>Email</TableHead>
+        <TableHead>Role</TableHead>
+        <TableHead>Status</TableHead>
+        <TableHead>
+          <span className="sr-only">Actions</span>
+        </TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {/* 五行占位与常见默认页大小一致。 */}
+      {Array.from({ length: 5 }).map((_, index) => (
+        <TableRow key={index}>
+          <TableCell>
+            <Skeleton className="h-4 w-32" />
+          </TableCell>
+          <TableCell>
+            <Skeleton className="h-4 w-40" />
+          </TableCell>
+          <TableCell>
+            {/* 胶囊形 Skeleton 模拟角色 Badge。 */}
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </TableCell>
+          <TableCell>
+            {/* 圆点 + 文本模拟 Active/Inactive 状态。 */}
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-2 rounded-full" />
+              <Skeleton className="h-4 w-12" />
+            </div>
+          </TableCell>
+          <TableCell>
+            <div className="flex justify-end">
+              <Skeleton className="size-8 rounded-md" />
+            </div>
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+)
+
+export default PendingUsers
+```
+
+## 阅读重点
+
+- 骨架形状应反映真实组件类型，而不只是随机宽度。
+- 如果用户表格未来增删列，必须同步更新骨架。
+- 初始加载适合骨架；错误状态应切换到明确错误提示，而不是无限骨架。
+- 角色与状态骨架保持不同形状，帮助用户预期信息层级。

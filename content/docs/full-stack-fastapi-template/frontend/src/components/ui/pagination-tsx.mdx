@@ -1,0 +1,202 @@
+---
+title: "pagination.tsx：分页导航原语"
+description: "组合 nav、列表、当前页链接、前后翻页和省略号，并复用 Button 变体保持一致交互。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Pagination 只提供可访问结构和视觉部件，不计算总页数或当前页。上层表格/路由负责分页算法，再选择要渲染的页码。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提供 navigation 语义。
+- 组织页码列表。
+- 标记当前页。
+- 提供 Previous/Next。
+- 显示不可交互省略号。
+- 复用 Button variants。
+
+## 执行思路
+
+1. 上层计算页码模型。
+2. PaginationContent 渲染列表。
+3. PaginationLink 根据 isActive 设置样式与 aria-current。
+4. 用户点击链接后由路由或回调更新页码。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Button/buttonVariants` | 链接视觉。 |
+| `DataTable` | 当前项目主要使用自定义分页按钮。 |
+| `Router/Search params` | 可承载可分享页码状态。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Pagination` | `component` | nav 根。 |
+| `PaginationContent/Item` | `components` | 列表结构。 |
+| `PaginationLink` | `component` | 页码链接。 |
+| `PaginationPrevious/Next` | `components` | 前后翻页。 |
+| `PaginationEllipsis` | `component` | 省略页段。 |
+
+## 组合结构
+
+```tsx title="usage.tsx"
+<Pagination>
+  <PaginationContent>
+    <PaginationItem><PaginationPrevious href="?page=1" /></PaginationItem>
+    <PaginationItem><PaginationLink href="?page=2" isActive>2</PaginationLink></PaginationItem>
+    <PaginationItem><PaginationEllipsis /></PaginationItem>
+    <PaginationItem><PaginationNext href="?page=3" /></PaginationItem>
+  </PaginationContent>
+</Pagination>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/pagination.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="pagination.tsx" lineNumbers
+import * as React from "react"
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  MoreHorizontalIcon,
+} from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import { Button, buttonVariants } from "@/components/ui/button"
+
+// nav + aria-label 为分页控件建立明确的导航语义。
+function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
+  return (
+    <nav
+      role="navigation"
+      aria-label="pagination"
+      data-slot="pagination"
+      className={cn("mx-auto flex w-full justify-center", className)}
+      {...props}
+    />
+  )
+}
+
+function PaginationContent({
+  className,
+  ...props
+}: React.ComponentProps<"ul">) {
+  return (
+    <ul
+      data-slot="pagination-content"
+      className={cn("flex flex-row items-center gap-1", className)}
+      {...props}
+    />
+  )
+}
+
+function PaginationItem({ ...props }: React.ComponentProps<"li">) {
+  return <li data-slot="pagination-item" {...props} />
+}
+
+type PaginationLinkProps = {
+  isActive?: boolean
+} & Pick<React.ComponentProps<typeof Button>, "size"> &
+  React.ComponentProps<"a">
+
+// 当前页通过 aria-current="page" 与 active 变体同时表达。
+function PaginationLink({
+  className,
+  isActive,
+  size = "icon",
+  ...props
+}: PaginationLinkProps) {
+  return (
+    <a
+      aria-current={isActive ? "page" : undefined}
+      data-slot="pagination-link"
+      data-active={isActive}
+      className={cn(
+        buttonVariants({
+          variant: isActive ? "outline" : "ghost",
+          size,
+        }),
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// Previous/Next 复用 PaginationLink，并补充图标与响应式文字。
+function PaginationPrevious({
+  className,
+  ...props
+}: React.ComponentProps<typeof PaginationLink>) {
+  return (
+    <PaginationLink
+      aria-label="Go to previous page"
+      size="default"
+      className={cn("gap-1 px-2.5 sm:pl-2.5", className)}
+      {...props}
+    >
+      <ChevronLeftIcon />
+      <span className="hidden sm:block">Previous</span>
+    </PaginationLink>
+  )
+}
+
+function PaginationNext({
+  className,
+  ...props
+}: React.ComponentProps<typeof PaginationLink>) {
+  return (
+    <PaginationLink
+      aria-label="Go to next page"
+      size="default"
+      className={cn("gap-1 px-2.5 sm:pr-2.5", className)}
+      {...props}
+    >
+      <span className="hidden sm:block">Next</span>
+      <ChevronRightIcon />
+    </PaginationLink>
+  )
+}
+
+// 省略号是不可交互状态，sr-only 说明还有更多页。
+function PaginationEllipsis({
+  className,
+  ...props
+}: React.ComponentProps<"span">) {
+  return (
+    <span
+      aria-hidden
+      data-slot="pagination-ellipsis"
+      className={cn("flex size-9 items-center justify-center", className)}
+      {...props}
+    >
+      <MoreHorizontalIcon className="size-4" />
+      <span className="sr-only">More pages</span>
+    </span>
+  )
+}
+
+export {
+  Pagination,
+  PaginationContent,
+  PaginationLink,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext,
+  PaginationEllipsis,
+}
+```
+
+## 阅读重点
+
+- 当前实现 PaginationLink 使用 anchor props，实际导航应提供 href 或 asChild 路由 Link。
+- 禁用 Previous/Next 时需要阻止导航并表达 aria-disabled。
+- 页码算法不应在 UI 原语中硬编码。
+- 当前页必须同时有视觉状态和 aria-current。

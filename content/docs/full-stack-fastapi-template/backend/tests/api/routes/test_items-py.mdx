@@ -1,0 +1,229 @@
+---
+title: "test_items.py：Item 路由权限矩阵"
+description: "通过成功、404 与 403 场景验证 Item CRUD 的 HTTP 契约和资源所有权。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该模块从客户端视角验证 `/items` 端点。核心不是逐行复述实现，而是证明每个 CRUD 动作都同时满足响应结构、资源存在性与所有权授权规则。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 验证创建、单条读取、列表读取、更新和删除五类操作。
+- 对读取、更新、删除分别覆盖资源不存在的 404。
+- 对读取、更新、删除分别覆盖非所有者访问的 403。
+- 验证 UUID 在 JSON 中序列化为字符串，且 `owner_id` 不被客户端篡改。
+
+## 执行思路
+
+1. 使用 fixture 获得 TestClient、数据库会话和两类认证头。
+2. 用 `create_random_item()` 直接准备数据库前置状态。
+3. 从 HTTP 层调用真实端点。
+4. 断言状态码、错误信息或响应字段。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/api/routes/items.py` | 被测 HTTP 路由及所有权判断。 |
+| `tests/utils/item.py` | 创建随机 Item 测试数据。 |
+| `tests/conftest.py` | 提供客户端、会话与认证头 fixture。 |
+
+## 覆盖矩阵
+
+| 操作 | 成功 | 不存在 | 非所有者 |
+| --- | --- | --- | --- |
+| 创建 | ✅ | — | 由认证依赖控制 |
+| 读取 | ✅ | 404 | 403 |
+| 更新 | ✅ | 404 | 403 |
+| 删除 | ✅ | 404 | 403 |
+
+## 带注释源码
+
+> 原始路径：`backend/tests/api/routes/test_items.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="test_items.py" lineNumbers
+import uuid
+
+from fastapi.testclient import TestClient
+from sqlmodel import Session
+
+from app.core.config import settings
+from tests.utils.item import create_random_item
+
+
+# 创建路径：同时验证业务字段与服务端生成的主键、所有者字段。
+def test_create_item(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    data = {"title": "Foo", "description": "Fighters"}
+    response = client.post(
+        f"{settings.API_V1_STR}/items/",
+        headers=superuser_token_headers,
+        json=data,
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content["title"] == data["title"]
+    assert content["description"] == data["description"]
+    assert "id" in content
+    assert "owner_id" in content
+
+
+# 读取路径：先写入真实测试数据，再从 HTTP 层读取。
+def test_read_item(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    response = client.get(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content["title"] == item.title
+    assert content["description"] == item.description
+    assert content["id"] == str(item.id)
+    assert content["owner_id"] == str(item.owner_id)
+
+
+# 404 边界：随机 UUID 可稳定代表不存在的资源。
+def test_read_item_not_found(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    response = client.get(
+        f"{settings.API_V1_STR}/items/{uuid.uuid4()}",
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 404
+    content = response.json()
+    assert content["detail"] == "Item not found"
+
+
+# 403 边界：资源存在，但当前用户不是所有者。
+def test_read_item_not_enough_permissions(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    response = client.get(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=normal_user_token_headers,
+    )
+    assert response.status_code == 403
+    content = response.json()
+    assert content["detail"] == "Not enough permissions"
+
+
+# 列表路径：重点验证分页响应至少包含刚创建的数据。
+def test_read_items(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    create_random_item(db)
+    create_random_item(db)
+    response = client.get(
+        f"{settings.API_V1_STR}/items/",
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert len(content["data"]) >= 2
+
+
+# 更新路径：验证可修改字段变化，同时主键与 owner_id 保持不变。
+def test_update_item(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    data = {"title": "Updated title", "description": "Updated description"}
+    response = client.put(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=superuser_token_headers,
+        json=data,
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content["title"] == data["title"]
+    assert content["description"] == data["description"]
+    assert content["id"] == str(item.id)
+    assert content["owner_id"] == str(item.owner_id)
+
+
+# 更新不存在资源应返回 404，而不是静默创建。
+def test_update_item_not_found(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    data = {"title": "Updated title", "description": "Updated description"}
+    response = client.put(
+        f"{settings.API_V1_STR}/items/{uuid.uuid4()}",
+        headers=superuser_token_headers,
+        json=data,
+    )
+    assert response.status_code == 404
+    content = response.json()
+    assert content["detail"] == "Item not found"
+
+
+# 非所有者不能通过 PUT 修改他人资源。
+def test_update_item_not_enough_permissions(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    data = {"title": "Updated title", "description": "Updated description"}
+    response = client.put(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=normal_user_token_headers,
+        json=data,
+    )
+    assert response.status_code == 403
+    content = response.json()
+    assert content["detail"] == "Not enough permissions"
+
+
+# 删除路径：验证成功消息；更严格测试还可再次查询数据库。
+def test_delete_item(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    response = client.delete(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content["message"] == "Item deleted successfully"
+
+
+# 删除不存在资源仍应明确返回 404。
+def test_delete_item_not_found(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    response = client.delete(
+        f"{settings.API_V1_STR}/items/{uuid.uuid4()}",
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 404
+    content = response.json()
+    assert content["detail"] == "Item not found"
+
+
+# 非所有者不能删除他人资源。
+def test_delete_item_not_enough_permissions(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    item = create_random_item(db)
+    response = client.delete(
+        f"{settings.API_V1_STR}/items/{item.id}",
+        headers=normal_user_token_headers,
+    )
+    assert response.status_code == 403
+    content = response.json()
+    assert content["detail"] == "Not enough permissions"
+```
+
+## 阅读重点
+
+- 把 404 与 403 分开测试很重要：前者表示资源不存在，后者表示资源存在但无权限。
+- 当前列表测试只断言数量下限；大型项目可进一步断言分页元数据与具体 ID。
+- 删除成功后可补充数据库查询，形成对持久化副作用的双重验证。

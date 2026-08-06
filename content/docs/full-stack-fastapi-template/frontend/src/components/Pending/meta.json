@@ -1,0 +1,8 @@
+{
+  "title": "Pending States",
+  "pages": [
+    "index",
+    "PendingItems-tsx",
+    "PendingUsers-tsx"
+  ]
+}

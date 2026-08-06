@@ -1,0 +1,10 @@
+{
+  "title": "Layout",
+  "pages": [
+    "index",
+    "admin-tsx",
+    "index-tsx",
+    "items-tsx",
+    "settings-tsx"
+  ]
+}

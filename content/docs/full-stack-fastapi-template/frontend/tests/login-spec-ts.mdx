@@ -1,0 +1,241 @@
+---
+title: "login.spec.ts：登录、退出与受保护路由守卫"
+description: "覆盖登录页可用性、正确/错误凭据、退出、匿名重定向和损坏令牌处理。"
+---
+
+<Callout type="idea" title="文件定位">
+
+登录测试不仅验证表单提交，还验证认证状态对整站路由访问的影响，是前后端安全链路的关键回归套件。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 通过 Playwright 浏览器测试覆盖 9 个独立用例。
+- 从用户可见行为出发验证页面，而不是直接读取 React 内部状态。
+- 用角色、标签、文本和稳定 test id 定位交互元素。
+- 同时覆盖成功路径、失败路径及该业务域的关键边界。
+- 让每个测试拥有可解释的前置状态与最终断言。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 准备环境变量、认证快照或随机测试数据。
+
+  </Step>
+  <Step>
+
+### 2. 导航到真实路由，等待页面进入可交互状态。
+
+  </Step>
+  <Step>
+
+### 3. 使用接近用户行为的定位器完成输入、点击和切换。
+
+  </Step>
+  <Step>
+
+### 4. 等待网络结果通过 UI 反馈呈现。
+
+  </Step>
+  <Step>
+
+### 5. 对可见内容、URL、ARIA 状态或持久化结果做断言。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Playwright test runner` | 提供 page、request、expect、生命周期钩子和并发隔离。 |
+| `auth.setup.ts` | 为默认受保护页面用例生成可复用登录状态。 |
+| `utils/privateApi.ts` | 在不依赖 UI 的情况下快速准备后端数据。 |
+| `utils/random.ts` | 生成低冲突邮箱、密码和业务字段。 |
+| `utils/user.ts` | 复用注册、登录和退出的用户级操作。 |
+
+## 覆盖矩阵
+
+| 场景 | 验证目标 |
+| --- | --- |
+| 表单可用性 | 字段为空、可编辑，主按钮和找回密码链接可见。 |
+| 正确凭据 | 进入首页并显示欢迎信息。 |
+| 错误凭据 | 错误邮箱或密码显示失败反馈。 |
+| 退出 | 菜单退出后回到登录页，受保护 URL 不可继续访问。 |
+| 路由守卫 | 未登录访问多个私有路由均重定向。 |
+| 损坏令牌 | 伪造 token 被清理并送回登录页。 |
+
+## 前置状态
+
+- 整份文件清空默认 storageState。
+- 正确凭据来自 config.ts。
+- 辅助函数统一填写和检查字段。
+- 受保护路由使用循环复用相同断言。
+
+## 定位器策略
+
+<Tabs items={['优先', '谨慎使用', '断言']}>
+  <Tab>表单字段用 test id 保持跨样式变化稳定，按钮和链接用 role。</Tab>
+  <Tab>错误文本是用户契约，但文案频繁变化时可增加错误区域 test id。</Tab>
+  <Tab>认证断言组合 URL、欢迎文本、本地 token 与重定向，避免单一信号误判。</Tab>
+</Tabs>
+
+```mermaid
+flowchart LR
+  Seed[准备数据 / 登录态] --> Route[page.goto]
+  Route --> Action[用户操作]
+  Action --> UI[等待界面反馈]
+  UI --> Assert[expect 断言]
+  Assert --> Isolation[测试结束并隔离状态]
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/tests/login.spec.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="login.spec.ts" lineNumbers
+import { expect, type Page, test } from "@playwright/test"
+import { firstSuperuser, firstSuperuserPassword } from "./config.ts"
+import { randomPassword } from "./utils/random.ts"
+
+// 清空默认登录快照，确保这一组从匿名会话开始。
+test.use({ storageState: { cookies: [], origins: [] } })
+
+// 把重复的凭据输入集中为用户动作，测试正文只描述场景差异。
+const fillForm = async (page: Page, email: string, password: string) => {
+  await page.getByTestId("email-input").fill(email)
+  await page.getByTestId("password-input").fill(password)
+}
+
+// 统一验证字段初始为空且可编辑，防止三个输入测试重复。
+const verifyInput = async (page: Page, testId: string) => {
+  const input = page.getByTestId(testId)
+  await expect(input).toBeVisible()
+  await expect(input).toHaveText("")
+  await expect(input).toBeEditable()
+}
+
+// 用例目标：Inputs are visible, empty and editable。
+test("Inputs are visible, empty and editable", async ({ page }) => {
+  await page.goto("/login")
+
+  await verifyInput(page, "email-input")
+  await verifyInput(page, "password-input")
+})
+
+// 用例目标：Log In button is visible。
+test("Log In button is visible", async ({ page }) => {
+  await page.goto("/login")
+
+  await expect(page.getByRole("button", { name: "Log In" })).toBeVisible()
+})
+
+// 用例目标：Forgot Password link is visible。
+test("Forgot Password link is visible", async ({ page }) => {
+  await page.goto("/login")
+
+  await expect(
+    page.getByRole("link", { name: "Forgot your password?" }),
+  ).toBeVisible()
+})
+
+// 用例目标：Log in with valid email and password 。
+test("Log in with valid email and password ", async ({ page }) => {
+  await page.goto("/login")
+
+  await fillForm(page, firstSuperuser, firstSuperuserPassword)
+  await page.getByRole("button", { name: "Log In" }).click()
+
+  await page.waitForURL("/")
+
+  await expect(
+    page.getByText("Welcome back, nice to see you again!"),
+  ).toBeVisible()
+})
+
+// 用例目标：Log in with invalid email。
+test("Log in with invalid email", async ({ page }) => {
+  await page.goto("/login")
+
+  await fillForm(page, "invalidemail", firstSuperuserPassword)
+  await page.getByRole("button", { name: "Log In" }).click()
+
+  await expect(page.getByText("Invalid email address")).toBeVisible()
+})
+
+// 用例目标：Log in with invalid password。
+test("Log in with invalid password", async ({ page }) => {
+  const password = randomPassword()
+
+  await page.goto("/login")
+  await fillForm(page, firstSuperuser, password)
+  await page.getByRole("button", { name: "Log In" }).click()
+
+  await expect(page.getByText("Incorrect email or password")).toBeVisible()
+})
+
+// 用例目标：Successful log out。
+test("Successful log out", async ({ page }) => {
+  await page.goto("/login")
+
+  await fillForm(page, firstSuperuser, firstSuperuserPassword)
+  await page.getByRole("button", { name: "Log In" }).click()
+
+  await page.waitForURL("/")
+
+  await expect(
+    page.getByText("Welcome back, nice to see you again!"),
+  ).toBeVisible()
+
+  await page.getByTestId("user-menu").click()
+  await page.getByRole("menuitem", { name: "Log out" }).click()
+  await page.waitForURL("/login")
+})
+
+// 用例目标：Logged-out user cannot access protected routes。
+test("Logged-out user cannot access protected routes", async ({ page }) => {
+  await page.goto("/login")
+
+  await fillForm(page, firstSuperuser, firstSuperuserPassword)
+  await page.getByRole("button", { name: "Log In" }).click()
+
+  await page.waitForURL("/")
+
+  await expect(
+    page.getByText("Welcome back, nice to see you again!"),
+  ).toBeVisible()
+
+  await page.getByTestId("user-menu").click()
+  await page.getByRole("menuitem", { name: "Log out" }).click()
+  await page.waitForURL("/login")
+
+  await page.goto("/settings")
+  await page.waitForURL("/login")
+})
+
+// 用例目标：Redirects to /login when token is wrong。
+test("Redirects to /login when token is wrong", async ({ page }) => {
+  await page.goto("/settings")
+  // 人为写入无效 token，验证客户端和路由能拒绝损坏会话。
+  await page.evaluate(() => {
+    localStorage.setItem("access_token", "invalid_token")
+  })
+  await page.goto("/settings")
+  await page.waitForURL("/login")
+  await expect(page).toHaveURL("/login")
+})
+```
+
+## 阅读重点
+
+- 登录页测试必须禁用预生成快照，否则访问 `/login` 可能被路由守卫直接送走。
+- 错误邮箱和错误密码应返回相同级别反馈，避免泄露账号是否存在。
+- 受保护路由列表是安全回归清单，新增私有页面时应同步更新。
+- 伪造 token 场景能捕获“localStorage 有值就视为登录”的脆弱实现。
+
+## 为什么这是端到端测试
+
+这里实际启动浏览器并穿过路由、表单、生成客户端、后端 API 与数据库。它比单元测试更慢，但能捕获“各层单独正确、组合后却失败”的问题。

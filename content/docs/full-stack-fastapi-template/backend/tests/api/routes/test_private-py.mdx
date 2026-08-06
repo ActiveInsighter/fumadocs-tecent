@@ -1,0 +1,74 @@
+---
+title: "test_private.py：测试环境私有端点"
+description: "验证仅在测试配置下开放的用户创建辅助端点。"
+---
+
+<Callout type="warn" title="文件定位">
+
+模板在测试环境挂载 `private` 路由，便于端到端测试快速准备用户。该测试确保辅助端点能创建用户，同时提醒生产环境绝不能暴露同类绕过正常注册策略的接口。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 生成随机邮箱、密码和姓名。
+- 调用 `/private/users/` 创建用户。
+- 验证 HTTP 响应字段。
+- 从数据库再次读取并验证持久化结果。
+
+## 执行思路
+
+1. 构造随机 UserCreate 数据。
+2. 调用测试专用路由。
+3. 断言 200 与返回邮箱。
+4. 按邮箱查询数据库，确认记录存在。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/api/routes/private.py` | 仅在 `ENVIRONMENT=local` 或测试条件下挂载的辅助路由。 |
+| `tests/utils/utils.py` | 提供随机字符串和邮箱。 |
+| `app/main.py / api/main.py` | 决定私有路由是否被包含。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/tests/api/routes/test_private.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="test_private.py" lineNumbers
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from app.core.config import settings
+from app.models import User
+
+
+# 私有端点只用于测试环境：创建随机用户并验证响应与数据库一致。
+def test_create_user(client: TestClient, db: Session) -> None:
+    r = client.post(
+        f"{settings.API_V1_STR}/private/users/",
+        json={
+            "email": "pollo@listo.com",
+            "password": "password123",
+            "full_name": "Pollo Listo",
+        },
+    )
+
+    assert r.status_code == 200
+
+    data = r.json()
+
+    user = db.exec(select(User).where(User.id == data["id"])).first()
+
+    assert user
+    assert user.email == "pollo@listo.com"
+    assert user.full_name == "Pollo Listo"
+```
+
+## 阅读重点
+
+- 测试辅助端点必须受环境开关保护。
+- 端到端测试便利性不能以生产安全为代价。
+- 更严格测试可增加“生产配置下路由不存在”的断言。

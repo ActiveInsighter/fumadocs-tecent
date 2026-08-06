@@ -1,0 +1,103 @@
+---
+title: "skeleton.tsx：轻量加载占位块"
+description: "用一个可组合的 div 提供脉冲式骨架屏基础原语。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Skeleton 不知道数据结构，也不负责请求状态。它只提供统一的背景、圆角与脉冲动画，业务组件按真实内容布局组合多个占位块。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 渲染语义中性的 div 占位元素。
+- 提供统一的 `animate-pulse` 加载反馈。
+- 允许调用方覆盖宽高、圆角和布局。
+- 通过 `data-slot` 暴露稳定样式钩子。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 父组件判断数据仍在加载。
+
+  </Step>
+  <Step>
+
+### 2. 按最终内容尺寸放置 Skeleton。
+
+  </Step>
+  <Step>
+
+### 3. 默认样式显示脉冲动画。
+
+  </Step>
+  <Step>
+
+### 4. 数据就绪后由真实组件替换占位块。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `PendingItems / PendingUsers` | 组合多个 Skeleton 模拟表格。 |
+| `cn` | 合并默认类与调用方类。 |
+| `Tailwind CSS` | 提供背景、圆角和动画工具类。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Skeleton` | `component` | 通用矩形占位块，继承 div 的所有属性。 |
+
+## 组合结构
+
+<Files>
+  <File name="Skeleton">
+    <File name="data-slot=skeleton" />
+    <File name="bg-accent" />
+    <File name="animate-pulse" />
+    <File name="rounded-md" />
+  </File>
+</Files>
+
+```tsx title="典型组合"
+<div className="space-y-2">
+  <Skeleton className="h-6 w-48" />
+  <Skeleton className="h-4 w-full" />
+</div>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/skeleton.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="skeleton.tsx" lineNumbers
+import { cn } from "@/lib/utils"
+
+// 仅负责视觉占位；实际尺寸由调用方通过 className 决定。
+function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="skeleton"
+      // 合并默认脉冲动画与业务自定义尺寸、形状。
+      className={cn("bg-accent animate-pulse rounded-md", className)}
+      {...props}
+    />
+  )
+}
+
+export { Skeleton }
+```
+
+## 阅读重点
+
+- 骨架屏应尽量接近最终布局，减少内容出现时的布局跳动。
+- 不要在 Skeleton 内放真实文本；它是视觉占位，不是禁用态。
+- 对于屏幕阅读器，可在父加载区域配合 `aria-busy` 或隐藏说明。
+- 动画数量过多会增加视觉噪声，列表中应控制密度。

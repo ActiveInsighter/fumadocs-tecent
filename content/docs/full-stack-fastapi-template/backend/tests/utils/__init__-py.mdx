@@ -1,0 +1,36 @@
+---
+title: "utils/__init__.py：测试工具包边界"
+description: "说明随机数据和认证辅助函数的组织原则。"
+---
+
+<Callout type="idea" title="包边界">
+
+`tests.utils` 是测试代码的 Python 包。这个 `__init__.py` 刻意保持为空，只负责稳定包识别与导入路径，不在导入阶段执行测试准备、数据库连接或 fixture 注册。
+
+</Callout>
+
+## 为什么保留空文件
+
+- 明确该目录是可导入的 Python 包，便于 Pytest、编辑器和静态分析工具解析绝对导入。
+- 避免把共享 fixture 隐藏在包初始化中；共享 fixture 应放在 `conftest.py`。
+- 避免导入测试包时产生数据库写入、网络请求或环境变量修改等副作用。
+
+## 目录内的重要内容
+
+<Cards>
+  <Card href="./item-py" title="item.py">创建随机 Item。</Card>
+  <Card href="./user-py" title="user.py">创建随机用户并获取认证头。</Card>
+  <Card href="./utils-py" title="utils.py">随机字符串、随机邮箱和超级管理员 token。</Card>
+</Cards>
+
+## 源码
+
+```python title="__init__.py" lineNumbers
+# 仅声明 Python 包边界；测试初始化逻辑不应写在这里。
+```
+
+<Callout type="warn" title="保持导入可预测">
+
+工具函数应只负责准备数据，不应隐藏核心断言；否则测试失败时难以看出真正验证了什么。
+
+</Callout>

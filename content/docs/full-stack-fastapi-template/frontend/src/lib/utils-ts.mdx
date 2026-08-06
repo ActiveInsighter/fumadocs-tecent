@@ -1,0 +1,101 @@
+---
+title: "lib/utils.ts：Tailwind 类名合并函数"
+description: "组合 clsx 的条件类能力与 tailwind-merge 的冲突消解能力。"
+---
+
+<Callout type="idea" title="文件定位">
+
+`cn()` 是几乎所有 UI 原语的共同基础。它既接受字符串、数组、对象和条件值，又能识别 `px-2` 与 `px-4` 这类 Tailwind 冲突并保留后者。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 接收任意 ClassValue 输入。
+- 过滤 false、null、undefined 等条件值。
+- 展开数组和对象形式。
+- 消解同一 Tailwind 属性的冲突。
+- 返回最终 className 字符串。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 调用方传入默认类、条件类和 className。
+
+  </Step>
+  <Step>
+
+### 2. clsx 将结构化输入展平为字符串。
+
+  </Step>
+  <Step>
+
+### 3. twMerge 按 Tailwind 规则识别冲突。
+
+  </Step>
+  <Step>
+
+### 4. 后出现的有效类覆盖前面的冲突类。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `clsx` | 处理条件、数组和对象输入。 |
+| `tailwind-merge` | 识别 Tailwind 工具类冲突。 |
+| `所有 UI 原语` | 允许业务 className 覆盖默认样式。 |
+
+## 两阶段处理
+
+```mermaid
+flowchart LR
+  Inputs[字符串 / 数组 / 对象 / 条件值] --> Clsx[clsx 展平]
+  Clsx --> Merge[twMerge 冲突消解]
+  Merge --> Result[最终 className]
+```
+
+```ts title="示例"
+cn("px-2 text-sm", isActive && "font-bold", "px-4")
+// 结果保留 px-4，而不是同时输出 px-2 与 px-4
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/lib/utils.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="utils.ts" lineNumbers
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+// 第一步由 clsx 处理条件值，第二步由 twMerge 消解 Tailwind 冲突。
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```
+
+## 阅读重点
+
+- 只使用字符串拼接无法正确处理 Tailwind 冲突，`cn()` 解决了这一问题。
+- 参数顺序很重要：通常默认类在前，调用方 className 在后。
+- twMerge 只理解已知 Tailwind 规则，自定义复杂类可能需要配置扩展。
+- 该函数是纯函数，适合直接单元测试。
+
+## Twoslash：条件类输入的类型
+
+```ts twoslash
+// ---cut-start---
+type ClassValue = string | false | null | undefined
+function compact(...values: ClassValue[]) {
+  return values.filter(Boolean)
+}
+// ---cut-end---
+const classes = compact('px-4', false, 'text-sm', undefined)
+//    ^?
+```
+
+真实 `ClassValue` 还支持对象和嵌套数组，因此 `cn()` 比手写字符串拼接更灵活。

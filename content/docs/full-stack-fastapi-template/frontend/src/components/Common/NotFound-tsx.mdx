@@ -1,0 +1,89 @@
+---
+title: "NotFound.tsx：404 未找到页面"
+description: "为未匹配路由提供明确的 404 语义、可测试标识和返回首页入口。"
+---
+
+<Callout type="idea" title="文件定位">
+
+当 URL 没有对应页面时，应用应告诉用户“资源不存在”，而不是显示通用系统错误。这个组件承担路由级 notFound 视图。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 展示醒目的 404 状态。
+- 解释目标页面不存在。
+- 提供返回首页按钮。
+- 提供 data-testid 供 E2E 测试。
+- 保持布局在不同屏幕上居中。
+
+## 执行思路
+
+1. TanStack Router 无法匹配路径或显式触发 notFound。
+2. 渲染 NotFound 组件。
+3. 用户确认页面不存在。
+4. 点击 Go Back 返回首页。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Router notFoundComponent` | 路由配置入口。 |
+| `ErrorComponent` | 处理系统错误而非 404。 |
+| `Playwright tests` | 验证不存在路径行为。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `data-testid="not-found"` | 稳定测试选择器。 |
+| `Link to="/"` | 用户恢复导航。 |
+| `404` | 明确 HTTP/路由语义。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Common/NotFound.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="NotFound.tsx" lineNumbers
+import { Link } from "@tanstack/react-router"
+import { Button } from "@/components/ui/button"
+
+// 专门处理未匹配路由，与运行时 ErrorComponent 保持语义分离。
+const NotFound = () => {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center flex-col p-4"
+      data-testid="not-found"
+    >
+      <div className="flex items-center z-10">
+        <div className="flex flex-col ml-4 items-center justify-center p-4">
+          <span className="text-6xl md:text-8xl font-bold leading-none mb-4">
+            404
+          </span>
+          <span className="text-2xl font-bold mb-2">Oops!</span>
+        </div>
+      </div>
+
+      {/* 解释资源不存在，而不是暗示系统故障。 */}
+      <p className="text-lg text-muted-foreground mb-4 text-center z-10">
+        The page you are looking for was not found.
+      </p>
+      <div className="z-10">
+        {/* 返回首页是最稳定的恢复路径。 */}
+        <Link to="/">
+          <Button className="mt-4">Go Back</Button>
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+export default NotFound
+```
+
+## 阅读重点
+
+- 按钮文案 “Go Back” 实际导航到首页，不是浏览器历史后退；可改为 “Go Home” 提高准确性。
+- 404 页面应保持轻依赖，避免在错误路径上再次请求数据。
+- 若站点有搜索，可在此增加搜索入口和热门链接。
+- 服务端部署需保证未知前端路由仍交给 SPA，而真正资源 404 正确返回状态码。

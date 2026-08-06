@@ -1,0 +1,86 @@
+---
+title: "script.py.mako：迁移文件生成模板"
+description: "定义 Alembic 新 revision 的固定结构、版本标识和升级/回滚占位内容。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这不是直接运行的 Python 文件，而是 Alembic 使用 Mako 渲染的模板。执行 revision 生成命令时，占位符会被 revision ID、时间、导入和操作代码替换。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 统一每个迁移文件的模块文档和版本元数据格式。
+- 注入 Alembic、SQLAlchemy 与 SQLModel 类型依赖。
+- 为 `upgrade()` 与 `downgrade()` 预留生成内容。
+- 在没有生成操作时使用 `pass` 保持合法函数体。
+
+## 执行思路
+
+1. Alembic 比较当前数据库和目标模型元数据。
+2. 生成新的 revision ID、父 revision 与候选操作。
+3. Mako 用这些值渲染本模板。
+4. 新文件写入 `versions/`，随后必须人工审查。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `env.py` | 提供元数据和迁移上下文。 |
+| `versions/*.py` | 本模板渲染后的最终文件。 |
+| `Alembic autogenerate` | 负责向模板提供 upgrades、downgrades 与 imports。 |
+
+## 主要模板变量
+
+| 变量 | 生成后的含义 |
+| --- | --- |
+| `${message}` | 迁移说明文本 |
+| `${up_revision}` | 当前 revision ID |
+| `${down_revision}` | 直接父 revision |
+| `${imports}` | 自动生成操作需要的额外导入 |
+| `${upgrades}` | 升级操作代码 |
+| `${downgrades}` | 回滚操作代码 |
+
+## 带注释源码
+
+> 原始路径：`backend/app/alembic/script.py.mako`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```python title="script.py.mako" lineNumbers
+"""${message}
+
+# 这里的 `${...}` 是 Mako 占位符，生成 revision 时会被真实值替换。
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from alembic import op
+import sqlalchemy as sa
+import sqlmodel.sql.sqltypes
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+# `down_revision` 把单个文件连接成有向迁移链。
+revision = ${repr(up_revision)}
+down_revision = ${repr(down_revision)}
+branch_labels = ${repr(branch_labels)}
+depends_on = ${repr(depends_on)}
+
+
+def upgrade():
+    """把数据库从 down_revision 升级到当前 revision。"""
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade():
+    """撤销当前 revision，回到 down_revision。"""
+    ${downgrades if downgrades else "pass"}
+```
+
+## 阅读重点
+
+- `${...}` 是模板表达式，不是 Python f-string。
+- `upgrade()` 与 `downgrade()` 应尽量保持可逆，但数据删除有时无法真正恢复。
+- 生成结果必须审查；重命名列常被误判为“删除旧列 + 新建列”。

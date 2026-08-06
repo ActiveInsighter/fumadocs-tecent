@@ -1,0 +1,122 @@
+---
+title: "crud.py：可复用数据操作"
+description: "封装用户创建、更新、邮箱查询、认证和 Item 创建，并明确事务提交与密码安全边界。"
+---
+
+<Callout type="idea" title="文件定位">
+
+CRUD 层把多个路由都会使用的数据访问流程集中起来。它不是简单的 SQL 包装，还承担密码哈希升级与防时序攻击等安全职责。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 创建用户时把明文密码转换为哈希字段。
+- 更新时只应用已提交字段，并单独处理密码。
+- 认证失败时使用虚拟哈希减少邮箱枚举时序差异。
+- 认证成功时自动升级旧密码哈希。
+
+## 核心执行流程
+
+1. 输入模型通过 `model_validate` 转换为数据库实体。
+2. 把对象加入 Session 并提交事务。
+3. 刷新对象获取数据库生成字段。
+4. 认证时查询用户并验证密码。
+5. 如哈希器建议升级，则在同次登录中持久化新哈希。
+
+## 与其他模块的关系
+
+- **`models.py`**：提供输入模型和数据库实体。
+- **`core/security.py`**：提供哈希、验证与升级。
+- **路由模块**：复用一致的数据写入和认证行为。
+- **`core/db.py`**：初始化超级用户时复用创建函数。
+
+## 带注释源码
+
+> 原始路径：`backend/app/crud.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="crud.py" lineNumbers
+import uuid
+from typing import Any
+
+from sqlmodel import Session, select
+
+from app.core.security import get_password_hash, verify_password
+from app.models import Item, ItemCreate, User, UserCreate, UserUpdate
+
+
+def create_user(*, session: Session, user_create: UserCreate) -> User:
+    """创建用户，并把输入中的明文密码替换为安全哈希。"""
+    # UserCreate 没有 hashed_password 字段，使用 update 注入服务端派生值。
+    db_obj = User.model_validate(
+        user_create, update={"hashed_password": get_password_hash(user_create.password)}
+    )
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+
+def update_user(*, session: Session, db_user: User, user_in: UserUpdate) -> Any:
+    """部分更新用户；密码字段单独转换为 hashed_password。"""
+    # 未提交字段不参与更新。
+    user_data = user_in.model_dump(exclude_unset=True)
+    extra_data = {}
+    if "password" in user_data:
+        password = user_data["password"]
+        hashed_password = get_password_hash(password)
+        extra_data["hashed_password"] = hashed_password
+    db_user.sqlmodel_update(user_data, update=extra_data)
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
+
+
+def get_user_by_email(*, session: Session, email: str) -> User | None:
+    """按唯一邮箱查找用户。"""
+    statement = select(User).where(User.email == email)
+    session_user = session.exec(statement).first()
+    return session_user
+
+
+# Dummy hash to use for timing attack prevention when user is not found
+# This is an Argon2 hash of a random password, used to ensure constant-time comparison
+# 固定虚拟哈希用于不存在账号的密码验证，降低时序侧信道。
+DUMMY_HASH = "$argon2id$v=19$m=65536,t=3,p=4$MjQyZWE1MzBjYjJlZTI0Yw$YTU4NGM5ZTZmYjE2NzZlZjY0ZWY3ZGRkY2U2OWFjNjk"
+
+
+def authenticate(*, session: Session, email: str, password: str) -> User | None:
+    """认证用户，并在成功登录时渐进升级旧哈希。"""
+    db_user = get_user_by_email(session=session, email=email)
+    if not db_user:
+        # Prevent timing attacks by running password verification even when user doesn't exist
+        # This ensures the response time is similar whether or not the email exists
+        verify_password(password, DUMMY_HASH)
+        return None
+    verified, updated_password_hash = verify_password(password, db_user.hashed_password)
+    if not verified:
+        return None
+    # pwdlib 可建议新哈希，使算法升级无需强制所有用户立即重置密码。
+    if updated_password_hash:  # [!code focus]
+        db_user.hashed_password = updated_password_hash
+        session.add(db_user)
+        session.commit()
+        session.refresh(db_user)
+    return db_user
+
+
+def create_item(*, session: Session, item_in: ItemCreate, owner_id: uuid.UUID) -> Item:
+    """创建属于指定用户的 Item；所有权由服务端参数决定。"""
+    db_item = Item.model_validate(item_in, update={"owner_id": owner_id})
+    session.add(db_item)
+    session.commit()
+    session.refresh(db_item)
+    return db_item
+```
+
+## 阅读重点
+
+- 事务边界目前在 CRUD 函数内部；更复杂业务可由服务层统一管理事务。
+- 明文密码只应短暂存在于输入对象和函数调用栈。
+- 虚拟哈希让不存在用户与密码错误的计算路径更接近。

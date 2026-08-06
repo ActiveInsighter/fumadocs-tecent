@@ -1,0 +1,13 @@
+{
+  "title": "Common Components",
+  "pages": [
+    "index",
+    "Appearance-tsx",
+    "AuthLayout-tsx",
+    "DataTable-tsx",
+    "ErrorComponent-tsx",
+    "Footer-tsx",
+    "Logo-tsx",
+    "NotFound-tsx"
+  ]
+}

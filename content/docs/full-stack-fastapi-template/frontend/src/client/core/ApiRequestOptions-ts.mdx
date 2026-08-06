@@ -1,0 +1,83 @@
+---
+title: "ApiRequestOptions.ts：统一请求描述"
+description: "用一个泛型类型描述 URL、HTTP 方法、参数、请求体、错误映射与响应转换。"
+---
+
+<Callout type="idea" title="文件定位">
+
+生成的每个 SDK 方法不会直接拼 Axios 配置，而是先构造 `ApiRequestOptions`。请求执行器再统一处理路径参数、查询参数、鉴权、表单、响应转换和错误映射。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 约束 HTTP 方法和 URL。
+- 承载 path、query、headers、cookies 与 body。
+- 描述 formData、mediaType 和响应头读取。
+- 用泛型 `T` 约束 responseTransformer 的返回值。
+- 保存状态码到错误消息的映射。
+
+## 执行思路
+
+1. SDK 方法根据 OpenAPI operation 构造 options。
+2. request.ts 解析路径和查询参数。
+3. 请求体按 mediaType 序列化。
+4. 响应经过 transformer 后返回 T。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `sdk.gen.ts` | 为每个 API 端点创建具体 options。 |
+| `request.ts` | 消费 options 并发出 Axios 请求。 |
+| `OpenAPI.ts` | 提供全局 base URL、token 与 headers。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`frontend/src/client/core/ApiRequestOptions.ts`。以下仅增加学习性注释，不改变程序行为。
+
+```ts title="ApiRequestOptions.ts" lineNumbers
+// 生成 SDK 中每个端点都会被归一化为这一份请求描述。
+export type ApiRequestOptions<T = unknown> = {
+	readonly body?: any;
+	readonly cookies?: Record<string, unknown>;
+	readonly errors?: Record<number | string, string>;
+	readonly formData?: Record<string, unknown> | any[] | Blob | File;
+	readonly headers?: Record<string, unknown>;
+	readonly mediaType?: string;
+	// 使用字面量联合限制合法 HTTP 方法，避免任意字符串。
+	readonly method:
+		| 'DELETE'
+		| 'GET'
+		| 'HEAD'
+		| 'OPTIONS'
+		| 'PATCH'
+		| 'POST'
+		| 'PUT';
+	readonly path?: Record<string, unknown>;
+	readonly query?: Record<string, unknown>;
+	readonly responseHeader?: string;
+	readonly responseTransformer?: (data: unknown) => Promise<T>;
+	readonly url: string;
+};
+```
+
+## 阅读重点
+
+- 大量 `unknown`/`any` 来自通用生成器边界，业务层最终类型由 SDK 方法签名收窄。
+- `readonly` 防止请求执行中被意外修改。
+- 重新生成客户端时应通过生成器配置改行为，不要长期手改生成文件。
+
+## Twoslash：泛型返回类型
+
+```ts twoslash
+type Options<T> = {
+  responseTransformer?: (data: unknown) => Promise<T>
+}
+
+const options: Options<{ id: string }> = {}
+options.responseTransformer
+//      ^?
+```

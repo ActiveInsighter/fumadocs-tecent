@@ -1,0 +1,192 @@
+---
+title: "User.tsx：侧边栏用户菜单"
+description: "展示头像缩写、姓名、邮箱、设置入口与退出操作，并适配移动端弹出方向。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件将“当前用户摘要”和“账户操作菜单”封装成一个侧边栏 Footer 组件。`UserInfo` 避免在触发器和菜单标签中重复头像与文本结构。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 用姓名生成头像缩写。
+- 在狭窄空间中截断姓名与邮箱。
+- 打开用户下拉菜单。
+- 跳转到 Settings。
+- 调用认证 Hook 执行退出。
+- 根据移动端状态选择菜单方向并关闭侧栏。
+
+## 执行思路
+
+1. 接收当前 user。
+2. 无用户时直接返回 null。
+3. 触发器展示 UserInfo。
+4. DropdownMenu 根据屏幕尺寸定位。
+5. Settings 导航后关闭移动侧栏。
+6. Log Out 调用 `logout()` 清理会话。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `useAuth` | 提供 logout。 |
+| `getInitials` | 把 full_name 转换为头像文本。 |
+| `ui/avatar` | 头像容器与 fallback。 |
+| `ui/dropdown-menu` | 可访问的弹出菜单行为。 |
+| `ui/sidebar` | 菜单按钮和移动端状态。 |
+| `TanStack Router` | 跳转用户设置页。 |
+
+## 组件复用关系
+
+```mermaid
+flowchart LR
+  UserInfo --> Trigger[SidebarMenuButton]
+  UserInfo --> Label[DropdownMenuLabel]
+  Trigger --> Menu[DropdownMenuContent]
+  Menu --> Settings[/settings]
+  Menu --> Logout[useAuth.logout]
+```
+
+<Tabs items={['桌面端', '移动端']}>
+  <Tab>
+
+菜单从侧边栏右侧展开，主侧边栏保持可见。
+
+  </Tab>
+  <Tab>
+
+菜单从触发器底部展开；选择设置后同时关闭移动端 Sheet。
+
+  </Tab>
+</Tabs>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Sidebar/User.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="User.tsx" lineNumbers
+import { Link as RouterLink } from "@tanstack/react-router"
+import { ChevronsUpDown, LogOut, Settings } from "lucide-react"
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar"
+import useAuth from "@/hooks/useAuth"
+import { getInitials } from "@/utils"
+
+interface UserInfoProps {
+  fullName?: string
+  email?: string
+}
+
+// 同一份用户摘要同时复用于触发按钮和下拉菜单标签。
+function UserInfo({ fullName, email }: UserInfoProps) {
+  return (
+    <div className="flex items-center gap-2.5 w-full min-w-0">
+      <Avatar className="size-8">
+        <AvatarFallback className="bg-zinc-600 text-white">
+          {getInitials(fullName || "User")}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex flex-col items-start min-w-0">
+        <p className="text-sm font-medium truncate w-full">{fullName}</p>
+        <p className="text-xs text-muted-foreground truncate w-full">{email}</p>
+      </div>
+    </div>
+  )
+}
+
+// 用户菜单组合认证动作、路由跳转和响应式弹出方向。
+export function User({ user }: { user: any }) {
+  const { logout } = useAuth()
+  const { isMobile, setOpenMobile } = useSidebar()
+
+  // 认证数据尚未准备好或已退出时，不渲染占位菜单。
+  if (!user) return null
+
+  const handleMenuClick = () => {
+    if (isMobile) {
+      setOpenMobile(false)
+    }
+  }
+  // logout 负责清理凭据和缓存；此处只响应用户意图。
+  const handleLogout = async () => {
+    logout()
+  }
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              size="lg"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              data-testid="user-menu"
+            >
+              <UserInfo fullName={user?.full_name} email={user?.email} />
+              <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            // 移动端从底部展开更符合窄屏空间；桌面端在侧边栏右侧展开。
+            side={isMobile ? "bottom" : "right"}
+            align="end"
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="p-0 font-normal">
+              <UserInfo fullName={user?.full_name} email={user?.email} />
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <RouterLink to="/settings" onClick={handleMenuClick}>
+              <DropdownMenuItem>
+                <Settings />
+                User Settings
+              </DropdownMenuItem>
+            </RouterLink>
+            <DropdownMenuItem onClick={handleLogout}>
+              <LogOut />
+              Log Out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  )
+}
+```
+
+## 阅读重点
+
+- `user: any` 会丢失 OpenAPI 客户端已生成的用户类型，建议替换为 `UserPublic` 或更窄类型。
+- 异步函数 `handleLogout` 当前没有 await，可直接写成普通函数。
+- 头像 fallback 对空姓名使用 `User`，避免生成空内容。
+- 设置链接包裹 MenuItem 时要确认最终 DOM 不产生嵌套交互元素。
+
+## Twoslash：先收窄再读取用户
+
+```ts twoslash
+type User = { full_name?: string; email: string }
+
+function label(user: User | null) {
+  if (!user) return 'Guest'
+  user.email
+  //   ^?
+  return user.full_name ?? user.email
+}
+```

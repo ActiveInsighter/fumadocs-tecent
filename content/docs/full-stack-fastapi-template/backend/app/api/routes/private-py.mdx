@@ -1,0 +1,83 @@
+---
+title: "private.py：本地开发私有接口"
+description: "提供仅在 local 环境注册的快速用户创建接口，用于开发和测试辅助。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是开发便利工具，不是正式用户注册流程。`api/main.py` 会确保它只在本地环境出现。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 快速创建测试用户。
+- 直接构造数据库实体并哈希密码。
+- 通过环境条件与公开 API 隔离。
+
+## 核心执行流程
+
+1. 本地环境注册 `/private` 路由。
+2. 请求体经 Pydantic 校验。
+3. 服务端哈希密码并创建 User。
+4. 提交事务并返回公开模型。
+
+## 与其他模块的关系
+
+- **`api/main.py`**：决定只在 local 环境注册。
+- **`core/security.py`**：哈希测试用户密码。
+- **`models.py`**：提供 User 与 UserPublic。
+
+## 带注释源码
+
+> 原始路径：`backend/app/api/routes/private.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="private.py" lineNumbers
+from typing import Any
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from app.api.deps import SessionDep
+from app.core.security import get_password_hash
+from app.models import (
+    User,
+    UserPublic,
+)
+
+# 该路由是否注册由 api/main.py 的环境判断控制。
+router = APIRouter(tags=["private"], prefix="/private")
+
+
+class PrivateUserCreate(BaseModel):
+    """仅用于本地调试的简化输入模型。"""
+    email: str
+    password: str
+    full_name: str
+    is_verified: bool = False
+
+
+@router.post("/users/", response_model=UserPublic)
+def create_user(user_in: PrivateUserCreate, session: SessionDep) -> Any:
+    """
+    Create a new user.
+    """
+
+    # 即使是调试接口，也不能把明文密码写入数据库。
+    user = User(
+        email=user_in.email,
+        full_name=user_in.full_name,
+        hashed_password=get_password_hash(user_in.password),
+    )
+
+    session.add(user)
+    session.commit()
+
+    return user
+```
+
+## 阅读重点
+
+- 绝不能在生产环境暴露绕过正式注册规则的接口。
+- 真实项目可进一步加调试密钥或完全移除该路由。
+- 返回模型会阻止 `hashed_password` 泄露。

@@ -1,0 +1,9 @@
+{
+  "title": "Sidebar Components",
+  "pages": [
+    "index",
+    "AppSidebar-tsx",
+    "Main-tsx",
+    "User-tsx"
+  ]
+}

@@ -1,0 +1,100 @@
+---
+title: "privateApi.ts：本地测试专用用户工厂"
+description: "配置生成客户端并调用仅本地可用的 PrivateService 快速创建已验证用户。"
+---
+
+<Callout type="idea" title="文件定位">
+
+复杂页面测试需要大量不同身份。通过测试专用 API 准备数据，比每次走注册 UI 更快，但该能力必须严格限制在本地/测试环境。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 在 Node 测试进程中设置 OpenAPI.BASE。
+- 封装 PrivateService.createUser。
+- 生成默认姓名与已验证状态。
+- 返回生成客户端的类型化用户结果。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. spec 生成随机邮箱与密码。
+
+  </Step>
+  <Step>
+
+### 2. createUser 组装 requestBody。
+
+  </Step>
+  <Step>
+
+### 3. PrivateService 调用后端测试路由。
+
+  </Step>
+  <Step>
+
+### 4. 后端直接创建已验证用户。
+
+  </Step>
+  <Step>
+
+### 5. spec 再用浏览器登录并测试目标页面。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `generated client` | 提供 OpenAPI 配置与 PrivateService 类型。 |
+| `backend private route` | 只在本地环境暴露数据准备能力。 |
+| `admin/items/settings specs` | 快速创建普通测试用户。 |
+| `VITE_API_URL` | 确定测试后端根地址。 |
+
+<Callout type="error" title="仅限隔离测试环境">
+
+PrivateService 能创建已验证用户，相当于绕过正常注册与邮件验证。生产构建和生产 OpenAPI 中必须不存在这项能力。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/tests/utils/privateApi.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="privateApi.ts" lineNumbers
+// PrivateService 只在本地生成客户端中存在，绝不能作为生产公开 API。 is only available when generating the client
+// for local environments
+import { OpenAPI, PrivateService } from "../../src/client"
+
+// Playwright Node 进程不会经过 main.tsx，因此在这里独立设置客户端根地址。
+OpenAPI.BASE = `${process.env.VITE_API_URL}`
+
+// 测试数据工厂：创建已验证普通用户，跳过注册和邮件验证步骤。
+export const createUser = async ({
+  email,
+  password,
+}: {
+  email: string
+  password: string
+}) => {
+  return await PrivateService.createUser({
+    requestBody: {
+      email,
+      password,
+      is_verified: true,
+      full_name: "Test User",
+    },
+  })
+}
+```
+
+## 阅读重点
+
+- 测试专用接口若误部署生产会形成严重安全漏洞，应由环境条件从 OpenAPI 和路由中移除。
+- 直接数据准备不替代注册流程测试；注册页仍有独立 spec。
+- OpenAPI.BASE 在模块导入时设置，要求环境变量在测试加载前就存在。
+- 返回用户对象可用于后续断言原始姓名、ID 等服务端值。

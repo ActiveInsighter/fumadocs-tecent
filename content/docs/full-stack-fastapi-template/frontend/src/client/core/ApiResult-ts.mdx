@@ -1,0 +1,55 @@
+---
+title: "ApiResult.ts：标准化 HTTP 响应快照"
+description: "将响应体、成功标记、状态码、状态文本和最终 URL 统一为轻量结果类型。"
+---
+
+<Callout type="idea" title="文件定位">
+
+请求执行器会把 AxiosResponse 转换成 `ApiResult`，让错误构造和后续处理不必依赖 Axios 的完整对象结构。泛型 `TData` 表示响应体类型。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 保存已经解析的响应体。
+- 用 `ok` 表示状态是否成功。
+- 保留 status、statusText 与最终 URL。
+- 为 ApiError 提供最小响应上下文。
+
+## 执行思路
+
+1. Axios 返回响应。
+2. request.ts 提取必要字段。
+3. 成功响应返回 body。
+4. 失败响应使用 ApiResult 构造 ApiError。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `request.ts` | 创建 ApiResult。 |
+| `ApiError.ts` | 读取结果并保存错误上下文。 |
+| `AxiosResponse` | 被适配和简化的底层响应类型。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`frontend/src/client/core/ApiResult.ts`。以下仅增加学习性注释，不改变程序行为。
+
+```ts title="ApiResult.ts" lineNumbers
+// Axios 响应被压缩为与具体传输库无关的稳定结果形状。
+export type ApiResult<TData = any> = {
+	readonly body: TData;
+	readonly ok: boolean;
+	readonly status: number;
+	readonly statusText: string;
+	readonly url: string;
+};
+```
+
+## 阅读重点
+
+- `ok` 通常由 2xx 状态码计算，不能只看 body 是否存在。
+- 泛型默认 any 是生成器兼容选择，业务代码应依赖具体 SDK 返回类型。
+- 保留最终 URL 对重定向和查询参数调试很有帮助。

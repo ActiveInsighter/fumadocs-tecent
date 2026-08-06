@@ -1,0 +1,12 @@
+{
+  "title": "Tests",
+  "pages": [
+    "index",
+    "api",
+    "crud",
+    "scripts",
+    "utils",
+    "__init__-py",
+    "conftest-py"
+  ]
+}

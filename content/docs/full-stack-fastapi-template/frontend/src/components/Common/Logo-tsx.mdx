@@ -1,0 +1,150 @@
+---
+title: "Logo.tsx：主题感知的品牌标志"
+description: "根据主题与使用场景选择深浅色资源，并支持完整、图标和侧边栏响应式三种形态。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Logo 不只是图片：它需要根据实际明暗主题选择资源，在侧边栏折叠时切换形态，并允许某些场景禁用首页链接。该组件集中处理这些差异。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 根据 resolvedTheme 选择深色或浅色 SVG。
+- 支持 full、icon、responsive 三种 variant。
+- 响应侧边栏 collapsible data 属性。
+- 通过 className 允许外部调整尺寸。
+- 按 asLink 决定是否包裹 TanStack Router Link。
+
+## 执行思路
+
+1. 读取 resolvedTheme。
+2. 选择对应的 fullLogo 与 iconLogo。
+3. 根据 variant 构造图片内容。
+4. responsive 模式随侧边栏折叠切换显示。
+5. 需要导航时包裹 Link。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `theme-provider` | 提供 resolvedTheme。 |
+| `AppSidebar / AuthLayout` | 分别使用 responsive 与 full。 |
+| `TanStack Router Link` | 首页导航。 |
+| `SVG assets` | 深浅色品牌资源。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `variant` | 决定输出完整 Logo、图标或双资源响应式结构。 |
+| `resolvedTheme` | system 解析后的真实主题。 |
+| `asLink` | 是否具有返回首页的导航语义。 |
+| `className` | 外部尺寸和样式扩展。 |
+
+## Variant 对比
+
+| variant | 输出 | 适用场景 |
+| --- | --- | --- |
+| `full` | 完整文字标志 | 登录页、大空间 Header |
+| `icon` | 单独图标 | 紧凑按钮或小空间 |
+| `responsive` | 同时渲染两张图并用 CSS 切换 | 可折叠侧边栏 |
+
+<Callout type="info" title="为什么读取 resolvedTheme？">
+
+当用户选择 `system` 时，`theme` 仍是 system，无法直接决定使用哪张图片；`resolvedTheme` 已根据系统媒体查询解析为 light 或 dark。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Common/Logo.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="Logo.tsx" lineNumbers
+import { Link } from "@tanstack/react-router"
+
+import { useTheme } from "@/components/theme-provider"
+import { cn } from "@/lib/utils"
+import icon from "/assets/images/fastapi-icon.svg"
+import iconLight from "/assets/images/fastapi-icon-light.svg"
+import logo from "/assets/images/fastapi-logo.svg"
+import logoLight from "/assets/images/fastapi-logo-light.svg"
+
+// variant 控制完整 Logo、图标或随侧边栏折叠自动切换。
+interface LogoProps {
+  variant?: "full" | "icon" | "responsive"
+  className?: string
+  asLink?: boolean
+}
+
+export function Logo({
+  variant = "full",
+  className,
+  asLink = true,
+}: LogoProps) {
+  // 使用 resolvedTheme 而不是 theme，确保 system 模式下选择正确资源。
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
+
+  const fullLogo = isDark ? logoLight : logo
+  const iconLogo = isDark ? iconLight : icon
+
+  // 先构造纯图片内容，再根据 asLink 决定是否包裹路由链接。
+  const content =
+    // responsive 版本借助 Sidebar 的 group data 属性切换完整标志与图标。
+    variant === "responsive" ? (
+      <>
+        <img
+          src={fullLogo}
+          alt="FastAPI"
+          className={cn(
+            "h-6 w-auto group-data-[collapsible=icon]:hidden",
+            className,
+          )}
+        />
+        <img
+          src={iconLogo}
+          alt="FastAPI"
+          className={cn(
+            "size-5 hidden group-data-[collapsible=icon]:block",
+            className,
+          )}
+        />
+      </>
+    ) : (
+      <img
+        src={variant === "full" ? fullLogo : iconLogo}
+        alt="FastAPI"
+        className={cn(variant === "full" ? "h-6 w-auto" : "size-5", className)}
+      />
+    )
+
+  // 登录页品牌面板可关闭链接语义，避免无意义点击。
+  if (!asLink) {
+    return content
+  }
+
+  return <Link to="/">{content}</Link>
+}
+```
+
+## 阅读重点
+
+- 图片 alt 使用品牌名，作为链接时可形成可访问名称。
+- responsive 模式同时渲染两张图，切换即时但会多一个 DOM 节点。
+- 主题资源命名应保持规则，便于未来品牌替换。
+- asLink=false 时返回 React Fragment 或 img，调用方不应假设根节点固定为 anchor。
+
+## Twoslash：判别联合限制 Variant
+
+```ts twoslash
+type LogoVariant = 'full' | 'icon' | 'responsive'
+
+function imageFor(variant: LogoVariant) {
+  return variant === 'full' ? 'logo.svg' : 'icon.svg'
+}
+
+imageFor('responsive')
+//       ^?
+```

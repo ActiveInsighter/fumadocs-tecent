@@ -1,0 +1,88 @@
+---
+title: "post_gen_project.py：统一 Shell 脚本换行符"
+description: "Copier 生成后递归把所有 .sh 文件的 CRLF 转换为 LF。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Windows 上生成模板时，Shell 文件若保留 CRLF，Linux 容器可能出现 `/usr/bin/env: bash\r`。该钩子在项目交付前消除这一差异。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 递归查找所有 `.sh` 文件。
+- 以字节读取完整文件。
+- 把 CRLF 替换为 LF。
+- 覆盖写回原路径。
+- 保持操作幂等。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. Copier 完成模板渲染。
+
+  </Step>
+  <Step>
+
+### 2. 从生成项目根目录执行钩子。
+
+  </Step>
+  <Step>
+
+### 3. glob 找到每个 Shell 文件。
+
+  </Step>
+  <Step>
+
+### 4. 执行字节级换行替换。
+
+  </Step>
+  <Step>
+
+### 5. 写回可在 Unix 环境执行的脚本。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Copier` | 在 post generation 阶段调用。 |
+| `Shell scripts` | 需要 LF 才能可靠进入 Linux shebang 解释器。 |
+| `Windows Git/editor` | 可能生成或转换为 CRLF。 |
+| `Docker/Linux CI` | 消费规范化后的脚本。 |
+
+<Callout type="warn" title="典型故障">
+
+Shell 文件首行若实际是 `#!/usr/bin/env bash\r\n`，Linux 会把解释器名称解析成带 `\r` 的 `bash\r`，从而报告找不到命令。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`hooks/post_gen_project.py`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```python title="post_gen_project.py" lineNumbers
+from pathlib import Path
+
+
+path: Path
+# 递归遍历所有生成后的 Shell 脚本，不依赖固定目录结构。
+for path in Path(".").glob("**/*.sh"):
+    # 以字节读取，避免文本模式自动换行转换造成平台差异。
+    data = path.read_bytes()
+    # 只把 Windows CRLF 替换为 Unix LF；已有 LF 内容保持不变。
+    lf_data = data.replace(b"\r\n", b"\n")
+    path.write_bytes(lf_data)
+```
+
+## 阅读重点
+
+- 字节模式避免 Python universal newline 干扰，意图非常明确。
+- 重复运行不会继续改变 LF 文件，因此适合钩子。
+- 当前无异常恢复；生成目录不可写时应让 Copier 明确失败。
+- 也可配合 `.gitattributes` 的 `*.sh text eol=lf` 形成双重保障。

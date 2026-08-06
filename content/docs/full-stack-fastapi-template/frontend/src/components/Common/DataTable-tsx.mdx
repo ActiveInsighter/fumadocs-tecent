@@ -1,0 +1,308 @@
+---
+title: "DataTable.tsx：通用分页数据表格"
+description: "用 TanStack Table 计算行模型，并用 shadcn Table 渲染表头、单元格、空状态和分页控制。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是 Admin 与 Items 页面共享的通用表格壳。列的业务呈现由外部 `columns` 决定；本组件只负责表格结构、flexRender、客户端分页、页大小和导航按钮。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 接受任意强类型 data 与 ColumnDef。
+- 计算核心行模型与分页行模型。
+- 渲染分组表头和可见单元格。
+- 提供统一空状态。
+- 显示当前范围、页码、页大小和首尾页导航。
+- 为图标按钮提供 sr-only 无障碍名称。
+
+## 执行思路
+
+1. 调用方传入 data 与 columns。
+2. useReactTable 生成 header groups 和 row model。
+3. flexRender 执行列中的 header/cell 定义。
+4. 分页状态决定当前可见行。
+5. 用户改变页码或 pageSize，表格重新计算。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `@tanstack/react-table` | 无头表格状态引擎。 |
+| `ui/table` | 语义化 HTML 表格组件。 |
+| `Admin/columns` | 用户表格业务列。 |
+| `Items/columns` | Item 表格业务列。 |
+| `ui/select + ui/button` | 分页交互。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `columns` | 外部声明的列访问和 cell 渲染规则。 |
+| `data` | 完整客户端数据数组。 |
+| `table` | TanStack Table 实例和分页状态。 |
+| `pagination.pageIndex` | 从 0 开始的当前页。 |
+| `pagination.pageSize` | 每页行数。 |
+
+## 泛型设计
+
+```ts
+DataTable<TData, TValue>
+```
+
+- `TData` 是每一行的完整对象类型。
+- `TValue` 是列访问器可能返回的值类型。
+- `ColumnDef<TData, TValue>[]` 与 `TData[]` 共用泛型，因此 cell 中的 `row.original` 能保持准确类型。
+
+## 分页范围计算
+
+设页索引为 `p`、每页行数为 `s`、总行数为 `n`：
+
+$$
+\text{start}=ps+1
+$$
+
+$$
+\text{end}=\min((p+1)s,n)
+$$
+
+<Callout type="info" title="当前是客户端分页">
+
+组件拿到的是完整 `data` 数组，再在浏览器中切页。数据量大时应改为服务端分页：页面状态进入 queryKey，后端接收 skip/limit，并返回 count。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Common/DataTable.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="DataTable.tsx" lineNumbers
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from "@tanstack/react-table"
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
+// 两个泛型分别代表行数据和列值，保持列定义与 data 强类型关联。
+interface DataTableProps<TData, TValue> {
+  columns: ColumnDef<TData, TValue>[]
+  data: TData[]
+}
+
+export function DataTable<TData, TValue>({
+  columns,
+  data,
+}: DataTableProps<TData, TValue>) {
+  // TanStack Table 只负责状态和行模型；实际 DOM 由下方 shadcn Table 渲染。
+  const table = useReactTable({
+    data,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  })
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Table>
+        <TableHeader>
+          {/* Header Group 支持未来的分组表头；placeholder 不渲染内容。 */}
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id} className="hover:bg-transparent">
+              {headerGroup.headers.map((header) => {
+                return (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
+                  </TableHead>
+                )
+              })}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody>
+          {/* 当前分页行模型为空时渲染跨全部列的空状态。 */}
+          {table.getRowModel().rows.length ? (
+            table.getRowModel().rows.map((row) => (
+              <TableRow key={row.id}>
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))
+          ) : (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={columns.length}
+                className="h-32 text-center text-muted-foreground"
+              >
+                No results found.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      {/* 只有超过一页时才展示分页区，减少单页界面噪声。 */}
+      {table.getPageCount() > 1 && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-t bg-muted/20">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="text-sm text-muted-foreground">
+              Showing{" "}
+              {table.getState().pagination.pageIndex *
+                table.getState().pagination.pageSize +
+                1}{" "}
+              to{" "}
+              {Math.min(
+                (table.getState().pagination.pageIndex + 1) *
+                  table.getState().pagination.pageSize,
+                data.length,
+              )}{" "}
+              of{" "}
+              <span className="font-medium text-foreground">{data.length}</span>{" "}
+              entries
+            </div>
+            <div className="flex items-center gap-x-2">
+              <p className="text-sm text-muted-foreground">Rows per page</p>
+              {/* 修改 pageSize 后 TanStack Table 会重新计算总页数与当前行模型。 */}
+              <Select
+                value={`${table.getState().pagination.pageSize}`}
+                onValueChange={(value) => {
+                  table.setPageSize(Number(value))
+                }}
+              >
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue
+                    placeholder={table.getState().pagination.pageSize}
+                  />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  {[5, 10, 25, 50].map((pageSize) => (
+                    <SelectItem key={pageSize} value={`${pageSize}`}>
+                      {pageSize}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-x-6">
+            <div className="flex items-center gap-x-1 text-sm text-muted-foreground">
+              <span>Page</span>
+              <span className="font-medium text-foreground">
+                {table.getState().pagination.pageIndex + 1}
+              </span>
+              <span>of</span>
+              <span className="font-medium text-foreground">
+                {table.getPageCount()}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-x-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => table.setPageIndex(0)}
+                disabled={!table.getCanPreviousPage()}
+              >
+                <span className="sr-only">Go to first page</span>
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                <span className="sr-only">Go to previous page</span>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                <span className="sr-only">Go to next page</span>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                disabled={!table.getCanNextPage()}
+              >
+                <span className="sr-only">Go to last page</span>
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+## 阅读重点
+
+- `getPageCount() > 1` 会在单页时隐藏 page size 选择；若产品希望始终可改每页数量，需要调整条件。
+- 空数据时 `colSpan={columns.length}` 保持占位覆盖整张表。
+- 大量数据不应一次性传入客户端，应切换为 manualPagination。
+- 当前没有 sorting/filtering row model；后续可按需要增加而不改变业务列文件。
+- 分页图标按钮全部有 sr-only 文本，键盘与读屏器可识别。
+
+## Twoslash：泛型列与行数据绑定
+
+```ts twoslash
+type ColumnDef<T> = {
+  cell: (row: T) => string
+}
+
+function makeTable<T>(data: T[], columns: ColumnDef<T>[]) {
+  return { data, columns }
+}
+
+const table = makeTable(
+  [{ id: '1', title: 'Book' }],
+  [{ cell: (row) => row.title }],
+)
+//    ^?
+```

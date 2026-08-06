@@ -1,0 +1,30 @@
+---
+title: "README：单数据库迁移环境"
+description: "解释 Alembic 生成的环境类型，以及这句简短说明在项目中的含义。"
+---
+
+<Callout title="文件定位">
+
+该文件来自 Alembic 初始化模板，声明当前目录采用 **generic single-database configuration**：一套迁移版本链对应一个主要数据库连接。
+
+</Callout>
+
+## 这意味着什么
+
+- `env.py` 每次从应用配置中取得一个 PostgreSQL URL。
+- 所有 revision 共享同一份 `SQLModel.metadata`。
+- `versions/` 中的 `down_revision` 形成一条主要迁移链。
+- 如果未来需要同时迁移多个独立数据库，必须扩展环境配置，而不是简单复制脚本。
+
+## 原始内容
+
+```text title="README"
+Generic single-database configuration.
+```
+
+## 相关文件
+
+<Cards>
+  <Card href="./env-py" title="env.py">单数据库连接真正被注入迁移上下文的位置。</Card>
+  <Card href="./versions" title="versions/">该数据库的全部结构版本。</Card>
+</Cards>

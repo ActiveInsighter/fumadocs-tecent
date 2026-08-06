@@ -1,0 +1,28 @@
+---
+title: "Core 核心基础设施"
+description: "集中管理配置、数据库连接和安全能力，为上层 API 与业务逻辑提供稳定依赖。"
+---
+
+## 文件组织
+
+<Files>
+  <Folder name="core" defaultOpen>
+    <File name="config.py — 从环境变量构建强类型 Settings" />
+    <File name="db.py — 创建 SQLModel 引擎并初始化超级用户" />
+    <File name="security.py — 生成 JWT、哈希和验证密码" />
+    <File name="__init__.py — 标记 Python 包" />
+  </Folder>
+</Files>
+
+## 设计原则
+
+- **集中配置**：上层模块只依赖 `settings`，不直接到处读取环境变量。
+- **单一引擎**：数据库引擎在进程内集中创建，会话则按请求产生和释放。
+- **安全封装**：路由不直接操作哈希算法或 JWT 库，而调用稳定的安全函数。
+- **依赖向下**：Core 不知道具体路由细节，减少耦合和循环导入。
+
+<Cards>
+  <Card href="./config-py" title="配置加载">环境变量解析、CORS、数据库 DSN、邮件和密钥检查。</Card>
+  <Card href="./db-py" title="数据库初始化">数据库引擎和首个超级用户的幂等创建。</Card>
+  <Card href="./security-py" title="安全工具">JWT 与可升级密码哈希。</Card>
+</Cards>

@@ -1,0 +1,163 @@
+---
+title: "test-docker-compose.yml：完整容器编排冒烟测试"
+description: "构建 Compose 镜像，等待核心服务健康，并用 curl 验证 API 与前端入口。"
+---
+
+<Callout type="idea" title="工作流定位">
+
+这个工作流不关心某个函数是否正确，而是验证“仓库按文档执行 docker compose 后能否真正启动并对外服务”。
+
+</Callout>
+
+## 这个工作流解决什么问题
+
+- 捕获 Dockerfile、构建上下文和依赖安装错误。
+- 验证 Compose 服务依赖与 healthcheck。
+- 确认后端健康检查可访问。
+- 确认统一入口能返回前端页面。
+- 每次清理卷和孤立容器。
+
+## 触发器与权限
+
+<Tabs items={['触发条件', '权限与 Secrets']}>
+  <Tab>
+
+| 配置 | 含义 |
+| --- | --- |
+| `push.master` | 默认分支持续验证可部署性。 |
+| `pull_request` | 编排变化合并前验证。 |
+
+  </Tab>
+  <Tab>
+
+| 权限或密钥 | 用途 |
+| --- | --- |
+| `contents: read` | 检出构建上下文。 |
+| `Docker daemon` | GitHub Runner 本地构建和启动容器。 |
+
+  </Tab>
+</Tabs>
+
+## 执行流程
+
+<Steps>
+  <Step>
+
+### 1. 检出仓库。
+
+  </Step>
+  <Step>
+
+### 2. 构建 Compose 中的镜像。
+
+  </Step>
+  <Step>
+
+### 3. 清理旧容器、网络和数据卷。
+
+  </Step>
+  <Step>
+
+### 4. 启动 backend 与 adminer，并等待健康。
+
+  </Step>
+  <Step>
+
+### 5. curl 后端 health-check。
+
+  </Step>
+  <Step>
+
+### 6. curl 根路径验证前端入口。
+
+  </Step>
+  <Step>
+
+### 7. 停止并清理所有资源。
+
+  </Step>
+</Steps>
+
+```mermaid
+flowchart LR
+  Repo[Repository] --> Build[docker compose build]
+  Build --> Clean[down -v]
+  Clean --> Up[up -d --wait]
+  Up --> Health[/api/v1/utils/health-check]
+  Up --> Root[/ frontend entry]
+  Health --> Cleanup[down -v]
+  Root --> Cleanup
+```
+
+## 设计思路
+
+- `--wait` 把 healthcheck 变成 CI 同步点，避免固定 sleep。
+- 只显式启动 backend 和 adminer，但 Compose 会自动拉起它们声明的依赖。
+- 同时测试 API 路径和根路径，可发现反向代理或静态前端接线错误。
+- 与 test-backend 分离，让应用逻辑失败和容器编排失败更容易区分。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `compose.yml` | 定义被测试的镜像、服务、网络与 healthcheck。 |
+| `backend health-check route` | 提供后端存活探针。 |
+| `playwright.yml` | 在完整环境上继续验证真实用户行为。 |
+| `test-backend.yml` | 更细粒度验证后端业务逻辑。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`.github/workflows/test-docker-compose.yml`。以下仅增加学习性注释，不改变触发器、权限、表达式或命令行为。
+
+```yaml title="test-docker-compose.yml" lineNumbers
+name: Test Docker Compose
+
+# 在 PR 和默认分支验证完整 Compose 编排。
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+permissions:
+  contents: read
+
+jobs:
+
+  test-docker-compose:
+    # 与后端测试不同，这里直接验证容器镜像和服务间连接。
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 构建所有项目镜像，捕获 Dockerfile 和构建上下文错误。
+      - run: docker compose build
+      - run: docker compose down -v --remove-orphans
+      # --wait 依赖 healthcheck，直到核心服务健康或超时。
+      - run: docker compose up -d --wait backend adminer
+      # 先访问专用健康检查，再验证根路径的前端代理。
+      - name: Test backend is up
+        run: curl http://localhost:8000/api/v1/utils/health-check
+      - name: Test frontend is up
+        run: curl http://localhost:8000
+      - run: docker compose down -v --remove-orphans
+```
+
+## 阅读重点
+
+- Compose build 成功不代表容器能健康启动。
+- health-check 路由是部署自动化的稳定探针。
+- 根路径通过 8000 端口访问，反映生产统一入口设计。
+- `down -v --remove-orphans` 同时清除旧版本遗留服务。
+
+<Callout type="warn" title="维护与安全边界">
+
+- 失败发生在最终 cleanup 前时可能留下资源；自托管 Runner 应使用 `if: always()` 或定期清理。
+- 冒烟测试只验证可达性，不替代 Playwright 用户流程和后端业务测试。
+- healthcheck 必须真实反映关键依赖状态，不能只返回固定 200。
+
+</Callout>

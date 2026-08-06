@@ -1,0 +1,108 @@
+---
+title: "test.sh：标准 Docker 集成测试生命周期"
+description: "构建、重置、启动 Compose，在后端容器运行测试，最后删除完整测试栈。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该脚本适合 CI 或需要完全可重复环境的本地运行。每次都从空卷开始，并在成功路径结束时清理资源。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 构建当前代码镜像。
+- 移除旧栈和卷。
+- 后台启动依赖。
+- 在 backend 容器执行测试入口。
+- 转交额外测试参数。
+- 结束时清理容器、卷和孤儿服务。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. build。
+
+  </Step>
+  <Step>
+
+### 2. down -v 清理历史状态。
+
+  </Step>
+  <Step>
+
+### 3. up -d 启动服务。
+
+  </Step>
+  <Step>
+
+### 4. exec -T backend 运行测试。
+
+  </Step>
+  <Step>
+
+### 5. 测试成功后 down -v。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Docker Compose` | 提供可重复的多服务环境。 |
+| `backend tests-start.sh` | 执行健康等待、预检查和 pytest。 |
+| `GitHub Actions` | 调用标准测试生命周期。 |
+| `test-local.sh` | 本地排错时保留容器的变体。 |
+
+## 与本地脚本的差异
+
+| 维度 | `test.sh` | `test-local.sh` |
+| --- | --- | --- |
+| Compose 命令 | `docker compose` | `docker-compose` |
+| 命令追踪 | `set -x` | 默认关闭 |
+| Linux 缓存清理 | 无 | 有 |
+| 成功后清理 | 是 | 否 |
+| 主要场景 | CI / 可重复运行 | 本地排错 |
+
+## 带注释源码
+
+> 原始路径：`scripts/test.sh`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```bash title="test.sh" lineNumbers
+#! /usr/bin/env sh
+
+# Exit in case of error
+# 任一步失败立即让 CI job 失败。
+set -e
+# 打印执行命令，便于在 CI 日志定位失败阶段。
+set -x
+
+# 使用当前提交构建所有测试镜像。
+docker compose build
+docker compose down -v --remove-orphans # Remove possibly previous broken stacks left hanging after an error
+# 后台启动完整服务栈，后续由 tests-start.sh 等待就绪。
+docker compose up -d
+docker compose exec -T backend bash scripts/tests-start.sh "$@"
+# 无论正常路径结束时都删除容器和卷，保持 CI runner 干净。
+docker compose down -v --remove-orphans
+```
+
+## 阅读重点
+
+- 当前 `set -e` 下若测试命令失败，结尾 down 不会执行；更健壮的版本可用 trap 保证清理。
+- 先 build 再 down 不影响正确性，但可根据缓存和服务占用调整顺序。
+- 删除卷提供数据库隔离，也会增加每次初始化成本。
+- `-T` 避免 CI 无 TTY 时失败。
+- `set -x` 不应打印包含秘密的命令或变量展开。
+
+## 可改进的清理模式
+
+```bash title="概念示例"
+cleanup() { docker compose down -v --remove-orphans; }
+trap cleanup EXIT
+```
+
+`trap ... EXIT` 能让测试失败时也执行清理；是否采用取决于 CI 调试时是否需要保留现场。

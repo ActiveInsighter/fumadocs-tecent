@@ -1,0 +1,90 @@
+---
+title: "GitHub Actions Workflows：仓库自动化目录"
+description: "按职责组织项目管理、部署、依赖守卫、标签、测试与安全扫描工作流。"
+---
+
+<Callout type="idea" title="目录定位">
+
+每个 YAML 文件是一条独立自动化流水线。本目录的 15 个工作流页面均已完成学习化整理，可从全景地图进入对应的触发器、权限、Jobs、Secrets、产物和失败边界分析。
+
+</Callout>
+
+## 目录结构
+
+<Files>
+  <Folder name=".github/workflows" defaultOpen>
+    <File name="add-to-project.yml" />
+    <File name="bump-pre-commit-hooks.yml" />
+    <File name="deploy-production.yml" />
+    <File name="deploy-staging.yml" />
+    <File name="detect-conflicts.yml" />
+    <File name="guard-dependencies.yml" />
+    <File name="issue-manager.yml" />
+    <File name="labeler.yml" />
+    <File name="latest-changes.yml" />
+    <File name="playwright.yml" />
+    <File name="pre-commit.yml" />
+    <File name="smokeshow.yml" />
+    <File name="test-backend.yml" />
+    <File name="test-docker-compose.yml" />
+    <File name="zizmor.yml" />
+  </Folder>
+</Files>
+
+## 如何组织
+
+| 类别 | 工作流 | 目标 |
+| --- | --- | --- |
+| 项目协作 | add-to-project, issue-manager, labeler | 自动管理 Issue/PR |
+| 发布部署 | deploy-production, deploy-staging, latest-changes | 环境部署与变更记录 |
+| 质量验证 | playwright, pre-commit, test-backend, test-docker-compose | 浏览器、静态和集成测试 |
+| 依赖维护 | bump-pre-commit-hooks, guard-dependencies | 更新并约束依赖 |
+| 仓库健康 | detect-conflicts, smokeshow, zizmor | 冲突、覆盖率和 Actions 安全 |
+
+<Callout type="warn" title="权限最小化">
+
+Actions 的 `permissions`、环境 secrets 和第三方 action 固定版本都是安全边界。工作流能写仓库或部署生产时，必须只授予所需权限。
+
+</Callout>
+
+## 组织原则
+
+- 一个工作流聚焦一个清晰责任。
+- 触发器限制到必要分支、路径或事件。
+- 权限采用最小授权。
+- 部署使用 GitHub Environments 区分 staging/production。
+- 依赖 action 固定到可信版本或 commit。
+- 测试工作流复用项目脚本，避免 CI 与本地命令分叉。
+
+## 完成状态
+
+<Callout type="tip" title="15 / 15 已整理">
+
+所有 GitHub Actions 工作流均已补充执行链路、权限模型、安全边界和带注释源码。建议先按职责阅读，再横向比较 `pull_request`、`pull_request_target` 与 `workflow_run` 三类事件。
+
+</Callout>
+
+## 推荐阅读顺序
+
+<Steps>
+  <Step>
+
+### 1. 先读 pre-commit/test-backend/test-docker-compose，理解质量门禁。
+
+  </Step>
+  <Step>
+
+### 2. 再读 playwright 和 smokeshow，理解 E2E 与覆盖率。
+
+  </Step>
+  <Step>
+
+### 3. 阅读 staging/production 部署，关注 secrets 和环境保护。
+
+  </Step>
+  <Step>
+
+### 4. 最后阅读项目管理、依赖守卫和安全扫描。
+
+  </Step>
+</Steps>

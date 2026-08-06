@@ -1,0 +1,170 @@
+---
+title: "card.tsx：卡片复合组件"
+description: "以根容器、Header、Title、Description、Action、Content 与 Footer 组成可自由组合的内容面板。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Card 采用“复合组件”而不是大量 props。调用方可以按需组合标题、说明、右上操作、正文和底部动作，DOM 结构清晰且容易扩展。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提供统一卡片边界与背景。
+- 组织标题、描述和右上 Action。
+- 为正文与 Footer 提供一致间距。
+- 使用 data-slot 支持上下文样式。
+- 保留原生 div 属性。
+
+## 执行思路
+
+1. Card 建立纵向容器。
+2. Header 检测是否存在 CardAction。
+3. Title/Description 填充主列。
+4. Content 渲染主体。
+5. Footer 放置操作或摘要。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `cn` | 样式覆盖。 |
+| `业务页面` | 自由组合卡片区块。 |
+| `Tailwind container query` | Header 自适应 Action。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Card` | `component` | 根容器。 |
+| `CardHeader` | `component` | 标题区布局。 |
+| `CardTitle` | `component` | 主标题。 |
+| `CardDescription` | `component` | 辅助说明。 |
+| `CardAction` | `component` | 右上操作。 |
+| `CardContent` | `component` | 正文。 |
+| `CardFooter` | `component` | 底部区域。 |
+
+## 组合结构
+
+<Files>
+  <Folder name="Card" defaultOpen>
+    <Folder name="CardHeader" defaultOpen>
+      <File name="CardTitle" />
+      <File name="CardDescription" />
+      <File name="CardAction" />
+    </Folder>
+    <File name="CardContent" />
+    <File name="CardFooter" />
+  </Folder>
+</Files>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/card.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="card.tsx" lineNumbers
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+// Card 根容器只提供边界、背景和垂直布局。
+function Card({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card"
+      className={cn(
+        "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// Header 使用容器查询和 has-data 选择器自动为 Action 留出第二列。
+function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-header"
+      className={cn(
+        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-title"
+      className={cn("leading-none font-semibold", className)}
+      {...props}
+    />
+  )
+}
+
+function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-description"
+      className={cn("text-muted-foreground text-sm", className)}
+      {...props}
+    />
+  )
+}
+
+// Action 被放到标题区右上角，不影响标题与描述的行结构。
+function CardAction({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-action"
+      className={cn(
+        "col-start-2 row-span-2 row-start-1 self-start justify-self-end",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+// Content 与 Footer 统一水平内边距，保持视觉基线。
+function CardContent({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-content"
+      className={cn("px-6", className)}
+      {...props}
+    />
+  )
+}
+
+function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-footer"
+      className={cn("flex items-center px-6 [.border-t]:pt-6", className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Card,
+  CardHeader,
+  CardFooter,
+  CardTitle,
+  CardAction,
+  CardDescription,
+  CardContent,
+}
+```
+
+## 阅读重点
+
+- 复合组件不会强制结构，团队应约定常见组合顺序。
+- CardTitle 当前是 div；若它是页面层级标题，调用方可通过 asChild 或自定义语义改进。
+- `has-data-[slot=card-action]` 依赖 Action 的 data-slot。
+- Card 只是视觉容器，不应滥用为所有页面区块。

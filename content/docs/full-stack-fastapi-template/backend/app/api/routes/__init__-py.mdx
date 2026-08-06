@@ -1,0 +1,39 @@
+---
+title: "__init__.py：Routes 包标识"
+description: "声明 routes 为 Python 包，具体路由由 api/main.py 显式导入和注册。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件不执行自动注册，避免仅仅导入包就改变全局路由表。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 建立路由模块命名空间。
+- 保持注册过程可追踪。
+- 允许每个路由模块独立导入与测试。
+
+## 核心执行流程
+
+1. 导入 `app.api.routes`。
+2. 初始化包但不产生副作用。
+3. `api/main.py` 显式导入需要的模块。
+
+## 与其他模块的关系
+
+- **`api/main.py`**：负责显式注册。
+- **同目录路由文件**：分别定义各业务接口。
+
+## 带注释源码
+
+> 原始路径：`backend/app/api/routes/__init__.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="__init__.py" lineNumbers
+# 路由模块在 api/main.py 中显式注册。
+```
+
+## 阅读重点
+
+- 路由自动发现虽然方便，但显式注册更容易审计生产暴露面。

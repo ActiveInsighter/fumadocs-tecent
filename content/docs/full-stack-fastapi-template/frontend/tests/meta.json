@@ -1,0 +1,15 @@
+{
+  "title": "Tests",
+  "pages": [
+    "index",
+    "utils",
+    "admin-spec-ts",
+    "auth-setup-ts",
+    "config-ts",
+    "items-spec-ts",
+    "login-spec-ts",
+    "reset-password-spec-ts",
+    "sign-up-spec-ts",
+    "user-settings-spec-ts"
+  ]
+}

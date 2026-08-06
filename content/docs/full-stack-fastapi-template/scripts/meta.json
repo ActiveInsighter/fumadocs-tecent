@@ -1,0 +1,10 @@
+{
+  "title": "Scripts",
+  "pages": [
+    "index",
+    "add_latest_release_date-py",
+    "generate-client-sh",
+    "test-local-sh",
+    "test-sh"
+  ]
+}

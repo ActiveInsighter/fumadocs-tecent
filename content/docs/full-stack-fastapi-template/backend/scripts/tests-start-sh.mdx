@@ -1,0 +1,58 @@
+---
+title: "tests-start.sh：测试容器编排入口"
+description: "先等待测试数据库可连接，再调用统一测试脚本并转发命令行参数。"
+---
+
+<Callout type="idea" title="测试编排">
+
+这是适合 Docker Compose 或 CI 的完整测试入口。它比直接运行 `test.sh` 多了一层基础设施探活，从而避免数据库启动竞态造成偶发失败。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 等待测试数据库接受查询。
+- 探活成功后调用统一的测试执行脚本。
+- 通过 `"$@"` 完整保留调用方参数边界。
+- 把任一步失败作为整个测试任务失败。
+
+## 执行思路
+
+1. 执行 `tests_pre_start.py`。
+2. 数据库不可用时自动重试，最终失败则退出。
+3. 数据库可用后运行 `test.sh`。
+4. Pytest 与 Coverage 的退出状态返回给 CI。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/tests_pre_start.py` | 提供数据库就绪检查。 |
+| `scripts/test.sh` | 执行真正的用例与覆盖率。 |
+| `Docker Compose / CI` | 通常直接调用本脚本。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/scripts/tests-start.sh`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```bash title="tests-start.sh" lineNumbers
+#! /usr/bin/env bash
+# 数据库探活或测试失败时立即退出。
+set -e
+# 回显命令，便于 CI 排错。
+set -x
+
+# 先消除测试进程和数据库启动之间的竞态。
+python app/tests_pre_start.py
+
+# 原样转发全部参数，使调用方可自定义覆盖率报告标题等信息。
+bash scripts/test.sh "$@"  # [!code highlight]
+```
+
+## 阅读重点
+
+- `"$@"` 比未加引号的 `$@` 更安全，能保持每个参数的原始边界。
+- 探活只验证连接，测试表结构仍应由环境初始化或迁移保证。
+- 把编排与测试本体分开，便于本地直接调用 `test.sh`。

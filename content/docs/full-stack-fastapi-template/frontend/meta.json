@@ -1,0 +1,10 @@
+{
+  "title": "Frontend",
+  "pages": [
+    "index",
+    "configuration",
+    "src",
+    "tests"
+  ],
+  "defaultOpen": true
+}

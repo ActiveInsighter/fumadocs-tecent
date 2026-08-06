@@ -1,0 +1,112 @@
+---
+title: "random.ts：低冲突测试数据工厂"
+description: "生成随机邮箱、密码、团队名、条目字段，并提供简单 slugify。"
+---
+
+<Callout type="idea" title="文件定位">
+
+E2E 测试常与历史数据或其他并发 worker 共用数据库。随机数据工厂降低唯一约束冲突，并让测试正文保持简洁。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 生成测试邮箱。
+- 生成团队名和密码。
+- 把文本转换为 slug。
+- 生成条目标题与描述。
+- 为日志保留可读业务前缀。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 调用 Math.random 生成小数。
+
+  </Step>
+  <Step>
+
+### 2. 转换为 base36 字符串。
+
+  </Step>
+  <Step>
+
+### 3. 截取随机片段。
+
+  </Step>
+  <Step>
+
+### 4. 拼接业务前缀或邮箱域名。
+
+  </Step>
+  <Step>
+
+### 5. 把结果传给数据工厂或表单。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `all Playwright specs` | 提供低冲突输入。 |
+| `backend validation` | 生成值必须持续满足 schema。 |
+| `database unique constraints` | 随机邮箱降低冲突概率。 |
+| `slug assertions` | slugify 提供可预测规范化结果。 |
+
+## 数据类型
+
+| 工厂 | 形状 | 用途 |
+| --- | --- | --- |
+| `randomEmail()` | `test_xxx@example.com` | 唯一账号 |
+| `randomPassword()` | base36 字符串 | 合法测试密码 |
+| `randomItemTitle()` | `Item xxx` | 表格行定位 |
+| `randomItemDescription()` | `Description xxx` | CRUD 内容 |
+| `slugify(text)` | 小写短横线 | URL/标识符 |
+
+## 带注释源码
+
+> 原始路径：`frontend/tests/utils/random.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="random.ts" lineNumbers
+// 基于 base36 随机片段生成满足唯一约束的测试邮箱。
+export const randomEmail = () =>
+  `test_${Math.random().toString(36).substring(7)}@example.com`
+
+export const randomTeamName = () =>
+  `Team ${Math.random().toString(36).substring(7)}`
+
+// 当前随机串长度通常足够，但测试 schema 改变时应同步约束。
+export const randomPassword = () => `${Math.random().toString(36).substring(2)}`
+
+// 把名称规范化为小写短横线形式，便于 URL 或标识符断言。
+export const slugify = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w-]+/g, "")
+
+// 业务字段使用易读前缀，失败日志中能快速识别测试数据。
+export const randomItemTitle = () =>
+  `Item ${Math.random().toString(36).substring(7)}`
+
+export const randomItemDescription = () =>
+  `Description ${Math.random().toString(36).substring(7)}`
+```
+
+## 阅读重点
+
+- Math.random 不是密码学随机数，但测试数据无需安全强度。
+- 随机测试仍应可复现；复杂故障可记录 seed 或使用可注入伪随机生成器。
+- substring 可能产生短值，密码最小长度提高后应显式补足。
+- 随机数据不能代替边界数据，空值、超长值和 Unicode 仍需专门用例。
+
+## Twoslash：所有工厂都返回字符串
+
+```ts twoslash
+const makeValue = () => `Item ${Math.random().toString(36)}`
+const value = makeValue()
+//    ^?
+```

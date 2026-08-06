@@ -1,0 +1,23 @@
+---
+title: "__init__.py：测试包边界"
+description: "说明 tests 目录作为 Python 包的作用，以及为什么不在初始化文件中创建测试数据。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件标记 `tests` 为 Python 包，使 `tests.utils.user` 等绝对导入在 Pytest、编辑器和静态检查器中保持一致。
+
+</Callout>
+
+## 设计原则
+
+- 保持初始化文件无副作用，测试发现阶段不连接数据库。
+- 公共 fixture 放在 `conftest.py`，而不是在包导入时创建。
+- 数据工厂放在 `tests/utils/`，便于按需导入。
+- 测试模块之间不要依赖执行顺序。
+
+## 源码
+
+```python title="__init__.py" lineNumbers
+# 只声明 `tests` 包，不在导入阶段创建 fixture 或测试数据。
+```

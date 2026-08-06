@@ -1,0 +1,116 @@
+---
+title: "9c0a5491：限制字符串字段长度"
+description: "把用户与项目的字符串列统一调整为 VARCHAR(255)，让数据库边界更明确。"
+---
+
+<Callout type="idea" title="迁移定位">
+
+该 revision 不新增表，而是收紧四个字符串列的数据库类型。它让数据库层和 API 层对最大长度的预期更一致。
+
+</Callout>
+
+## 版本关系
+
+| 字段 | 值 |
+| --- | --- |
+| 当前 revision | `9c0a54914c78` |
+| 父 revision | `e2412789c190` |
+| 执行方向 | `upgrade()` 向前，`downgrade()` 回退 |
+
+## Upgrade 的结构效果
+
+- 将 `user.email` 改为 `VARCHAR(255)`，保持非空。
+- 将 `user.full_name` 改为 `VARCHAR(255)`，继续允许为空。
+- 将 `item.title` 改为 `VARCHAR(255)`，保持非空。
+- 将 `item.description` 改为 `VARCHAR(255)`，继续允许为空。
+
+<Callout type="warn" title="收紧约束前先检查数据">
+
+可以先查询最大长度和超限行。迁移脚本没有自动截断数据，这是更安全的默认行为，因为静默截断可能破坏邮箱、标题或描述。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`backend/app/alembic/versions/9c0a54914c78_add_max_length_for_string_varchar_.py`。注释用于解释迁移意图，执行语句保持不变。
+
+```python title="9c0a54914c78_add_max_length_for_string_varchar_.py" lineNumbers
+"""Add max length for string(varchar) fields in User and Items models
+
+Revision ID: 9c0a54914c78
+Revises: e2412789c190
+Create Date: 2024-06-17 14:42:44.639457
+
+"""
+from alembic import op
+import sqlalchemy as sa
+import sqlmodel.sql.sqltypes
+
+
+# revision identifiers, used by Alembic.
+revision = '9c0a54914c78'
+down_revision = 'e2412789c190'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    """把四个业务字符串列收紧为 255 个字符。"""
+    # 登录标识必须非空，同时设置明确上限。
+    op.alter_column('user', 'email',  # [!code highlight]
+               existing_type=sa.String(),
+               type_=sa.String(length=255),
+               existing_nullable=False)
+
+    # Adjust the length of the full_name field in the User table
+    op.alter_column('user', 'full_name',
+               existing_type=sa.String(),
+               type_=sa.String(length=255),
+               existing_nullable=True)
+
+    # Adjust the length of the title field in the Item table
+    op.alter_column('item', 'title',
+               existing_type=sa.String(),
+               type_=sa.String(length=255),
+               existing_nullable=False)
+
+    # Adjust the length of the description field in the Item table
+    op.alter_column('item', 'description',
+               existing_type=sa.String(),
+               type_=sa.String(length=255),
+               existing_nullable=True)
+
+
+def downgrade():
+    """移除显式长度上限，恢复为通用 String。"""
+    # Revert the length of the email field in the User table
+    op.alter_column('user', 'email',
+               existing_type=sa.String(length=255),
+               type_=sa.String(),
+               existing_nullable=False)
+
+    # Revert the length of the full_name field in the User table
+    op.alter_column('user', 'full_name',
+               existing_type=sa.String(length=255),
+               type_=sa.String(),
+               existing_nullable=True)
+
+    # Revert the length of the title field in the Item table
+    op.alter_column('item', 'title',
+               existing_type=sa.String(length=255),
+               type_=sa.String(),
+               existing_nullable=False)
+
+    # Revert the length of the description field in the Item table
+    op.alter_column('item', 'description',
+               existing_type=sa.String(length=255),
+               type_=sa.String(),
+               existing_nullable=True)
+```
+
+## 迁移审查重点
+
+- 迁移前应检查是否存在长度超过 255 的历史值，否则 PostgreSQL 可能拒绝类型收缩。
+- API 校验和数据库约束应同步，否则用户会在提交后才收到数据库错误。
+- 回滚恢复无长度 `String()`，但不会恢复因前期清洗而删除的数据。
+- 仅改变列类型，不会自动截断已有文本。

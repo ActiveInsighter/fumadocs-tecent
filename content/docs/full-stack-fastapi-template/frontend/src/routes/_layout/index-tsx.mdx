@@ -1,0 +1,107 @@
+---
+title: "index.tsx：登录后仪表盘首页"
+description: "在受保护根路径展示当前用户的个性化欢迎信息。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是 `_layout` 的索引子路由，因此最终 URL 是 `/`。页面非常薄，只从认证 Hook 读取当前用户并渲染欢迎文案。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 注册受保护首页路由。
+- 设置 Dashboard 页面标题。
+- 读取当前用户。
+- 优先显示 full_name，缺失时回退 email。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 用户通过布局认证守卫。
+
+  </Step>
+  <Step>
+
+### 2. Dashboard 调用 useAuth。
+
+  </Step>
+  <Step>
+
+### 3. currentUser Query 返回缓存或请求结果。
+
+  </Step>
+  <Step>
+
+### 4. 页面渲染姓名/邮箱和欢迎文案。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `_layout.tsx` | 提供认证、侧边栏和页面框架。 |
+| `useAuth` | 提供当前用户数据。 |
+| `routeTree.gen.ts` | 将 `_layout/` 映射为 `/`。 |
+
+## 路由契约
+
+| 配置 | 作用 |
+| --- | --- |
+| `path` | `/`。 |
+| `parent` | `/_layout`。 |
+| `head` | Dashboard 页面标题。 |
+| `data` | currentUser Query。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/routes/_layout/index.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="index.tsx" lineNumbers
+import { createFileRoute } from "@tanstack/react-router"
+
+import useAuth from "@/hooks/useAuth"
+
+// `_layout/` 的 index 文件映射受保护根 URL `/`。
+export const Route = createFileRoute("/_layout/")({
+  component: Dashboard,
+  head: () => ({
+    meta: [
+      {
+        title: "Dashboard - FastAPI Template",
+      },
+    ],
+  }),
+})
+
+// 仪表盘只消费 useAuth 提供的当前用户缓存。
+function Dashboard() {
+  const { user: currentUser } = useAuth()
+
+  return (
+    <div>
+      <div>
+        <h1 className="text-2xl truncate max-w-sm">
+          {/* full_name 为空时回退到 email，避免问候语缺失。 */}
+          Hi, {currentUser?.full_name || currentUser?.email} 👋
+        </h1>
+        <p className="text-muted-foreground">
+          Welcome back, nice to see you again!!!
+        </p>
+      </div>
+    </div>
+  )
+}
+```
+
+## 阅读重点
+
+- 可选链使用户数据加载前不会抛错，但会短暂显示空问候。
+- 若需要无闪烁体验，可在布局层预取 currentUser 或使用 Suspense。
+- 首页保持薄组件是良好实践，复杂仪表盘应拆分独立卡片和 Query。
+- full_name 为空时使用 email 是明确的回退策略。

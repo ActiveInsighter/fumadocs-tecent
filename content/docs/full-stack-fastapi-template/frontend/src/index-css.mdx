@@ -1,0 +1,242 @@
+---
+title: "index.css：Tailwind 4 主题令牌与全局样式"
+description: "定义浅色/深色 OKLCH 语义色、侧边栏令牌、圆角映射和基础元素规则。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是整个前端视觉系统的单一入口。组件只使用 `bg-background`、`text-muted-foreground` 等语义类，具体颜色由这里的 CSS 变量在浅色和深色主题中切换。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 导入 Tailwind CSS 与动画工具。
+- 定义 class 驱动的 dark 变体。
+- 把 CSS 变量注册为 Tailwind token。
+- 设置浅色与深色语义色。
+- 定义图表和侧边栏专用变量。
+- 统一全局边框、焦点环、背景和指针行为。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. Tailwind 读取 @theme inline 映射。
+
+  </Step>
+  <Step>
+
+### 2. 组件类名引用语义 token。
+
+  </Step>
+  <Step>
+
+### 3. ThemeProvider 在 html 上切换 .dark。
+
+  </Step>
+  <Step>
+
+### 4. 浅色 :root 或 .dark 提供变量值。
+
+  </Step>
+  <Step>
+
+### 5. 浏览器计算最终颜色与圆角。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `ThemeProvider` | 在根元素切换 dark 类。 |
+| `所有 UI 组件` | 消费 background、primary、muted 等语义类。 |
+| `Tailwind CSS 4` | 通过 @theme inline 暴露 token。 |
+| `tw-animate-css` | 为 Dialog、Tooltip 等提供状态动画。 |
+
+## 三层主题模型
+
+<Files>
+  <Folder name="index.css" defaultOpen>
+    <File name="@theme inline：Tailwind token 名称" />
+    <File name=":root：浅色变量值" />
+    <File name=".dark：深色变量值" />
+    <File name="@layer base：全局基础规则" />
+  </Folder>
+</Files>
+
+<Tabs items={['语义层', '主题值层', '组件层']}>
+  <Tab>`--color-primary`、`--color-background` 等把变量暴露给 Tailwind。</Tab>
+  <Tab>`:root` 与 `.dark` 分别提供同一组变量的具体 OKLCH 值。</Tab>
+  <Tab>组件只写 `bg-primary`、`text-foreground`，不关心当前主题。</Tab>
+</Tabs>
+
+## 主要令牌分组
+
+| 分组 | 变量示例 | 使用场景 |
+| --- | --- | --- |
+| 页面 | `background`, `foreground` | body 与正文 |
+| 容器 | `card`, `popover` | 卡片、菜单、通知 |
+| 交互 | `primary`, `secondary`, `accent` | 按钮、选中、hover |
+| 状态 | `destructive`, `ring`, `border`, `input` | 危险操作、焦点和边界 |
+| 数据 | `chart-1` ... `chart-5` | 图表系列 |
+| 导航 | `sidebar-*` | 侧边栏独立主题 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/index.css`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```css title="index.css" lineNumbers
+/* Tailwind CSS 4 主入口：扫描源码并生成工具类。 */
+@import "tailwindcss";
+/* 提供 Radix/shadcn 常用进入、退出动画工具。 */
+@import "tw-animate-css";
+
+/* dark: 变体由祖先 .dark 类触发，与 ThemeProvider 配合。 */
+@custom-variant dark (&:is(.dark *));
+
+/* 将语义 CSS 变量映射为 Tailwind 颜色和圆角 token。 */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* 浅色主题：定义组件消费的语义变量，而不是直接绑定具体组件。 */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.5982 0.10687 182.4689);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.5982 0.10687 182.4689);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+/* 深色主题只覆盖变量值，组件类名无需改变。 */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.65 0.10687 182.4689);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.65 0.10687 182.4689);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* 全局基础层：统一边框、焦点环、页面背景与可点击光标。 */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+}
+```
+
+## 阅读重点
+
+- OKLCH 的三个主要参数分别是亮度、色度和色相，较适合构建感知均匀主题。
+- 组件应引用语义色，不要在业务 JSX 中散落具体 OKLCH 值。
+- 浅色和深色必须定义相同变量集合，避免切换时回退到旧值。
+- `@apply border-border outline-ring/50` 会影响所有元素，新增第三方组件时要检查继承效果。
+- 侧边栏有独立 token，可在不改变主页面卡片色的情况下独立调色。
+
+## 修改主题时的检查顺序
+
+<Steps>
+  <Step>先调整 `:root` 和 `.dark` 的变量值，不直接改组件。</Step>
+  <Step>检查 primary/foreground 对比度以及 destructive 状态。</Step>
+  <Step>检查 Card、Popover、Sidebar 等不同表面层级。</Step>
+  <Step>验证 focus ring、disabled、hover、selected 等交互状态。</Step>
+  <Step>最后在移动端和深色模式中进行视觉回归。</Step>
+</Steps>

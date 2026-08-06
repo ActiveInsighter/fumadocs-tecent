@@ -1,0 +1,14 @@
+{
+  "title": "Components",
+  "pages": [
+    "index",
+    "Admin",
+    "Common",
+    "Items",
+    "Pending",
+    "Sidebar",
+    "UserSettings",
+    "ui",
+    "theme-provider-tsx"
+  ]
+}

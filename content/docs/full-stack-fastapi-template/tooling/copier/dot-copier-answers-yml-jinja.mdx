@@ -1,0 +1,80 @@
+---
+title: ".copier-answers.yml.jinja：序列化模板答案"
+description: "用 Jinja 过滤器把 Copier 的答案对象写成 JSON 兼容内容。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Copier 渲染项目后需要保留一份答案快照，供后续更新和 update_dotenv.py 使用。这个模板把内部答案对象一次性序列化。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 读取 Copier 内置 `_copier_answers`。
+- 通过 `to_json` 序列化键值。
+- 使用 `-` 去除模板尾部多余空白。
+- 生成可被 json.loads 读取的答案文件。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 用户回答 Copier 问题。
+
+  </Step>
+  <Step>
+
+### 2. Copier 构造 `_copier_answers`。
+
+  </Step>
+  <Step>
+
+### 3. Jinja 执行 `to_json`。
+
+  </Step>
+  <Step>
+
+### 4. 结果写入 `.copier-answers.yml`。
+
+  </Step>
+  <Step>
+
+### 5. update_dotenv.py 读取该文件。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Copier` | 提供答案上下文和渲染生命周期。 |
+| `Jinja` | 执行过滤器与空白控制。 |
+| `.copier-answers.yml` | 保存生成项目的答案快照。 |
+| `update_dotenv.py` | 把答案同步到 .env。 |
+
+## 单行模板拆解
+
+| 片段 | 含义 |
+| --- | --- |
+| `{{ ... }}` | 输出表达式结果 |
+| `_copier_answers` | Copier 提供的答案映射 |
+| `|to_json` | 序列化为 JSON |
+| `-}}` | 移除右侧空白 |
+
+## 带注释源码
+
+> 原始路径：`.copier/.copier-answers.yml.jinja`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```jinja title=".copier-answers.yml.jinja" lineNumbers
+{{ _copier_answers|to_json -}}
+```
+
+## 阅读重点
+
+- 虽然文件名是 yml，JSON 是 YAML 的合法子集，也能被 json.loads 直接解析。
+- `to_json` 会正确转义字符串，比手工拼接安全。
+- 结尾 `-` 是 Jinja 空白控制，避免输出多余换行。
+- 答案文件可能包含部署域名或账号信息，应评估是否含秘密并配置忽略规则。

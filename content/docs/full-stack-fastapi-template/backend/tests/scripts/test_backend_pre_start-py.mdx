@@ -1,0 +1,82 @@
+---
+title: "test_backend_pre_start.py：生产探活成功路径"
+description: "使用 patch 和 MagicMock 隔离数据库，验证探活函数的成功执行流程。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该测试把 SQLModel Session 替换为可观察的 Mock 上下文管理器，使探活函数在不连接真实数据库的情况下执行，并验证最小查询确实被调用。
+
+</Callout>
+
+## 这个文件负责什么
+
+- Patch 被测模块中的 `Session` 名称。
+- 构造 `__enter__` 返回的模拟会话。
+- 调用 `init(mock_engine)`。
+- 断言会话构造、上下文进入和 `exec()` 调用。
+
+## 执行思路
+
+1. 创建模拟 Engine 和 Session。
+2. 配置上下文管理器的返回对象。
+3. 调用探活函数。
+4. 通过 mock 断言验证交互。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `backend_pre_start.py` | 被测探活模块。 |
+| `unittest.mock` | 隔离 SQLModel 与数据库连接。 |
+| `Tenacity` | 成功路径不会触发后续重试。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/tests/scripts/test_backend_pre_start.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="test_backend_pre_start.py" lineNumbers
+from unittest.mock import MagicMock, patch
+
+from sqlmodel import select
+
+from app.backend_pre_start import init, logger
+
+
+# 用 MagicMock 替代真实 Session，验证上下文管理和最小查询调用。
+def test_init_successful_connection() -> None:
+    engine_mock = MagicMock()
+
+    session_mock = MagicMock()
+    session_mock.__enter__.return_value = session_mock
+
+    select1 = select(1)
+
+    with (
+        # Patch 必须指向被测模块实际查找 `Session` 的位置。
+        patch("app.backend_pre_start.Session", return_value=session_mock),  # [!code highlight]
+        patch("app.backend_pre_start.select", return_value=select1),
+        patch.object(logger, "info"),
+        patch.object(logger, "error"),
+        patch.object(logger, "warn"),
+    ):
+        try:
+            init(engine_mock)
+            connection_successful = True
+        except Exception:
+            connection_successful = False
+
+        assert connection_successful, (
+            "The database connection should be successful and not raise an exception."
+        )
+
+        session_mock.exec.assert_called_once_with(select1)
+```
+
+## 阅读重点
+
+- Patch 路径错误是 Mock 测试最常见问题：要 patch 被测模块实际查找的名称。
+- 现有断言可进一步精确到 `select(1)` 参数。
+- 还应补充连续失败、重试次数与最终抛错场景。

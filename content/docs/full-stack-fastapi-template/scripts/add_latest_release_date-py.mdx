@@ -1,0 +1,134 @@
+---
+title: "add_latest_release_date.py：为最新版本补发布日期"
+description: "扫描 release-notes.md 的首个语义化版本标题，缺少日期时写入当天 ISO 日期。"
+---
+
+<Callout type="idea" title="文件定位">
+
+发布自动化在版本已生成但日期尚未填写时调用此脚本。它只修改最新版本标题，并通过退出码区分“未找到版本头”。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 读取完整发布说明。
+- 用正则识别版本标题和可选日期。
+- 跳过已有日期的最新版本。
+- 补写当天 ISO 日期。
+- 写回文件并输出可读日志。
+- 未找到版本标题时返回非零状态。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 读取 release-notes.md 为行列表。
+
+  </Step>
+  <Step>
+
+### 2. 从顶部寻找第一个匹配标题。
+
+  </Step>
+  <Step>
+
+### 3. 若已有日期则成功退出。
+
+  </Step>
+  <Step>
+
+### 4. 否则替换该行并写回。
+
+  </Step>
+  <Step>
+
+### 5. 没有任何版本标题则以状态 1 失败。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `release-notes.md` | 被读取和原位修改。 |
+| `latest-changes workflow` | 可能在发布流程中调用脚本。 |
+| `date.today` | 生成本地日期的 ISO 字符串。 |
+| `CI exit code` | 决定工作流继续或失败。 |
+
+## 标题转换
+
+```diff title="release-notes.md"
+-## 0.9.0
++## 0.9.0 (2026-08-06)
+```
+
+```mermaid
+flowchart TD
+  Read[读取文件] --> Match{找到首个版本标题?}
+  Match -->|否| Fail[exit 1]
+  Match -->|是| Dated{已有日期?}
+  Dated -->|是| Done[exit 0，不修改]
+  Dated -->|否| Update[写入 today]
+  Update --> Done
+```
+
+## 带注释源码
+
+> 原始路径：`scripts/add_latest_release_date.py`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```python title="add_latest_release_date.py" lineNumbers
+"""Check release-notes.md and add today's date to the latest release header if missing."""
+
+import re
+import sys
+from datetime import date
+
+RELEASE_NOTES_FILE = "release-notes.md"
+# 只匹配形如 `## 1.2.3` 或 `## 1.2.3 (date)` 的二级标题。
+RELEASE_HEADER_PATTERN = re.compile(r"^## (\d+\.\d+\.\d+)\s*(\(.*\))?\s*$")
+
+
+def main() -> None:
+    with open(RELEASE_NOTES_FILE) as f:
+        lines = f.readlines()
+
+    # 从上到下遇到的第一个版本标题就是最新版本。
+    for i, line in enumerate(lines):
+        match = RELEASE_HEADER_PATTERN.match(line)
+        if not match:
+            continue
+
+        version = match.group(1)
+        date_part = match.group(2)
+
+        # 已有日期时保持文件不变，并以成功状态退出。
+        if date_part:
+            print(f"Latest release {version} already has a date: {date_part}")
+            sys.exit(0)
+
+        # ISO 日期便于机器解析，也与发布说明格式保持稳定。
+        today = date.today().isoformat()
+        lines[i] = f"## {version} ({today})\n"
+        print(f"Added date: {version} ({today})")
+
+        with open(RELEASE_NOTES_FILE, "w") as f:
+            f.writelines(lines)
+        sys.exit(0)
+
+    print("No release header found")
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## 阅读重点
+
+- 脚本假设最新版本排在最上方，这与发布说明常见结构一致。
+- 正则只接受三段数字版本，不匹配预发布后缀；若引入 rc/beta 需要扩展。
+- 已有日期返回 0，使脚本具备幂等性。
+- 写文件前可增加 UTF-8 编码参数，避免不同系统默认编码差异。
+- CI 时区可能影响 `date.today()`，发布流程应明确期望日期时区。

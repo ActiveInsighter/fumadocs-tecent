@@ -1,0 +1,165 @@
+---
+title: "DeleteItem.tsx：Item 删除确认弹窗"
+description: "从行操作菜单打开危险确认框，执行删除并同步关闭浮层与刷新缓存。"
+---
+
+<Callout type="idea" title="文件定位">
+
+删除 Item 不需要复杂表单，但需要清晰确认、重复提交保护和嵌套浮层协调。该组件把这些交互细节封装在一个菜单项中。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 在 DropdownMenu 中呈现危险操作。
+- 打开不可逆删除确认 Dialog。
+- 调用 ItemsService.deleteItem。
+- 使用 LoadingButton 防止重复删除。
+- 成功后关闭 Dialog 和父菜单。
+- 请求结束后刷新相关查询。
+
+## 执行思路
+
+1. 用户打开行操作菜单。
+2. 点击 Delete Item 并打开确认框。
+3. 确认后调用删除端点。
+4. 成功显示 Toast 并关闭两层浮层。
+5. 缓存失效后列表移除该行。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `ItemActionsMenu` | 父级下拉菜单。 |
+| `ItemsService.deleteItem` | 后端删除端点。 |
+| `DataTable` | 删除后重新渲染数据。 |
+| `handleError` | 统一错误消息。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `id` | 目标 Item UUID。 |
+| `isOpen` | 确认 Dialog 状态。 |
+| `mutation.isPending` | 删除请求进行中。 |
+| `onSuccess` | 通知 ItemActionsMenu 关闭。 |
+
+<Callout type="warn" title="不可逆操作设计">
+
+危险按钮使用 destructive 视觉只能作为提示。更重要的是明确对象、解释后果、阻止重复提交，并由后端执行所有权和权限检查。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Items/DeleteItem.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="DeleteItem.tsx" lineNumbers
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Trash2 } from "lucide-react"
+import { useState } from "react"
+import { useForm } from "react-hook-form"
+
+import { ItemsService } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { LoadingButton } from "@/components/ui/loading-button"
+import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
+
+// id 标识目标 Item，onSuccess 负责通知父级菜单关闭。
+interface DeleteItemProps {
+  id: string
+  onSuccess: () => void
+}
+
+const DeleteItem = ({ id, onSuccess }: DeleteItemProps) => {
+  // Dialog 独立于 DropdownMenu 控制，避免浮层生命周期冲突。
+  const [isOpen, setIsOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { handleSubmit } = useForm()
+
+  // 将 SDK 调用包装为单参数 mutationFn。
+  const deleteItem = async (id: string) => {
+    await ItemsService.deleteItem({ id: id })
+  }
+
+  // 删除成功后关闭确认框与父菜单，并刷新查询。
+  const mutation = useMutation({
+    mutationFn: deleteItem,
+    onSuccess: () => {
+      showSuccessToast("The item was deleted successfully")
+      setIsOpen(false)
+      onSuccess()
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries()
+    },
+  })
+
+  const onSubmit = async () => {
+    mutation.mutate(id)
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      {/* 阻止默认 select 关闭菜单，确保随后打开的 Dialog 不被卸载。 */}
+      <DropdownMenuItem
+        variant="destructive"
+        onSelect={(e) => e.preventDefault()}
+        onClick={() => setIsOpen(true)}
+      >
+        <Trash2 />
+        Delete Item
+      </DropdownMenuItem>
+      <DialogContent className="sm:max-w-md">
+        {/* 原生 form 支持 Enter 提交和统一按钮语义。 */}
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <DialogHeader>
+            <DialogTitle>Delete Item</DialogTitle>
+            <DialogDescription>
+              This item will be permanently deleted. Are you sure? You will not
+              be able to undo this action.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-4">
+            <DialogClose asChild>
+              <Button variant="outline" disabled={mutation.isPending}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <LoadingButton
+              variant="destructive"
+              type="submit"
+              loading={mutation.isPending}
+            >
+              Delete
+            </LoadingButton>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export default DeleteItem
+```
+
+## 阅读重点
+
+- 当前 `invalidateQueries()` 会刷新全部查询；可收窄为 `queryKey: ["items"]`。
+- 确认文案最好包含 Item 标题，帮助用户确认目标。
+- 后端应验证 Item 所有权，不能只依赖前端传入 id。
+- 删除失败时 Dialog 保持打开，便于用户读取错误或重试。

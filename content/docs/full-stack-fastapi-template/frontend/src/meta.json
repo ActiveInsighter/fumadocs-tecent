@@ -1,0 +1,16 @@
+{
+  "title": "Source Code",
+  "pages": [
+    "index",
+    "client",
+    "components",
+    "hooks",
+    "lib",
+    "routes",
+    "index-css",
+    "main-tsx",
+    "routeTree-gen-ts",
+    "utils-ts",
+    "vite-env-d-ts"
+  ]
+}

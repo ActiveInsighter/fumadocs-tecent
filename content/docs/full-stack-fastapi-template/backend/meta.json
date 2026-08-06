@@ -1,0 +1,11 @@
+{
+  "title": "Backend",
+  "pages": [
+    "index",
+    "configuration",
+    "app",
+    "scripts",
+    "tests"
+  ],
+  "defaultOpen": true
+}

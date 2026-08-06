@@ -1,0 +1,66 @@
+---
+title: "DeleteAccount.tsx：删除账户设置区块"
+description: "为危险操作提供独立标题与确认组件入口，保持设置页面结构清晰。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是一个很薄的页面区块组件。它刻意不直接调用删除 API，而是把不可逆操作委托给 `DeleteConfirmation`，让确认文案、按钮禁用和 Mutation 生命周期集中维护。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 展示 Delete Account 区块标题。
+- 挂载删除确认交互。
+- 将危险操作从其他设置表单中隔离。
+
+## 执行思路
+
+1. 设置页渲染该区块。
+2. 用户点击 DeleteConfirmation 中的按钮。
+3. 确认对话框负责后续删除流程。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `DeleteConfirmation` | 真正的确认与 API 调用。 |
+| `settings route` | 将本区块与资料、密码设置组合。 |
+
+## 为什么保留这一层
+
+<Cards>
+  <Card title="信息架构">设置页能明确区分资料、密码与危险操作。</Card>
+  <Card title="关注点分离">区块布局与删除流程分别维护。</Card>
+  <Card title="便于扩展">以后可加入数据导出或账户停用说明。</Card>
+</Cards>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/UserSettings/DeleteAccount.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="DeleteAccount.tsx" lineNumbers
+import DeleteConfirmation from "./DeleteConfirmation"
+
+// 这一层只提供设置页区块标题，危险操作细节由确认组件隔离。
+const DeleteAccount = () => {
+  return (
+    <div className="max-w-md mt-4 rounded-lg border border-destructive/50 p-4">
+      <h3 className="font-semibold text-destructive">Delete Account</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Permanently delete your account and all associated data.
+      </p>
+      <DeleteConfirmation />
+    </div>
+  )
+}
+
+export default DeleteAccount
+```
+
+## 阅读重点
+
+- 薄组件仍有价值：它定义页面信息架构和独立变更边界。
+- 危险操作不应和普通保存按钮放在同一个表单中。
+- 未来可在此处增加导出数据、冷静期或组织级限制说明。

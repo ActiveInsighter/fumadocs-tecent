@@ -1,0 +1,164 @@
+---
+title: "items.py：资源 CRUD 与所有权校验"
+description: "实现 Item 的分页查询、详情、创建、更新和删除，并区分超级用户与普通用户的数据范围。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是一个典型“用户拥有资源”的 REST 路由示例。重点不是 Item 字段，而是查询范围、对象级权限和事务写入模式。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 普通用户只能看到和修改自己的 Item。
+- 超级用户可以查询全部 Item。
+- 列表接口同时返回分页数据与总数。
+- 响应使用 Public 模型，隔离数据库实体。
+
+## 核心执行流程
+
+1. 依赖注入会话和当前用户。
+2. 根据角色构造带/不带 owner 条件的 SQL。
+3. 读取对象时先检查存在性。
+4. 修改或删除前执行对象级所有权检查。
+5. 写入后提交事务并在需要时刷新对象。
+
+## 与其他模块的关系
+
+- **`api/deps.py`**：提供 Session 与 CurrentUser。
+- **`models.py`**：提供数据库实体与输入/输出模型。
+- **数据库外键**：`owner_id` 将 Item 绑定到 User。
+
+## 带注释源码
+
+> 原始路径：`backend/app/api/routes/items.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="items.py" lineNumbers
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from sqlmodel import col, func, select
+
+from app.api.deps import CurrentUser, SessionDep
+from app.models import Item, ItemCreate, ItemPublic, ItemsPublic, ItemUpdate, Message
+
+# URL 前缀与 OpenAPI 标签都按资源划分。
+router = APIRouter(prefix="/items", tags=["items"])
+
+
+@router.get("/", response_model=ItemsPublic)
+def read_items(
+    session: SessionDep, current_user: CurrentUser, skip: int = 0, limit: int = 100
+) -> Any:
+    """
+    Retrieve items.
+    """
+
+    # 管理员查询全表；普通用户的 count 和 data 必须使用同一所有权条件。
+    if current_user.is_superuser:  # [!code focus]
+        count_statement = select(func.count()).select_from(Item)
+        count = session.exec(count_statement).one()
+        statement = (
+            select(Item).order_by(col(Item.created_at).desc()).offset(skip).limit(limit)
+        )
+        items = session.exec(statement).all()
+    else:
+        count_statement = (
+            select(func.count())
+            .select_from(Item)
+            .where(Item.owner_id == current_user.id)
+        )
+        count = session.exec(count_statement).one()
+        statement = (
+            select(Item)
+            .where(Item.owner_id == current_user.id)
+            .order_by(col(Item.created_at).desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        items = session.exec(statement).all()
+
+    # 显式转换为公开模型，防止未来数据库模型新增内部字段时意外泄露。
+    items_public = [ItemPublic.model_validate(item) for item in items]
+    return ItemsPublic(data=items_public, count=count)
+
+
+@router.get("/{id}", response_model=ItemPublic)
+def read_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
+    """
+    Get item by ID.
+    """
+    item = session.get(Item, id)
+    # 权限检查顺序：先确认对象存在，再判断调用者是否可访问。
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not current_user.is_superuser and (item.owner_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return item
+
+
+@router.post("/", response_model=ItemPublic)
+def create_item(
+    *, session: SessionDep, current_user: CurrentUser, item_in: ItemCreate
+) -> Any:
+    """
+    Create new item.
+    """
+    # owner_id 由服务端从当前用户注入，不能信任客户端提交。
+    item = Item.model_validate(item_in, update={"owner_id": current_user.id})  # [!code highlight]
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@router.put("/{id}", response_model=ItemPublic)
+def update_item(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    item_in: ItemUpdate,
+) -> Any:
+    """
+    Update an item.
+    """
+    item = session.get(Item, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not current_user.is_superuser and (item.owner_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    # 只更新请求体中实际出现的字段，避免把未提交字段覆盖为 None。
+    update_dict = item_in.model_dump(exclude_unset=True)
+    item.sqlmodel_update(update_dict)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@router.delete("/{id}")
+def delete_item(
+    session: SessionDep, current_user: CurrentUser, id: uuid.UUID
+) -> Message:
+    """
+    Delete an item.
+    """
+    item = session.get(Item, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not current_user.is_superuser and (item.owner_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    # SQLModel Session 先标记删除，commit 后才真正持久化。
+    session.delete(item)
+    session.commit()
+    return Message(message="Item deleted successfully")
+```
+
+## 阅读重点
+
+- 列表权限与单对象权限都必须实现，不能只保护详情接口。
+- `exclude_unset=True` 让 PATCH/部分更新只修改客户端实际提交字段。
+- 总数查询和分页数据查询要使用相同过滤条件。

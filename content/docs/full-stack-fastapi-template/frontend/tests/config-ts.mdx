@@ -1,0 +1,115 @@
+---
+title: "config.ts：端到端测试环境变量边界"
+description: "从仓库根 .env 加载超级用户凭据，并在缺失时快速失败。"
+---
+
+<Callout type="idea" title="文件定位">
+
+测试代码不应在各文件散落 `process.env` 判空。这个模块集中完成路径解析、dotenv 加载和必填变量收窄。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 在 ESM 中计算当前文件目录。
+- 显式定位仓库根 `.env`。
+- 读取并校验必填环境变量。
+- 向其他测试导出稳定 string 类型。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 把 `import.meta.url` 转换为本地文件路径。
+
+  </Step>
+  <Step>
+
+### 2. 定位 `../../.env`。
+
+  </Step>
+  <Step>
+
+### 3. dotenv 写入 `process.env`。
+
+  </Step>
+  <Step>
+
+### 4. getEnvVar 检查值是否存在。
+
+  </Step>
+  <Step>
+
+### 5. 导出超级用户邮箱和密码。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `.env` | 保存本地与 CI 注入的测试配置。 |
+| `auth.setup.ts` | 消费超级用户凭据建立登录快照。 |
+| `admin/user-settings specs` | 需要超级用户权限或重新登录。 |
+| `Node ESM` | 通过 fileURLToPath 模拟 __dirname。 |
+
+## 配置边界
+
+<Callout type="warn" title="测试凭据仍是敏感信息">
+
+`.env` 中的超级用户密码只应属于隔离测试环境。不要让 Playwright 指向生产数据库，也不要提交认证快照。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/tests/config.ts`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```ts title="config.ts" lineNumbers
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import dotenv from "dotenv"
+
+// ESM 没有 CommonJS 的 __filename/__dirname，需要从 import.meta.url 还原。
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// 无论命令从哪个目录启动，都明确读取仓库根目录的 .env。
+dotenv.config({ path: path.join(__dirname, "../../.env") })
+
+// 返回类型固定为 string；缺失配置立即失败，避免测试运行到中途才报错。
+function getEnvVar(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`Environment variable ${name} is undefined`)
+  }
+  return value
+}
+
+export const firstSuperuser = getEnvVar("FIRST_SUPERUSER")
+export const firstSuperuserPassword = getEnvVar("FIRST_SUPERUSER_PASSWORD")
+```
+
+## 阅读重点
+
+- 快速失败能把“配置缺失”与“页面功能失败”清晰区分。
+- 不要把真实生产密码写入仓库；CI 应使用 secrets 生成环境。
+- 这里检查的是存在性，不检查邮箱格式或密码强度；可按需要扩展 schema。
+- 显式路径比依赖 `process.cwd()` 更稳定，因为测试命令可能从不同目录启动。
+
+## Twoslash：缺失检查如何收窄类型
+
+```ts twoslash
+function requireValue(value: string | undefined): string {
+  if (!value) throw new Error('missing')
+  return value
+}
+
+const raw: string | undefined = 'configured'
+const safe = requireValue(raw)
+//    ^?
+```
+
+抛出异常后，正常返回分支中的值被收窄为 `string`。

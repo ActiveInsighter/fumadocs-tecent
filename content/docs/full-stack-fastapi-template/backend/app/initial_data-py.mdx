@@ -1,0 +1,76 @@
+---
+title: "initial_data.py：创建初始业务数据"
+description: "打开数据库会话并调用幂等初始化函数，确保首个超级管理员存在。"
+---
+
+<Callout type="idea" title="文件定位">
+
+数据库表结构由 Alembic 创建后，本脚本负责写入运行所需的最小业务数据。当前模板主要确保配置中的超级管理员账户存在。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 创建一个明确作用域的 SQLModel `Session`。
+- 调用 `init_db()` 执行幂等的数据初始化。
+- 通过日志记录初始化阶段，便于容器日志排查。
+- 作为独立脚本供 `prestart.sh` 和运维命令复用。
+
+## 执行思路
+
+1. 从 `app.core.db` 获取引擎与初始化函数。
+2. 打开会话并调用 `init_db(session)`。
+3. `init_db` 按邮箱查询超级管理员。
+4. 仅在用户不存在时创建账户，因此脚本可重复执行。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/core/db.py` | 实现真正的幂等初始化逻辑。 |
+| `app/core/config.py` | 提供首个超级管理员邮箱和密码。 |
+| `backend/scripts/prestart.sh` | 在迁移完成后调用本脚本。 |
+
+<Callout type="success" title="幂等性">
+
+如果数据库中已经存在配置邮箱对应的用户，`init_db()` 不会再次插入。幂等初始化让部署脚本可以安全重跑。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`backend/app/initial_data.py`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```python title="initial_data.py" lineNumbers
+import logging
+
+from sqlmodel import Session
+
+from app.core.db import engine, init_db
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def init() -> None:
+    """创建数据库会话，并执行可重复运行的初始数据逻辑。"""
+    with Session(engine) as session:
+        init_db(session)  # [!code highlight]
+
+
+def main() -> None:
+    """命令行入口：记录初始化开始与完成状态。"""
+    logger.info("Creating initial data")
+    init()
+    logger.info("Initial data created")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## 阅读重点
+
+- 初始化数据应可重复执行，避免容器重启时生成重复记录。
+- 表结构变化应进入 Alembic，不应塞入数据初始化脚本。
+- 生产环境必须通过安全变量提供管理员初始密码。

@@ -1,0 +1,9 @@
+{
+  "title": "Built Email Templates",
+  "pages": [
+    "index",
+    "new_account-html",
+    "reset_password-html",
+    "test_email-html"
+  ]
+}

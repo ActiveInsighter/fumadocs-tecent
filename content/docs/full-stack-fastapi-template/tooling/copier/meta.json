@@ -1,0 +1,8 @@
+{
+  "title": "Copier Template Tooling",
+  "pages": [
+    "index",
+    "dot-copier-answers-yml-jinja",
+    "update_dotenv-py"
+  ]
+}

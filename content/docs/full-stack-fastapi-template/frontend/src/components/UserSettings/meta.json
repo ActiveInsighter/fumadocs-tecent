@@ -1,0 +1,10 @@
+{
+  "title": "User Settings",
+  "pages": [
+    "index",
+    "ChangePassword-tsx",
+    "DeleteAccount-tsx",
+    "DeleteConfirmation-tsx",
+    "UserInformation-tsx"
+  ]
+}

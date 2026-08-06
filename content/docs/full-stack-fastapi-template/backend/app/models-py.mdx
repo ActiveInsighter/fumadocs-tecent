@@ -1,0 +1,189 @@
+---
+title: "models.py：数据库与 API 模型"
+description: "使用 SQLModel 定义 User、Item 数据表以及创建、更新、公开响应和 Token 等边界模型。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件是数据契约中心。它通过多个小模型区分数据库存储、客户端输入和对外输出，避免一个模型承担所有职责。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 数据库实体使用 `table=True`，请求/响应模型不建表。
+- 输入模型包含客户端可提交字段，公开模型排除密码哈希。
+- UUID 作为主键，时间使用带时区 UTC。
+- User 与 Item 建立双向关系和级联删除。
+
+## 核心执行流程
+
+1. 定义共享字段基类。
+2. 在创建/更新模型中添加不同验证约束。
+3. 定义数据库表、主键、外键和关系。
+4. 定义公开响应与分页包装。
+5. 定义认证和通用消息载荷。
+
+## 与其他模块的关系
+
+- **`crud.py`**：使用创建/更新模型构造数据库实体。
+- **`api/routes/*`**：声明输入与 response_model。
+- **Alembic**：从表模型差异生成迁移。
+- **OpenAPI 客户端**：从公开模型生成前端类型。
+
+## 带注释源码
+
+> 原始路径：`backend/app/models.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="models.py" lineNumbers
+import uuid
+from datetime import UTC, datetime
+
+from pydantic import EmailStr
+from sqlalchemy import DateTime
+from sqlmodel import Field, Relationship, SQLModel
+
+
+def get_datetime_utc() -> datetime:
+    """统一生成带 UTC 时区的时间，避免本地时区歧义。"""
+    return datetime.now(UTC)
+
+
+# 用户模型族：共享字段 → 输入模型 → 数据库表 → 公开输出。
+# Shared properties
+class UserBase(SQLModel):
+    email: EmailStr = Field(unique=True, index=True, max_length=255)
+    is_active: bool = True
+    is_superuser: bool = False
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+# Properties to receive via API on creation
+class UserCreate(UserBase):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserRegister(SQLModel):
+    email: EmailStr = Field(max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+# Properties to receive via API on update, all are optional
+class UserUpdate(SQLModel):
+    email: EmailStr | None = Field(default=None, max_length=255)
+    is_active: bool | None = None
+    is_superuser: bool | None = None
+    full_name: str | None = Field(default=None, max_length=255)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class UserUpdateMe(SQLModel):
+    full_name: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = Field(default=None, max_length=255)
+
+
+class UpdatePassword(SQLModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+# Database model, database table inferred from class name
+class User(UserBase, table=True):
+    """真正映射到 `user` 数据表的实体。"""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    hashed_password: str
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    # ORM 关系与 Item.owner 对应，删除用户时级联处理其条目。
+    items: list[Item] = Relationship(back_populates="owner", cascade_delete=True)  # [!code focus]
+
+
+# Properties to return via API, id is always required
+class UserPublic(UserBase):
+    id: uuid.UUID
+    created_at: datetime | None = None
+
+
+class UsersPublic(SQLModel):
+    data: list[UserPublic]
+    count: int
+
+
+# 条目模型族与用户模型采用相同的“输入/表/输出”分层。
+# Shared properties
+class ItemBase(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+
+
+# Properties to receive on item creation
+class ItemCreate(ItemBase):
+    """创建时只接收公开字段，owner_id 由服务端注入。"""
+
+    pass
+
+
+# Properties to receive on item update
+class ItemUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+
+
+# Database model, database table inferred from class name
+class Item(ItemBase, table=True):
+    """映射到数据库的条目实体，每个条目必须属于一个用户。"""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    # 外键不可为空，数据库删除用户时级联删除其条目。
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE"
+    )
+    owner: User | None = Relationship(back_populates="items")
+
+
+# Properties to return via API, id is always required
+class ItemPublic(ItemBase):
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    created_at: datetime | None = None
+
+
+class ItemsPublic(SQLModel):
+    data: list[ItemPublic]
+    count: int
+
+
+# Generic message
+class Message(SQLModel):
+    message: str
+
+
+# 认证相关模型保持极小，避免 Token 响应夹带用户敏感数据。
+# JSON payload containing access token
+class Token(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# Contents of JWT token
+class TokenPayload(SQLModel):
+    sub: str | None = None
+
+
+class NewPassword(SQLModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+```
+
+## 阅读重点
+
+- 数据库模型、输入模型、输出模型应该分离。
+- 前向引用 `list[Item]` 依赖延迟注解解析。
+- 数据库级 `ondelete="CASCADE"` 与 ORM 关系级级联共同维护一致性。
+- 字段长度和邮箱格式在进入业务逻辑前完成验证。

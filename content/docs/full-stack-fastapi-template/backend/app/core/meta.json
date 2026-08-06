@@ -1,0 +1,11 @@
+{
+  "title": "Core",
+  "pages": [
+    "index",
+    "config-py",
+    "db-py",
+    "security-py",
+    "__init__-py"
+  ],
+  "defaultOpen": true
+}

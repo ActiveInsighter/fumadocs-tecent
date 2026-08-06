@@ -1,0 +1,104 @@
+---
+title: "test-local.sh：本地 Docker 集成测试入口"
+description: "清理旧栈与 Linux Python 缓存，构建并启动 Compose，再在 backend 容器运行测试。"
+---
+
+<Callout type="idea" title="文件定位">
+
+本地调试需要保留失败后的容器便于查看日志，因此该脚本启动测试后不自动 down；与 CI 版 test.sh 的生命周期不同。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 失败立即退出。
+- 清理旧容器、卷和孤儿服务。
+- Linux 上删除可能由容器创建的 __pycache__。
+- 构建并后台启动 Compose。
+- 在 backend 容器执行 tests-start.sh。
+- 转交用户附加的 pytest 参数。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. down 清理旧栈。
+
+  </Step>
+  <Step>
+
+### 2. Linux 环境清理缓存。
+
+  </Step>
+  <Step>
+
+### 3. build 构建镜像。
+
+  </Step>
+  <Step>
+
+### 4. up -d 启动数据库、后端等服务。
+
+  </Step>
+  <Step>
+
+### 5. exec backend 运行测试。
+
+  </Step>
+  <Step>
+
+### 6. 结束后保留栈供本地排查。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `docker-compose.yml` | 定义测试所需服务。 |
+| `backend/scripts/tests-start.sh` | 等待依赖并运行 pytest。 |
+| `__pycache__` | 容器/root 权限可能妨碍本地覆盖。 |
+| `test.sh` | 提供会自动清理的标准版本。 |
+
+<Callout type="info" title="本地版为何不在结尾 down">
+
+测试失败时保留容器，可以立即检查数据库、后端日志和服务健康状态。下一次运行开头会统一清理。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`scripts/test-local.sh`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```bash title="test-local.sh" lineNumbers
+#! /usr/bin/env bash
+
+# Exit in case of error
+# 任一 Docker 或测试命令失败立即停止。
+set -e
+
+# 先删除上次失败遗留的容器、网络、匿名卷和孤儿服务。
+docker-compose down -v --remove-orphans # Remove possibly previous broken stacks left hanging after an error
+
+# Linux 本地可能产生 root 所有的缓存目录，构建前主动清理。
+if [ $(uname -s) = "Linux" ]; then
+    echo "Remove __pycache__ files"
+    sudo find . -type d -name __pycache__ -exec rm -r {} \+
+fi
+
+# 重新构建镜像并启动完整依赖栈。
+docker-compose build
+docker-compose up -d
+# 关闭伪终端，适合脚本/CI，并把额外参数转交 tests-start.sh。
+docker-compose exec -T backend bash scripts/tests-start.sh "$@"
+```
+
+## 阅读重点
+
+- 脚本使用旧式 `docker-compose` 命令，而 test.sh 使用 `docker compose`；环境应确认兼容。
+- sudo 删除缓存会要求本地权限，跨平台体验可进一步优化。
+- 失败后容器保留便于 `docker compose logs`，但下次运行前会被清理。
+- `"$@"` 保留参数边界，可传 `-k users -x` 等 pytest 选项。
+- 删除卷意味着测试数据库重新创建，隔离性高但启动更慢。

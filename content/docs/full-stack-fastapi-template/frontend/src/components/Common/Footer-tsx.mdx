@@ -1,0 +1,103 @@
+---
+title: "Footer.tsx：共享页脚与社交链接"
+description: "用数据数组渲染 FastAPI 社交链接，并自动显示当前年份。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这个页脚用于认证布局等公共页面。它把外链元数据与 JSX 分离，统一处理新窗口安全属性、图标尺寸和响应式排列。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 显示项目名称和当前年份。
+- 渲染 GitHub、X、LinkedIn 外链。
+- 为纯图标链接提供 aria-label。
+- 在小屏纵向、大屏横向排列。
+- 对新窗口链接添加安全 rel 属性。
+
+## 执行思路
+
+1. 模块声明社交链接配置。
+2. Footer 计算当前年份。
+3. map 为每个平台生成 anchor。
+4. 图标组件通过变量 Icon 动态渲染。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `AuthLayout` | 在认证页面底部使用。 |
+| `react-icons` | 提供品牌图标。 |
+| `external websites` | 新标签页打开。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `socialLinks` | 图标、URL 与可访问名称的配置数组。 |
+| `currentYear` | 运行时计算的年份。 |
+| `Icon` | 从配置中解构出的 React 图标组件。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Common/Footer.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="Footer.tsx" lineNumbers
+import { FaGithub, FaLinkedinIn } from "react-icons/fa"
+import { FaXTwitter } from "react-icons/fa6"
+
+// 数据驱动外链，新增平台时无需复制 JSX 结构。
+const socialLinks = [
+  {
+    icon: FaGithub,
+    href: "https://github.com/fastapi/fastapi",
+    label: "GitHub",
+  },
+  { icon: FaXTwitter, href: "https://x.com/fastapi", label: "X" },
+  {
+    icon: FaLinkedinIn,
+    href: "https://linkedin.com/company/fastapi",
+    label: "LinkedIn",
+  },
+]
+
+export function Footer() {
+  // 在渲染时计算年份，避免每年手工修改静态文本。
+  const currentYear = new Date().getFullYear()
+
+  return (
+    <footer className="border-t py-4 px-6">
+      <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
+        <p className="text-muted-foreground text-sm">
+          Full Stack FastAPI Template - {currentYear}
+        </p>
+        <div className="flex items-center gap-4">
+          {/* 使用 label 同时作为稳定 key 和无障碍名称。 */}
+          {socialLinks.map(({ icon: Icon, href, label }) => (
+            <a
+              key={label}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={label}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {/* noopener 阻止新窗口控制当前页面；noreferrer 同时隐藏来源。 */}
+              <Icon className="h-5 w-5" />
+            </a>
+          ))}
+        </div>
+      </div>
+    </footer>
+  )
+}
+```
+
+## 阅读重点
+
+- 外链配置可进一步抽到站点配置文件，避免组件硬编码品牌信息。
+- `target="_blank"` 应始终配合 `noopener noreferrer`。
+- 纯图标链接必须提供 aria-label；当前实现正确。
+- SSR 在跨年瞬间可能产生极小概率 hydration 差异，通常可忽略。

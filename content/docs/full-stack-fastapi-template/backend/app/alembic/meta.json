@@ -1,0 +1,10 @@
+{
+  "title": "Alembic Migrations",
+  "pages": [
+    "index",
+    "versions",
+    "README",
+    "env-py",
+    "script-py-mako"
+  ]
+}

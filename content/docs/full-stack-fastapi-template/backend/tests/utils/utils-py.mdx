@@ -1,0 +1,76 @@
+---
+title: "utils.py：基础随机值与超级管理员认证"
+description: "生成唯一测试字符串、邮箱，并取得超级管理员 Bearer token。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是测试工具层的最底层模块：提供无业务依赖的随机值，以及基于项目配置的超级管理员登录辅助函数。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 生成足够唯一的十六进制字符串。
+- 生成符合邮箱格式的随机地址。
+- 使用配置中的管理员账号提交 OAuth2 登录。
+- 返回标准 Bearer 请求头。
+
+## 执行思路
+
+1. 随机函数直接从 `secrets.token_hex()` 取值。
+2. 邮箱函数组合随机本地部分与测试域名。
+3. 管理员辅助函数调用登录端点。
+4. 解析 access token 并构造请求头。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/core/config.py` | 提供首个超级管理员凭据。 |
+| `tests/utils/user.py` | 复用随机值函数。 |
+| `tests/conftest.py` | 用管理员 token 构造 session 级 fixture。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/tests/utils/utils.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="utils.py" lineNumbers
+import random
+import string
+
+from fastapi.testclient import TestClient
+
+from app.core.config import settings
+
+
+# token_hex 适合生成测试唯一值，不用于需要可读性的业务数据。
+def random_lower_string() -> str:
+    return "".join(random.choices(string.ascii_lowercase, k=32))
+
+
+# 在固定测试域名前拼接随机本地部分，减少邮箱唯一约束冲突。
+def random_email() -> str:
+    return f"{random_lower_string()}@{random_lower_string()}.com"
+
+
+# 使用配置中的首个超级管理员，通过真实登录端点获取 token。
+def get_superuser_token_headers(client: TestClient) -> dict[str, str]:
+    login_data = {
+        "username": settings.FIRST_SUPERUSER,
+        "password": settings.FIRST_SUPERUSER_PASSWORD,
+    }
+    r = client.post(f"{settings.API_V1_STR}/login/access-token", data=login_data)
+    tokens = r.json()
+    a_token = tokens["access_token"]
+    headers = {"Authorization": f"Bearer {a_token}"}
+    return headers
+```
+
+## 阅读重点
+
+- `secrets` 的随机性足以减少并行测试碰撞。
+- 固定域名避免随机值产生非法邮箱格式。
+- 测试失败信息不应输出管理员密码或完整令牌。

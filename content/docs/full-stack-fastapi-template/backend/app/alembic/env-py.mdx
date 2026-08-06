@@ -1,0 +1,155 @@
+---
+title: "env.py：Alembic 迁移运行环境"
+description: "把应用数据库配置和 SQLModel 元数据接入 Alembic，并支持离线生成 SQL 与在线执行迁移。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这是每次执行 Alembic 命令都会加载的环境文件。它连接了三个世界：`alembic.ini` 的工具配置、Pydantic Settings 的数据库地址，以及 SQLModel 的表元数据。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 读取 Alembic 命令上下文和日志配置。
+- 导入全部模型并把 `SQLModel.metadata` 交给自动生成器。
+- 从应用配置动态取得数据库 URL，避免重复保存凭据。
+- 根据命令模式选择离线 SQL 输出或在线数据库执行。
+- 启用 `compare_type=True`，让字段类型变化也能被识别。
+
+## 执行思路
+
+1. Alembic 加载 `alembic.ini` 并执行本文件。
+2. 导入 `app.models`，构建目标元数据集合。
+3. `get_url()` 从 `settings` 取得 PostgreSQL DSN。
+4. 离线模式只配置 URL 并输出 SQL；在线模式创建短连接引擎。
+5. 在事务上下文中按 revision 链执行迁移。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `alembic.ini` | 提供脚本目录、日志和 SQLAlchemy 基础配置。 |
+| `app/core/config.py` | 提供真实数据库连接 URL。 |
+| `app/models.py` | 提供自动生成迁移所比较的目标元数据。 |
+| `versions/*.py` | 由迁移上下文按依赖顺序执行。 |
+
+## 两种运行模式
+
+<Tabs items={['Online', 'Offline']}>
+  <Tab>
+    创建 SQLAlchemy Engine，连接真实数据库并在事务中执行 revision。常见的 `alembic upgrade head` 默认走此模式。
+  </Tab>
+  <Tab>
+    不建立 DBAPI 连接，只根据 URL 和迁移脚本生成 SQL 文本，适合预审或受控发布流程。
+  </Tab>
+</Tabs>
+
+## 带注释源码
+
+> 原始路径：`backend/app/alembic/env.py`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```python title="env.py" lineNumbers
+# `os` 当前没有直接使用；生成模板遗留的导入可在后续清理。
+import os
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
+# Alembic 在命令运行时注入 Config，来源通常是 `alembic.ini`。
+config = context.config  # [!code highlight]
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+assert config.config_file_name is not None
+fileConfig(config.config_file_name)
+
+# add your model's MetaData object here
+# for 'autogenerate' support
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
+# target_metadata = None
+
+# 导入模型模块后，所有 `table=True` 模型会注册到 SQLModel.metadata。
+from app.models import SQLModel  # noqa
+from app.core.config import settings  # noqa
+
+target_metadata = SQLModel.metadata  # [!code highlight]
+
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option("my_important_option")
+# ... etc.
+
+
+def get_url() -> str:
+    """从应用 Settings 获取数据库 URL，避免在 alembic.ini 中复制密码。"""
+    return str(settings.SQLALCHEMY_DATABASE_URI)
+
+
+def run_migrations_offline() -> None:
+    """Run migrations in 'offline' mode.
+
+    This configures the context with just a URL
+    and not an Engine, though an Engine is acceptable
+    here as well.  By skipping the Engine creation
+    we don't even need a DBAPI to be available.
+
+    Calls to context.execute() here emit the given string to the
+    script output.
+
+    """
+    url = get_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,  # 把参数直接渲染进生成的 SQL 文本。
+        compare_type=True,  # 同时检测列类型变化，而不只比较列是否存在。
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+    configuration = config.get_section(config.config_ini_section)
+    assert configuration is not None
+    configuration["sqlalchemy.url"] = get_url()
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        # 迁移是短生命周期任务，不需要维护长期连接池。
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection, target_metadata=target_metadata, compare_type=True
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+# 根据 Alembic 命令模式选择“只生成 SQL”或“直接连接数据库执行”。
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()  # [!code focus]
+```
+
+## 阅读重点
+
+- 仅导入 `SQLModel` 类并不足够，必须确保表模型模块已执行并注册元数据。
+- `NullPool` 适合一次性迁移命令，避免遗留连接池。
+- 离线模式适合审查 SQL 或交给 DBA 执行，但复杂数据迁移仍需实际环境验证。
+- 自动生成只比较结构差异，无法理解所有业务数据转换。

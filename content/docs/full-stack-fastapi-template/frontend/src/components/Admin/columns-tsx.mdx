@@ -1,0 +1,161 @@
+---
+title: "Admin/columns.tsx：用户表格列定义"
+description: "声明用户表格的姓名、邮箱、角色、状态和行操作呈现方式。"
+---
+
+<Callout type="idea" title="文件定位">
+
+TanStack Table 将数据计算与 DOM 渲染分离。这个文件集中定义每列如何读取 UserTableData、如何渲染缺失值、角色与状态，以及如何挂载操作菜单。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 扩展 UserPublic，添加 isCurrentUser 展示字段。
+- 为缺失 full_name 提供可读占位。
+- 用 Badge 区分当前用户和角色。
+- 用颜色与文字共同表达启用状态。
+- 在最后一列渲染 UserActionsMenu。
+
+## 执行思路
+
+1. 路由或页面获取 UsersPublic。
+2. 页面为每个用户计算 isCurrentUser。
+3. DataTable 使用 columns 构建 Header 与 Cell。
+4. actions 单元格把完整行传给菜单。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Common/DataTable` | 消费 columns 和 data。 |
+| `UserPublic` | 后端生成的公开用户模型。 |
+| `UserActionsMenu` | 行级编辑与删除入口。 |
+| `Badge / cn` | 状态视觉和条件样式。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `UserTableData` | API 用户数据与前端派生字段的交叉类型。 |
+| `columns` | 稳定的 ColumnDef 数组，可被通用 DataTable 复用。 |
+| `row.original` | 当前行完整的强类型数据。 |
+
+## 列语义
+
+| 列 | 原始数据 | 展示策略 |
+| --- | --- | --- |
+| Full Name | `full_name` | 缺失显示 N/A；本人增加 You Badge |
+| Email | `email` | 使用弱化文本样式 |
+| Role | `is_superuser` | Superuser/User Badge |
+| Status | `is_active` | 圆点 + Active/Inactive 文本 |
+| Actions | 完整行 | 打开编辑/删除菜单 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Admin/columns.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="columns.tsx" lineNumbers
+import type { ColumnDef } from "@tanstack/react-table"
+
+import type { UserPublic } from "@/client"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import { UserActionsMenu } from "./UserActionsMenu"
+
+// 在生成的 UserPublic 上附加纯前端字段，不污染 API 类型。
+export type UserTableData = UserPublic & {
+  isCurrentUser: boolean
+}
+
+// 列定义是“数据访问 + 呈现策略”的声明式配置。
+export const columns: ColumnDef<UserTableData>[] = [
+  {
+    // 缺失姓名使用 N/A，并为当前用户增加 You 标记。
+    accessorKey: "full_name",
+    header: "Full Name",
+    cell: ({ row }) => {
+      const fullName = row.original.full_name
+      return (
+        <div className="flex items-center gap-2">
+          <span
+            className={cn("font-medium", !fullName && "text-muted-foreground")}
+          >
+            {fullName || "N/A"}
+          </span>
+          {row.original.isCurrentUser && (
+            <Badge variant="outline" className="text-xs">
+              You
+            </Badge>
+          )}
+        </div>
+      )
+    },
+  },
+  {
+    accessorKey: "email",
+    header: "Email",
+    cell: ({ row }) => (
+      <span className="text-muted-foreground">{row.original.email}</span>
+    ),
+  },
+  {
+    // 角色使用 Badge 视觉编码。
+    accessorKey: "is_superuser",
+    header: "Role",
+    cell: ({ row }) => (
+      <Badge variant={row.original.is_superuser ? "default" : "secondary"}>
+        {row.original.is_superuser ? "Superuser" : "User"}
+      </Badge>
+    ),
+  },
+  {
+    // 状态同时使用颜色圆点和文字，避免只靠颜色传达。
+    accessorKey: "is_active",
+    header: "Status",
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "size-2 rounded-full",
+            row.original.is_active ? "bg-green-500" : "bg-gray-400",
+          )}
+        />
+        <span className={row.original.is_active ? "" : "text-muted-foreground"}>
+          {row.original.is_active ? "Active" : "Inactive"}
+        </span>
+      </div>
+    ),
+  },
+  {
+    // actions 不是数据字段，因此使用稳定 id，并隐藏表头文本。
+    id: "actions",
+    header: () => <span className="sr-only">Actions</span>,
+    cell: ({ row }) => (
+      <div className="flex justify-end">
+        <UserActionsMenu user={row.original} />
+      </div>
+    ),
+  },
+]
+```
+
+## 阅读重点
+
+- 把 `isCurrentUser` 作为派生字段提前计算，比在每个 cell 内反复访问认证上下文更纯粹。
+- 状态不能只用绿色/灰色表达，当前同时显示文字，符合可访问性原则。
+- 列数组定义在模块顶层，避免每次渲染创建新引用。
+- actions 表头使用 sr-only，既保持表格语义又不显示视觉文字。
+
+## Twoslash：`row.original` 的完整类型
+
+```ts twoslash
+type UserPublic = { id: string; email: string }
+type UserTableData = UserPublic & { isCurrentUser: boolean }
+type Row<T> = { original: T }
+
+function render(row: Row<UserTableData>) {
+  row.original.isCurrentUser
+  //           ^?
+}
+```

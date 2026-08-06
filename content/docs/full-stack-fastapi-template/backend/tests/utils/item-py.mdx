@@ -1,0 +1,65 @@
+---
+title: "item.py：随机 Item 测试工厂"
+description: "创建带真实 owner 外键的随机 Item，并提交到测试数据库。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该工厂为路由测试准备可查询、可授权的 Item。它先创建随机用户，再把用户 UUID 注入 Item，确保权限测试使用真实外键关系。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 创建随机 owner 用户。
+- 构造随机标题和描述。
+- 通过 `model_validate(..., update=...)` 注入 owner_id。
+- 提交、刷新并返回持久化 Item。
+
+## 执行思路
+
+1. 调用 `create_random_user()`。
+2. 构造 ItemCreate。
+3. 转换为表模型并注入外键。
+4. add → commit → refresh。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `tests/utils/user.py` | 提供随机 owner。 |
+| `app/models.py` | 定义 ItemCreate 与 Item。 |
+| `test_items.py` | 消费返回对象测试 HTTP 权限。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/tests/utils/item.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="item.py" lineNumbers
+from sqlmodel import Session
+
+from app import crud
+from app.models import Item, ItemCreate
+from tests.utils.user import create_random_user
+from tests.utils.utils import random_lower_string
+
+
+# 创建 Item 前先创建随机 owner，保证外键关系真实有效。
+def create_random_item(db: Session) -> Item:
+    user = create_random_user(db)
+    owner_id = user.id
+    assert owner_id is not None
+    title = random_lower_string()
+    description = random_lower_string()
+    item_in = ItemCreate(title=title, description=description)
+    # 通过真实 CRUD 函数创建，既复用业务逻辑，也保证 owner_id 被正确持久化。
+    return crud.create_item(session=db, item_in=item_in, owner_id=owner_id)  # [!code highlight]
+```
+
+## 阅读重点
+
+- 先创建 owner 能避免无效外键。
+- `refresh()` 确保数据库生成字段已回填。
+- 测试工厂不负责删除数据，清理由 fixture 的事务策略统一完成。

@@ -1,0 +1,105 @@
+---
+title: "PendingItems.tsx：Items 表格骨架屏"
+description: "在 Item 数据加载期间渲染与真实表格结构一致的五行 Skeleton。"
+---
+
+<Callout type="idea" title="文件定位">
+
+骨架屏的目的不是装饰，而是提前占据最终内容的空间。这个组件复用真实 Table 结构，模拟 ID、标题、描述和操作列，降低数据到达时的布局位移。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 复刻 Items 表头。
+- 生成五行固定骨架。
+- 为不同字段使用不同宽度。
+- 保持操作列右对齐。
+- 避免加载期间页面高度塌陷。
+
+## 执行思路
+
+1. Items 查询进入 pending。
+2. 路由渲染 PendingItems。
+3. Skeleton 占据最终表格空间。
+4. 查询完成后替换为 DataTable。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Items route` | 在 pending 分支使用。 |
+| `ui/table` | 与真实表格共享语义结构。 |
+| `ui/skeleton` | 加载占位原子组件。 |
+| `Items/columns` | 骨架列应与真实列同步。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `Array.from({ length: 5 })` | 生成与默认页大小一致的占位行。 |
+| `Skeleton className` | 模拟字段长度和形态。 |
+| `index key` | 静态占位列表可安全使用索引。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Pending/PendingItems.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="PendingItems.tsx" lineNumbers
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
+// 骨架表格复刻真实 Items 表格的列数、宽度层级与操作位置。
+const PendingItems = () => (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>ID</TableHead>
+        <TableHead>Title</TableHead>
+        <TableHead>Description</TableHead>
+        <TableHead>
+          <span className="sr-only">Actions</span>
+        </TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {/* 固定 5 行与默认 pageSize 对齐，减少加载完成后的布局跳动。 */}
+      {Array.from({ length: 5 }).map((_, index) => (
+        <TableRow key={index}>
+          {/* Skeleton 宽度模拟 ID、标题、描述和操作按钮的真实视觉重量。 */}
+          <TableCell>
+            <Skeleton className="h-4 w-64 font-mono" />
+          </TableCell>
+          <TableCell>
+            <Skeleton className="h-4 w-32" />
+          </TableCell>
+          <TableCell>
+            <Skeleton className="h-4 w-48" />
+          </TableCell>
+          <TableCell>
+            <div className="flex justify-end">
+              <Skeleton className="size-8 rounded-md" />
+            </div>
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+)
+
+export default PendingItems
+```
+
+## 阅读重点
+
+- 骨架列数、顺序和大致宽度应跟真实表格保持一致。
+- 固定占位行适合初始加载；翻页加载可保留旧数据并显示局部 loading。
+- 静态骨架使用 index key 不会遇到数据重排问题。
+- 动画应尊重 `prefers-reduced-motion`，通常由 Skeleton 组件统一处理。

@@ -1,0 +1,81 @@
+---
+title: "db.py：数据库引擎与初始化"
+description: "创建 SQLModel 引擎，并以幂等方式保证首个超级管理员存在。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该文件负责数据库连接的进程级对象和最小初始化逻辑。表结构由 Alembic 管理，而不是在每次启动时自动创建。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 从强类型配置生成唯一数据库引擎。
+- 明确模型必须在元数据操作前导入。
+- 查询首个超级管理员，缺失时才创建。
+- 让初始化脚本可以安全重复执行。
+
+## 核心执行流程
+
+1. 模块加载时创建数据库引擎。
+2. 启动脚本创建 `Session` 并调用 `init_db`。
+3. 按邮箱查询超级管理员。
+4. 仅在不存在时通过 CRUD 创建并哈希密码。
+
+## 与其他模块的关系
+
+- **`core/config.py`**：提供数据库 URI 与初始管理员配置。
+- **`models.py`**：注册 SQLModel 表与关系。
+- **`crud.py`**：封装用户创建和密码哈希。
+- **Alembic**：负责真正的数据库表结构迁移。
+
+## 带注释源码
+
+> 原始路径：`backend/app/core/db.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="db.py" lineNumbers
+from sqlmodel import Session, create_engine, select
+
+from app import crud
+from app.core.config import settings
+from app.models import User, UserCreate
+
+# Engine 管理连接池，可在整个应用进程中复用。
+engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))  # [!code highlight]
+
+
+# make sure all SQLModel models are imported (app.models) before initializing DB
+# otherwise, SQLModel might fail to initialize relationships properly
+# for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
+
+
+def init_db(session: Session) -> None:
+    """创建必要的初始数据；可重复调用而不会重复创建管理员。"""
+    # Tables should be created with Alembic migrations
+    # But if you don't want to use migrations, create
+    # the tables un-commenting the next lines
+    # from sqlmodel import SQLModel
+
+    # This works because the models are already imported and registered from app.models
+    # SQLModel.metadata.create_all(engine)
+
+    # 先查再建，使容器每次启动都能安全执行初始化。
+    user = session.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).first()
+    if not user:
+        user_in = UserCreate(
+            email=settings.FIRST_SUPERUSER,
+            password=settings.FIRST_SUPERUSER_PASSWORD,
+            is_superuser=True,
+        )
+        # 复用 CRUD，确保密码采用与正常注册相同的哈希流程。
+        user = crud.create_user(session=session, user_create=user_in)
+```
+
+## 阅读重点
+
+- Engine 通常全局复用，Session 按工作单元创建。
+- 初始化数据要幂等，避免重复插入。
+- 生产项目应使用迁移管理结构，而不是 `create_all()`。

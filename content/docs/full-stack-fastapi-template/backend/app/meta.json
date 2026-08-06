@@ -1,0 +1,21 @@
+{
+  "title": "Application",
+  "pages": [
+    "index",
+    "main-py",
+    "core",
+    "api",
+    "models-py",
+    "crud-py",
+    "utils-py",
+    "---启动与初始化---",
+    "backend_pre_start-py",
+    "initial_data-py",
+    "tests_pre_start-py",
+    "---数据库与邮件---",
+    "alembic",
+    "email-templates",
+    "__init__-py"
+  ],
+  "defaultOpen": true
+}

@@ -1,0 +1,165 @@
+---
+title: "DeleteUser.tsx：用户删除确认流程"
+description: "在下拉菜单中打开危险操作确认框，并执行级联删除与缓存刷新。"
+---
+
+<Callout type="idea" title="文件定位">
+
+删除用户是不可逆高风险操作。该组件把菜单项、确认文案、请求 pending 状态、成功回调和错误处理组合在一起，并明确提醒关联 Item 会被级联删除。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 从操作菜单打开确认 Dialog。
+- 调用 UsersService.deleteUser。
+- 提交期间禁用取消并显示加载状态。
+- 成功后关闭 Dialog 和父级菜单。
+- 刷新查询缓存，使用户和关联数据同步。
+
+## 执行思路
+
+1. 管理员点击 Delete User。
+2. 菜单项阻止默认关闭行为并打开 Dialog。
+3. 管理员确认后提交 form。
+4. SDK 删除用户及后端级联数据。
+5. 成功提示并刷新缓存。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `UserActionsMenu` | 承载该菜单项并传入目标用户。 |
+| `UsersService.deleteUser` | 删除端点。 |
+| `backend cascade rules` | 决定关联 Item 是否随用户删除。 |
+| `handleError` | 展示结构化 API 错误。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `id` | 目标用户 UUID。 |
+| `isOpen` | 确认 Dialog 状态。 |
+| `mutation.isPending` | 防止重复提交并驱动 LoadingButton。 |
+| `onSuccess` | 通知父级操作菜单关闭。 |
+
+<Callout type="warn" title="级联删除必须由数据库和后端保证">
+
+前端文案只是在提醒用户。真正的级联关系应由数据库外键、ORM relationship 或后端事务保证，否则可能留下孤儿数据或只删除部分资源。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Admin/DeleteUser.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="DeleteUser.tsx" lineNumbers
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Trash2 } from "lucide-react"
+import { useState } from "react"
+import { useForm } from "react-hook-form"
+
+import { UsersService } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { LoadingButton } from "@/components/ui/loading-button"
+import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
+
+// 父级菜单传入目标用户 ID，并在成功后关闭下拉菜单。
+interface DeleteUserProps {
+  id: string
+  onSuccess: () => void
+}
+
+const DeleteUser = ({ id, onSuccess }: DeleteUserProps) => {
+  // 删除确认 Dialog 与外层 DropdownMenu 分离控制。
+  const [isOpen, setIsOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { handleSubmit } = useForm()
+
+  // 将 SDK 调用包装为 mutationFn，保持参数签名简单。
+  const deleteUser = async (id: string) => {
+    await UsersService.deleteUser({ userId: id })
+  }
+
+  // 删除成功后关闭两层浮层；结束后刷新所有相关查询。
+  const mutation = useMutation({
+    mutationFn: deleteUser,
+    onSuccess: () => {
+      showSuccessToast("The user was deleted successfully")
+      setIsOpen(false)
+      onSuccess()
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries()
+    },
+  })
+
+  const onSubmit = async () => {
+    mutation.mutate(id)
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      {/* 阻止菜单默认 select 行为，否则确认弹窗可能随菜单一起卸载。 */}
+      <DropdownMenuItem
+        variant="destructive"
+        onSelect={(e) => e.preventDefault()}
+        onClick={() => setIsOpen(true)}
+      >
+        <Trash2 />
+        Delete User
+      </DropdownMenuItem>
+      <DialogContent className="sm:max-w-md">
+        {/* 删除没有输入字段，但复用 handleSubmit 保持原生 form 提交流程。 */}
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+            <DialogDescription>
+              All items associated with this user will also be{" "}
+              <strong>permanently deleted.</strong> Are you sure? You will not
+              be able to undo this action.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-4">
+            <DialogClose asChild>
+              <Button variant="outline" disabled={mutation.isPending}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <LoadingButton
+              variant="destructive"
+              type="submit"
+              loading={mutation.isPending}
+            >
+              Delete
+            </LoadingButton>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export default DeleteUser
+```
+
+## 阅读重点
+
+- 当前 `invalidateQueries()` 没有 queryKey，会使所有查询失效；简单应用可接受，大型应用应精确到 users/items。
+- 高风险操作应考虑要求再次输入邮箱、使用二次认证或提供软删除。
+- 前端隐藏当前用户的删除入口仍不够，后端必须禁止管理员删除自己或违反策略的账户。
+- `onSelect(e.preventDefault())` 是在 Dropdown 与 Dialog 组合时保持组件挂载的重要细节。

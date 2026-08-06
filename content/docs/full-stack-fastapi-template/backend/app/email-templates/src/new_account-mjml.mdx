@@ -1,0 +1,67 @@
+---
+title: "new_account.mjml：新账户欢迎邮件"
+description: "展示项目名、用户名、初始密码和控制台入口，并由 MJML 生成兼容 HTML。"
+---
+
+<Callout type="idea" title="模板定位">
+
+当管理员或系统创建新用户后，这个模板负责把账户信息和登录入口发送给用户。视觉重点是明确身份信息与主要操作按钮。
+
+</Callout>
+
+## 渲染数据
+
+| 变量 | 含义 |
+| --- | --- |
+| `{{ project_name }}` | 邮件标题中的项目名称。 |
+| `{{ username }}` | 新账户用户名或邮箱。 |
+| `{{ password }}` | 系统生成或分配的初始密码。 |
+| `{{ link }}` | 用户点击后进入的前端控制台地址。 |
+
+## 内容组织思路
+
+1. 使用项目名和 “New Account” 明确邮件主题。
+2. 用欢迎语解释邮件来源。
+3. 集中列出用户名和初始密码。
+4. 提供醒目的 Dashboard 按钮作为主操作。
+5. 用分隔线结束主要内容。
+
+<Callout type="warn" title="凭据邮件的改进方向">
+
+更安全的设计是不发送可长期使用的密码，而是发送一次性、短时有效的账户激活链接，让用户首次访问时自行设置密码。
+
+</Callout>
+
+## 带注释模板
+
+> 原始路径：`backend/app/email-templates/src/new_account.mjml`。`{{ ... }}` 会在发送前由模板引擎替换。
+
+```xml title="new_account.mjml" lineNumbers
+<mjml>
+  <!-- 页面级浅色背景；真正内容放在白色 section 中。 -->
+  <mj-body background-color="#fafbfc">
+    <mj-section background-color="#fff" padding="40px 20px">
+      <!-- 单列布局在桌面与移动端都更稳定。 -->
+      <mj-column vertical-align="middle" width="100%">
+        <!-- 品牌名由 Jinja 变量注入。 -->
+        <mj-text align="center" padding="35px" font-size="20px" color="#333">{{ project_name }} - New Account</mj-text>
+        <mj-text align="center" font-size="16px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555"><span>Welcome to your new account!</span></mj-text>
+        <mj-text align="center" font-size="16px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555">Here are your account details:</mj-text>
+        <mj-text align="center" font-size="16px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555">Username: {{ username }}</mj-text>
+        <!-- 初始密码属于敏感数据；生产系统可改为一次性激活链接。 -->
+        <mj-text align="center" font-size="16px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555">Password: {{ password }}</mj-text>
+        <!-- 主 CTA：link 应由可信的 FRONTEND_HOST 构建。 -->
+        <mj-button align="center" font-size="18px" background-color="#009688" border-radius="8px" color="#fff" href="{{ link }}" padding="15px 30px">Go to Dashboard</mj-button>
+        <mj-divider border-color="#ccc" border-width="2px"></mj-divider>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
+```
+
+## 阅读重点
+
+- 通过邮件发送明文初始密码有安全风险，实际产品更推荐发送一次性激活链接。
+- `href` 中的 URL 必须经过可信配置构建，不能直接拼接未验证的用户输入。
+- 布局样式应在 MJML 中维护，不应修改编译后的 HTML。
+- 敏感邮件应避免在日志中记录完整模板变量。

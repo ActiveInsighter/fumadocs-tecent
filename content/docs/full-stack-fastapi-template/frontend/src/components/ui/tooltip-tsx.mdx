@@ -1,0 +1,164 @@
+---
+title: "tooltip.tsx：悬浮提示复合组件"
+description: "基于 Radix Tooltip 提供延迟、Portal、方向动画和箭头样式。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Tooltip 为图标按钮、缩略标签等补充短说明。它不能代替表单标签、错误信息或必须阅读的业务内容。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提供共享 TooltipProvider。
+- 连接 Trigger 与 Content 的可访问关系。
+- 通过 Portal 避免父容器裁剪。
+- 按上下左右方向播放进入与退出动画。
+- 渲染与浮层颜色一致的箭头。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 用户聚焦或悬停 Trigger。
+
+  </Step>
+  <Step>
+
+### 2. Provider 应用 delayDuration。
+
+  </Step>
+  <Step>
+
+### 3. Root 切换打开状态。
+
+  </Step>
+  <Step>
+
+### 4. Portal 将 Content 挂到顶层。
+
+  </Step>
+  <Step>
+
+### 5. 离开、失焦或 Escape 后关闭。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `@radix-ui/react-tooltip` | 交互、焦点和 aria 关系。 |
+| `SidebarMenuButton` | 折叠侧栏中显示菜单文字。 |
+| `Portal` | 绕过 overflow hidden 与局部层叠上下文。 |
+| `cn` | 组合方向动画与业务样式。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `TooltipProvider` | `provider` | 设置延迟等共享配置。 |
+| `Tooltip` | `root` | 管理单个提示状态。 |
+| `TooltipTrigger` | `trigger` | 关联可交互触发元素。 |
+| `TooltipContent` | `content` | Portal 中的提示文本和箭头。 |
+
+## 组合结构
+
+<Files>
+  <Folder name="TooltipProvider" defaultOpen>
+    <Folder name="Tooltip Root" defaultOpen>
+      <File name="TooltipTrigger" />
+      <Folder name="Portal">
+        <File name="TooltipContent" />
+        <File name="Arrow" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+<Callout type="warn" title="不要隐藏关键信息">
+
+Tooltip 在触摸设备上不稳定，也可能被用户忽略。按钮的核心含义应有可访问名称，关键错误和操作说明必须直接显示。
+
+</Callout>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/tooltip.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="tooltip.tsx" lineNumbers
+import * as React from "react"
+import * as TooltipPrimitive from "@radix-ui/react-tooltip"
+
+import { cn } from "@/lib/utils"
+
+// Provider 集中配置延迟和悬浮卡之间的共享行为。
+function TooltipProvider({
+  delayDuration = 0,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+  return (
+    <TooltipPrimitive.Provider
+      data-slot="tooltip-provider"
+      delayDuration={delayDuration}
+      {...props}
+    />
+  )
+}
+
+// 每个 Tooltip 默认自带 Provider，便于独立使用。
+function Tooltip({
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  return (
+    <TooltipProvider>
+      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+    </TooltipProvider>
+  )
+}
+
+// Trigger 默认保留 Radix 行为；常配合 asChild 包裹按钮。
+function TooltipTrigger({
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+}
+
+// Content 通过 Portal 脱离局部 stacking context，并按 side 播放动画。
+function TooltipContent({
+  className,
+  sideOffset = 0,
+  children,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  return (
+    <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Content
+        data-slot="tooltip-content"
+        sideOffset={sideOffset}
+        className={cn(
+          "bg-foreground text-background animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-3 py-1.5 text-xs text-balance",
+          className
+        )}
+        {...props}
+      >
+        {/* 文本内容后追加视觉箭头，箭头颜色与浮层一致。 */}
+        {children}
+        <TooltipPrimitive.Arrow className="bg-foreground fill-foreground z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
+      </TooltipPrimitive.Content>
+    </TooltipPrimitive.Portal>
+  )
+}
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+```
+
+## 阅读重点
+
+- 图标按钮配合 Tooltip 时仍应提供 `aria-label`。
+- 内容应简短，复杂说明更适合 Popover 或正文。
+- `sideOffset=0` 很贴近触发器，可按视觉需要增加间距。
+- 顶层 SidebarProvider 已包裹 TooltipProvider，单组件再次包裹虽安全但可能冗余。

@@ -1,0 +1,77 @@
+---
+title: "_layout：登录后业务页面"
+description: "汇总共享认证布局下的 Dashboard、Items、Settings 和 Admin 子路由。"
+---
+
+<Callout type="idea" title="目录定位">
+
+该目录中的页面都继承上级 `_layout.tsx` 的登录守卫、侧边栏、顶部栏和页脚。目录名属于文件路由组织，不会直接出现在最终 URL。
+
+</Callout>
+
+## 目录结构
+
+<Files>
+  <Folder name="frontend/src/routes/_layout" defaultOpen>
+    <File name="index.tsx → /" />
+    <File name="items.tsx → /items" />
+    <File name="settings.tsx → /settings" />
+    <File name="admin.tsx → /admin" />
+  </Folder>
+</Files>
+
+## 如何组织
+
+| 页面 | 主要数据 | 权限 |
+| --- | --- | --- |
+| Dashboard | currentUser | 已登录 |
+| Items | items list | 已登录 |
+| Settings | currentUser + mutations | 已登录 |
+| Admin | users list | 超级用户 |
+
+```mermaid
+flowchart TD
+  Layout[_layout beforeLoad] --> Dashboard[/]
+  Layout --> Items[/items]
+  Layout --> Settings[/settings]
+  Layout --> AdminGuard{admin beforeLoad}
+  AdminGuard --> Admin[/admin]
+```
+
+## 组织原则
+
+- 共享认证和页面骨架只在父布局实现一次。
+- 子页面只负责自己的数据、标题和内容。
+- 额外权限（superuser）在最接近页面的路由守卫中处理。
+- 列表页面统一使用 Query Key、Suspense fallback 和 DataTable。
+- URL 路径与文件层级由 TanStack Router 自动生成。
+
+## 推荐阅读顺序
+
+<Steps>
+  <Step>
+
+### 1. 先读父级 `_layout.tsx`。
+
+  </Step>
+  <Step>
+
+### 2. 再读最简单的 `index.tsx`。
+
+  </Step>
+  <Step>
+
+### 3. 然后读 `items.tsx` 的 Suspense 列表模式。
+
+  </Step>
+  <Step>
+
+### 4. 继续读 `settings.tsx` 的配置驱动 Tabs。
+
+  </Step>
+  <Step>
+
+### 5. 最后读 `admin.tsx` 的附加权限守卫。
+
+  </Step>
+</Steps>

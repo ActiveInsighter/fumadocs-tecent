@@ -1,0 +1,37 @@
+---
+title: "__init__.py：应用包边界"
+description: "说明 backend/app 为什么是 Python 包，以及空初始化文件如何避免导入副作用。"
+---
+
+<Callout type="idea" title="文件定位">
+
+这个文件本身不承载业务逻辑，它的主要价值是明确 `app` 是后端应用的顶层 Python 包。保持为空可以避免导入 `app` 时意外连接数据库、加载路由或执行初始化任务。
+
+</Callout>
+
+## 它为什么可以是空文件
+
+- Python 在导入 `app.main`、`app.models` 等模块时，会先识别 `app` 包。
+- 显式保留 `__init__.py` 能让编辑器、测试工具和不同 Python 版本更稳定地识别包边界。
+- 不在这里集中导入全部子模块，可以降低循环依赖和启动副作用的风险。
+
+## 包内主要模块
+
+<Cards>
+  <Card href="./main-py" title="main.py">组装 FastAPI、CORS、监控、API 路由与静态前端。</Card>
+  <Card href="./models-py" title="models.py">定义 SQLModel 表模型和 API 数据模型。</Card>
+  <Card href="./crud-py" title="crud.py">封装用户创建、认证和数据访问操作。</Card>
+  <Card href="./api" title="api/">组织依赖注入、鉴权和 HTTP 路由。</Card>
+</Cards>
+
+## 源码
+
+```python title="__init__.py" lineNumbers
+# 该文件刻意保持为空：只声明 `app` 的包边界，不执行初始化副作用。
+```
+
+<Callout type="warn" title="不要把启动逻辑放在这里">
+
+数据库迁移、初始数据创建和服务探活应由独立脚本完成。否则任何 `import app` 都可能触发耗时或不可逆操作。
+
+</Callout>

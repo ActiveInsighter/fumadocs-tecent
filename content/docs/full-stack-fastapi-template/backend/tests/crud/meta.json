@@ -1,0 +1,8 @@
+{
+  "title": "CRUD Tests",
+  "pages": [
+    "index",
+    "__init__-py",
+    "test_user-py"
+  ]
+}

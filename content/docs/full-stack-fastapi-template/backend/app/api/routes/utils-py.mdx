@@ -1,0 +1,75 @@
+---
+title: "utils.py：运维辅助接口"
+description: "提供超级用户测试邮件接口和轻量健康检查。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该路由模块承载不属于某个业务资源、但对运维和集成测试有价值的接口。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 让管理员验证 SMTP 与邮件模板是否可用。
+- 提供无需数据库查询的存活检查。
+- 使用依赖声明保护敏感测试操作。
+
+## 核心执行流程
+
+1. 测试邮件接口先通过超级用户依赖。
+2. 生成模板数据并发送邮件。
+3. 健康检查异步返回布尔值。
+
+## 与其他模块的关系
+
+- **`api/deps.py`**：保护测试邮件接口。
+- **`app/utils.py`**：负责生成和发送邮件。
+- **负载均衡器/容器平台**：可调用健康检查判断服务是否存活。
+
+## 带注释源码
+
+> 原始路径：`backend/app/api/routes/utils.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="utils.py" lineNumbers
+from fastapi import APIRouter, Depends
+from pydantic.networks import EmailStr
+
+from app.api.deps import get_current_active_superuser
+from app.models import Message
+from app.utils import generate_test_email, send_email
+
+# 运维辅助接口统一归入 /utils。
+router = APIRouter(prefix="/utils", tags=["utils"])
+
+
+@router.post(
+    "/test-email/",
+    dependencies=[Depends(get_current_active_superuser)],
+    status_code=201,
+)
+def test_email(email_to: EmailStr) -> Message:
+    """
+    Test emails.
+    """
+    # 模板生成与 SMTP 发送分离，便于分别测试。
+    email_data = generate_test_email(email_to=email_to)
+    send_email(
+        email_to=email_to,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+    return Message(message="Test email sent")
+
+
+@router.get("/health-check/")
+async def health_check() -> bool:
+    """轻量 liveness 探针：进程能处理请求即返回成功。"""
+    return True
+```
+
+## 阅读重点
+
+- 存活检查应快速、稳定，深度依赖检查可单独提供 readiness 接口。
+- 测试邮件属于高权限操作，不能匿名开放。
+- 201 状态表示已触发创建/发送动作。

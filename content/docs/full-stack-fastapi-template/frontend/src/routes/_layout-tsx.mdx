@@ -1,0 +1,144 @@
+---
+title: "_layout.tsx：登录后页面共享外壳"
+description: "通过 beforeLoad 保护子路由，并统一侧边栏、顶部栏、内容区和页脚。"
+---
+
+<Callout type="idea" title="文件定位">
+
+`_layout` 是无路径布局路由：它不会给 URL 增加片段，却能让 Dashboard、Items、Settings 和 Admin 共享认证守卫与页面骨架。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 在进入子页面前检查 access_token。
+- 匿名用户重定向到 /login。
+- 提供响应式 AppSidebar。
+- 渲染固定顶部栏和侧栏触发器。
+- 限制主内容最大宽度。
+- 在 Outlet 中承载具体子页面。
+- 统一页脚。
+
+## 执行思路
+
+<Steps>
+  <Step>
+
+### 1. 用户访问受保护 URL。
+
+  </Step>
+  <Step>
+
+### 2. beforeLoad 调用 isLoggedIn。
+
+  </Step>
+  <Step>
+
+### 3. 无令牌时抛出 redirect。
+
+  </Step>
+  <Step>
+
+### 4. 有令牌时渲染 SidebarProvider 和 AppSidebar。
+
+  </Step>
+  <Step>
+
+### 5. Outlet 渲染匹配的子页面。
+
+  </Step>
+  <Step>
+
+### 6. Footer 位于所有子页面之后。
+
+  </Step>
+</Steps>
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `useAuth.isLoggedIn` | 快速认证入口判断。 |
+| `AppSidebar / SidebarProvider` | 导航与响应式侧栏状态。 |
+| `Outlet` | 注入当前子路由。 |
+| `Footer` | 所有登录后页面共享页脚。 |
+| `main.tsx 401/403 handler` | 令牌无效时的运行时兜底。 |
+
+## 路由契约
+
+| 配置 | 作用 |
+| --- | --- |
+| `path id` | `/_layout`，文件层级存在但 URL 路径为空。 |
+| `beforeLoad` | 匿名用户重定向 `/login`。 |
+| `component` | 共享页面框架。 |
+| `Outlet children` | `/`、`/items`、`/settings`、`/admin`。 |
+
+<Files>
+  <Folder name="SidebarProvider" defaultOpen>
+    <File name="AppSidebar" />
+    <Folder name="SidebarInset" defaultOpen>
+      <File name="sticky header + SidebarTrigger" />
+      <File name="main + Outlet" />
+      <File name="Footer" />
+    </Folder>
+  </Folder>
+</Files>
+
+## 带注释源码
+
+> 原始路径：`frontend/src/routes/_layout.tsx`。以下仅增加学习性注释与代码高亮标记，不改变程序行为。
+
+```tsx title="_layout.tsx" lineNumbers
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router"
+
+import { Footer } from "@/components/Common/Footer"
+import AppSidebar from "@/components/Sidebar/AppSidebar"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+import { isLoggedIn } from "@/hooks/useAuth"
+
+// 路径分组 `_layout` 不出现在 URL 中，但为所有登录后页面提供共同外壳。
+export const Route = createFileRoute("/_layout")({
+  component: Layout,
+  // 在页面组件渲染前做快速认证守卫。
+  beforeLoad: async () => {
+    if (!isLoggedIn()) {
+      throw redirect({
+        to: "/login",
+      })
+    }
+  },
+})
+
+// Layout 只组织导航、主内容出口与页脚，不请求具体页面数据。
+function Layout() {
+  return (
+    {/* Provider 同时管理桌面折叠与移动端 Sheet。 */}
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1 text-muted-foreground" />
+        </header>
+        <main className="flex-1 p-6 md:p-8">
+          <div className="mx-auto max-w-7xl">
+            {/* /、/items、/settings、/admin 在此替换。 */}
+            <Outlet />
+          </div>
+        </main>
+        <Footer />
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}
+```
+
+## 阅读重点
+
+- 令牌存在不代表有效；真正 API 请求返回 401/403 时由全局错误处理清理会话。
+- 布局路由适合共享导航和守卫，避免每个页面重复相同 JSX。
+- sticky header 的父滚动容器和 z-index 需要与侧边栏协调。
+- Outlet 外层 max-w-7xl 统一内容宽度，个别全宽页面可通过布局设计调整。

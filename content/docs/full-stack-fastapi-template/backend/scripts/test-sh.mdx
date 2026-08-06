@@ -1,0 +1,61 @@
+---
+title: "test.sh：运行 Pytest 与覆盖率"
+description: "在 development 环境下执行后端测试，并同时生成终端与 HTML 覆盖率报告。"
+---
+
+<Callout type="idea" title="测试入口">
+
+这是后端测试的核心执行脚本。它让 coverage 启动 Pytest，从而记录测试真正执行到的 Python 行，再输出两种报告。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 为测试命令临时设置 `FASTAPI_ENV=development`。
+- 运行 `tests/` 下的完整 Pytest 套件。
+- 输出终端覆盖率摘要。
+- 生成 `htmlcov/` HTML 报告，便于逐行检查未覆盖代码。
+
+## 执行思路
+
+1. Coverage 启动 Python 模块 `pytest`。
+2. Pytest 加载 `conftest.py` fixture 并执行用例。
+3. Coverage 汇总被执行的源码行。
+4. 终端报告用于快速门禁，HTML 报告用于深入定位。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `tests/conftest.py` | 提供数据库、客户端和认证头 fixture。 |
+| `tests-start.sh` | 在数据库探活后调用本脚本。 |
+| `pyproject.toml` | 保存 Pytest 与 Coverage 配置。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/scripts/test.sh`。以下只补充学习性注释与高亮标记，不改变原始执行逻辑。
+
+```bash title="test.sh" lineNumbers
+#!/usr/bin/env bash
+
+# 测试或报告生成失败时立即返回失败状态。
+set -e
+# 把完整命令写入日志。
+set -x
+
+# 仅对当前命令设置环境，并让 coverage 作为 Python 启动器运行 Pytest。
+FASTAPI_ENV=development coverage run -m pytest tests/  # [!code highlight]
+# 在终端输出按文件统计，适合 CI 日志快速查看。
+coverage report
+# 生成可浏览的 HTML 报告；可把脚本参数用于报告标题。
+coverage html --title "${@-coverage}"
+```
+
+## 阅读重点
+
+- 覆盖率衡量“哪些行被执行”，不直接代表断言质量。
+- 环境变量只作用于这一条 `coverage run` 命令。
+- HTML 报告属于生成产物，通常不提交仓库。
+- 可在 CI 中设置最低覆盖率阈值，防止长期下降。

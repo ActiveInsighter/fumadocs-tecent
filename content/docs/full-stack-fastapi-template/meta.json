@@ -1,0 +1,23 @@
+{
+  "title": "Full Stack FastAPI Template",
+  "pages": [
+    "index",
+    "---开始学习---",
+    "development",
+    "deployment",
+    "---项目配置---",
+    "project-configuration",
+    "dependency-locks",
+    "---源码结构---",
+    "backend",
+    "frontend",
+    "tooling",
+    "hooks",
+    "scripts",
+    "---项目资料---",
+    "contributing",
+    "release-notes",
+    "license"
+  ],
+  "defaultOpen": true
+}

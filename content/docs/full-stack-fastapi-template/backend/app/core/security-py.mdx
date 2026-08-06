@@ -1,0 +1,84 @@
+---
+title: "security.py：JWT 与密码安全"
+description: "集中封装访问令牌生成、密码哈希和渐进式哈希升级。"
+---
+
+<Callout type="idea" title="文件定位">
+
+路由和 CRUD 不直接依赖具体哈希器细节，而调用本模块提供的稳定函数。这样未来更换算法时不必修改所有业务代码。
+
+</Callout>
+
+## 这个文件解决什么问题
+
+- 使用 UTC 过期时间生成签名 JWT。
+- 优先使用 Argon2，同时兼容已有 Bcrypt 哈希。
+- 验证密码时可返回升级后的新哈希。
+- 统一算法常量，保证编码和解码一致。
+
+## 核心执行流程
+
+1. 登录成功后调用 `create_access_token`。
+2. 把用户 ID 放入 `sub`，把过期时间放入 `exp`。
+3. 密码验证时依次识别支持的哈希格式。
+4. 若旧哈希策略需要升级，返回新哈希供 CRUD 持久化。
+
+## 与其他模块的关系
+
+- **`config.py`**：提供 JWT 签名密钥。
+- **`api/deps.py`**：使用相同算法解码 Token。
+- **`crud.py`**：创建用户、认证与升级密码哈希。
+
+## 带注释源码
+
+> 原始路径：`backend/app/core/security.py`。以下仅增加学习性注释，不改变程序逻辑。
+
+```python title="security.py" lineNumbers
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import jwt
+from pwdlib import PasswordHash
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
+
+from app.core.config import settings
+
+# 新密码优先采用 Argon2；Bcrypt 用于验证并升级历史哈希。
+password_hash = PasswordHash(
+    (
+        Argon2Hasher(),
+        BcryptHasher(),
+    )
+)
+
+
+# 编码和解码必须使用同一允许算法列表。
+ALGORITHM = "HS256"
+
+
+def create_access_token(subject: str | Any, expires_delta: timedelta) -> str:
+    """签发包含主体 `sub` 和过期时间 `exp` 的访问令牌。"""
+    expire = datetime.now(UTC) + expires_delta
+    to_encode = {"exp": expire, "sub": str(subject)}
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+def verify_password(
+    plain_password: str, hashed_password: str
+) -> tuple[bool, str | None]:
+    """验证密码，并在算法策略过旧时返回建议替换的新哈希。"""
+    return password_hash.verify_and_update(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    """为新密码生成不可逆哈希。"""
+    return password_hash.hash(password)
+```
+
+## 阅读重点
+
+- JWT 是签名令牌，不是加密容器，不要放敏感明文。
+- 密码应只保存哈希，绝不保存原文。
+- 多哈希器策略便于平滑迁移旧数据。

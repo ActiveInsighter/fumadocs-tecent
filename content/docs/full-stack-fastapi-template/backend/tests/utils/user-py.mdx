@@ -1,0 +1,99 @@
+---
+title: "user.py：用户工厂与认证头辅助函数"
+description: "创建随机用户，并通过真实登录端点获得可复用的 Bearer 请求头。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该模块连接“数据库准备”和“HTTP 认证”两层。测试既可快速创建用户，也可用真实登录端点取得 token，从而避免手工伪造 JWT。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提交 OAuth2 表单并生成 Authorization 请求头。
+- 创建带随机邮箱和密码的普通用户。
+- 按邮箱复用已有用户或创建新用户。
+- 为路由测试返回标准 Bearer token 头。
+
+## 执行思路
+
+1. 确定邮箱和密码。
+2. 查询用户；不存在时通过 CRUD 创建。
+3. 调用 `/login/access-token`。
+4. 把 access token 包装为 `Authorization: Bearer ...`。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `app/crud.py` | 创建和查询测试用户。 |
+| `login/access-token` | 真实签发 JWT 的 HTTP 端点。 |
+| `tests/api/routes/*` | 大量路由用例复用认证头。 |
+
+
+
+## 带注释源码
+
+> 原始路径：`backend/tests/utils/user.py`。以下仅增加学习性注释，不改变程序行为。
+
+```python title="user.py" lineNumbers
+from fastapi.testclient import TestClient
+from sqlmodel import Session
+
+from app import crud
+from app.core.config import settings
+from app.models import User, UserCreate, UserUpdate
+from tests.utils.utils import random_email, random_lower_string
+
+
+# 用真实登录端点换取认证头，覆盖完整凭据链。
+def user_authentication_headers(
+    *, client: TestClient, email: str, password: str
+) -> dict[str, str]:
+    data = {"username": email, "password": password}
+
+    r = client.post(f"{settings.API_V1_STR}/login/access-token", data=data)
+    response = r.json()
+    auth_token = response["access_token"]
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    return headers
+
+
+# 构造唯一邮箱并通过 CRUD 创建持久化用户。
+def create_random_user(db: Session) -> User:
+    email = random_email()
+    password = random_lower_string()
+    user_in = UserCreate(email=email, password=password)
+    user = crud.create_user(session=db, user_create=user_in)
+    return user
+
+
+# 若用户不存在则创建，再返回可直接用于请求的 Bearer 头。
+def authentication_token_from_email(
+    *, client: TestClient, email: str, db: Session
+) -> dict[str, str]:
+    """
+    Return a valid token for the user with given email.
+
+    If the user doesn't exist it is created first.
+    """
+    password = random_lower_string()
+    user = crud.get_user_by_email(session=db, email=email)
+    if not user:
+        user_in_create = UserCreate(email=email, password=password)
+        user = crud.create_user(session=db, user_create=user_in_create)
+    else:
+        user_in_update = UserUpdate(password=password)
+        if not user.id:
+            raise Exception("User id not set")
+        user = crud.update_user(session=db, db_user=user, user_in=user_in_update)
+
+    return user_authentication_headers(client=client, email=email, password=password)
+```
+
+## 阅读重点
+
+- 通过真实登录端点获取 token，比直接调用 JWT 函数更接近客户端行为。
+- 辅助函数中的断言用于保证测试准备成功，但业务断言仍应留在测试主体。
+- 随机密码仅用于测试，不能复用到生产种子数据。

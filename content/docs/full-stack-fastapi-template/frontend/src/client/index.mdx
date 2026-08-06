@@ -1,0 +1,77 @@
+---
+title: "Generated API Client：前端类型安全 API 层"
+description: "理解 OpenAPI 代码生成目录的分层、依赖方向和再生成流程。"
+---
+
+<Callout type="idea" title="目录定位">
+
+`frontend/src/client/` 由 FastAPI 的 OpenAPI Schema 自动生成。它把后端的数据模型和路由契约转换成 TypeScript 类型、服务方法和通用请求运行时，减少手写 URL、请求体和响应类型造成的漂移。
+
+</Callout>
+
+## 目录结构
+
+<Files>
+  <Folder name="client" defaultOpen>
+    <Folder name="core" defaultOpen>
+      <File name="request.ts — HTTP 请求执行器" />
+      <File name="OpenAPI.ts — 运行时配置" />
+      <File name="CancelablePromise.ts — 取消模型" />
+      <File name="ApiError.ts — 结构化错误" />
+      <File name="ApiRequestOptions.ts — 端点描述" />
+      <File name="ApiResult.ts — 响应快照" />
+    </Folder>
+    <File name="sdk.gen.ts — 面向业务的服务类" />
+    <File name="types.gen.ts — TypeScript 数据类型" />
+    <File name="schemas.gen.ts — 运行时 JSON Schema" />
+    <File name="index.ts — 公共导出入口" />
+  </Folder>
+</Files>
+
+## 分层关系
+
+```mermaid
+flowchart TD
+  FastAPI[FastAPI OpenAPI JSON] --> Generator[@hey-api/openapi-ts]
+  Generator --> Types[types.gen.ts]
+  Generator --> Schemas[schemas.gen.ts]
+  Generator --> SDK[sdk.gen.ts]
+  Generator --> Core[core/]
+  Index[index.ts] --> Types
+  Index --> SDK
+  Index --> Core
+  UI[React Components / Hooks] --> Index
+  SDK --> Core
+```
+
+## 学习导航
+
+<Cards>
+  <Card href="./core/request-ts" title="请求执行器">阅读从端点描述到 Axios 请求的完整管线。</Card>
+  <Card href="./sdk-gen-ts" title="服务层 SDK">观察后端路由如何变成静态方法。</Card>
+  <Card href="./types-gen-ts" title="生成类型">理解 DTO 与端点参数类型。</Card>
+  <Card href="./schemas-gen-ts" title="运行时 Schema">理解静态类型之外的 JSON Schema。</Card>
+  <Card href="./index-ts" title="公共入口">理解业务模块为什么只从 `@/client` 导入。</Card>
+</Cards>
+
+## 再生成流程
+
+<Steps>
+  <Step>启动或提供可访问的 FastAPI OpenAPI 文档。</Step>
+  <Step>运行项目的 `scripts/generate-client.sh`。</Step>
+  <Step>生成器读取 Schema 并覆盖 `src/client/`。</Step>
+  <Step>执行 TypeScript、Lint 和前端测试，确认契约变化已被处理。</Step>
+</Steps>
+
+<Callout type="warn" title="不要把生成文件当手写业务代码">
+
+学习时可以逐行阅读，但长期定制应放在生成器配置、后端 Schema、封装层或独立适配器中。直接修改生成文件会在下一次生成时丢失。
+
+</Callout>
+
+## 组织原则
+
+- 依赖方向应保持为“业务层 → 生成客户端 → 请求运行时”，不要让生成代码反向依赖具体页面。
+- 后端字段或路由改变后应立即重新生成，利用 TypeScript 编译错误定位受影响的前端代码。
+- 业务规则不应写入 `sdk.gen.ts`；可在 hooks 或 service adapter 中组合多个端点。
+- 提交生成文件能让 CI 和部署无需在构建阶段依赖运行中的后端。

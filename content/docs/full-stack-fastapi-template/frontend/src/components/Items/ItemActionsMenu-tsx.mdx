@@ -1,0 +1,94 @@
+---
+title: "ItemActionsMenu.tsx：Item 行操作协调器"
+description: "在表格行中组合编辑和删除入口，并管理嵌套下拉菜单的关闭状态。"
+---
+
+<Callout type="idea" title="文件定位">
+
+该组件本身不执行 API 请求，只协调一行数据、DropdownMenu 和两个具体操作组件，是典型的轻量组合层。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 渲染省略号图标按钮。
+- 管理 DropdownMenu 受控状态。
+- 把完整 Item 传给编辑组件。
+- 把 Item id 传给删除组件。
+- 在子操作成功后关闭菜单。
+
+## 执行思路
+
+1. DataTable 渲染 actions cell。
+2. 点击按钮打开菜单。
+3. 选择编辑或删除。
+4. 子组件完成 API 请求。
+5. onSuccess 关闭菜单。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `Items/columns.tsx` | 创建该组件。 |
+| `EditItem` | 编辑流程。 |
+| `DeleteItem` | 删除流程。 |
+| `DropdownMenu` | 菜单状态与定位。 |
+
+## 状态与数据
+
+| 名称 | 作用 |
+| --- | --- |
+| `item` | 当前表格行的 ItemPublic。 |
+| `open` | 下拉菜单开关。 |
+| `setOpen(false)` | 供子组件成功回调关闭菜单。 |
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/Items/ItemActionsMenu.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="ItemActionsMenu.tsx" lineNumbers
+import { EllipsisVertical } from "lucide-react"
+import { useState } from "react"
+
+import type { ItemPublic } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import DeleteItem from "../Items/DeleteItem"
+import EditItem from "../Items/EditItem"
+
+// 传入完整 ItemPublic，编辑和删除子组件各取所需字段。
+interface ItemActionsMenuProps {
+  item: ItemPublic
+}
+
+export const ItemActionsMenu = ({ item }: ItemActionsMenuProps) => {
+  // 受控菜单允许子 Dialog 成功后主动关闭。
+  const [open, setOpen] = useState(false)
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <EllipsisVertical />
+        </Button>
+      </DropdownMenuTrigger>
+      {/* 编辑需要完整 item，删除只需要 id。 */}
+      <DropdownMenuContent align="end">
+        <EditItem item={item} onSuccess={() => setOpen(false)} />
+        <DeleteItem id={item.id} onSuccess={() => setOpen(false)} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+```
+
+## 阅读重点
+
+- 组合层不应重复保存 Item 字段，直接传递完整强类型对象更简单。
+- 图标按钮应补充 sr-only 或 tooltip，确保无障碍名称。
+- 同目录组件可使用 `./EditItem` 和 `./DeleteItem`，比 `../Items/...` 更直接。
+- 受控 open 模式让多层浮层的关闭行为可预测。

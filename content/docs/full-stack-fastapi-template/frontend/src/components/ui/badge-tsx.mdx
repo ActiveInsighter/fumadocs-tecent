@@ -1,0 +1,125 @@
+---
+title: "badge.tsx：状态标签原语"
+description: "用 CVA 管理四种视觉变体，并通过 Slot 支持链接化或其他多态渲染。"
+---
+
+<Callout type="idea" title="文件定位">
+
+Badge 用于短文本状态、角色或分类。默认是 `span`，不会自动获得按钮行为；`asChild` 只在确实需要链接语义时使用。
+
+</Callout>
+
+## 这个文件负责什么
+
+- 提供 default、secondary、destructive、outline 变体。
+- 统一小字号、圆角和图标尺寸。
+- 支持 asChild 多态渲染。
+- 导出 badgeVariants 供其他组件复用。
+
+## 执行思路
+
+1. 调用方传 variant。
+2. CVA 计算类名。
+3. asChild 决定 span 或 Slot。
+4. 属性与样式落到最终节点。
+
+## 与其他模块的关系
+
+| 模块 | 关系 |
+| --- | --- |
+| `CVA` | 类型化变体。 |
+| `Radix Slot` | 合并到子元素。 |
+| `Admin columns` | 展示用户角色等状态。 |
+
+## 导出 API
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `Badge` | `component` | 标签组件。 |
+| `badgeVariants` | `style factory` | 可复用的变体类生成器。 |
+
+## 组合结构
+
+```tsx title="usage.tsx"
+<Badge variant="secondary">Member</Badge>
+<Badge variant="destructive">Inactive</Badge>
+<Badge asChild variant="outline">
+  <a href="/admin">Admin</a>
+</Badge>
+```
+
+## 带注释源码
+
+> 原始路径：`frontend/src/components/ui/badge.tsx`。以下仅增加学习性注释，不改变程序行为。
+
+```tsx title="badge.tsx" lineNumbers
+import * as React from "react"
+import { Slot } from "@radix-ui/react-slot"
+import { cva, type VariantProps } from "class-variance-authority"
+
+import { cn } from "@/lib/utils"
+
+// 变体描述 Badge 的语义层级，调用方不需要拼接颜色类。
+const badgeVariants = cva(
+  "inline-flex items-center justify-center rounded-full border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
+  {
+    variants: {
+      variant: {
+        default:
+          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+        destructive:
+          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
+        outline:
+          "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+)
+
+// asChild 允许把样式与 data-slot 合并到链接等其他语义元素。
+function Badge({
+  className,
+  variant,
+  asChild = false,
+  ...props
+}: React.ComponentProps<"span"> &
+  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+  // 默认使用非交互 span；asChild 时由调用方决定最终 DOM。
+  const Comp = asChild ? Slot : "span"
+
+  return (
+    <Comp
+      data-slot="badge"
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    />
+  )
+}
+
+export { Badge, badgeVariants }
+```
+
+## 阅读重点
+
+- Badge 不应承载点击动作；可点击标签应使用 Link/Button 并保留正确语义。
+- 颜色不能是唯一状态线索，文字必须明确。
+- `[a&]` 只在最终元素是 a 时启用 hover。
+- asChild 要求恰好一个可接受 props 的子元素。
+
+## Twoslash：从变体联合限制输入
+
+```ts twoslash
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+function badgeClass(variant: BadgeVariant) {
+  return `badge-${variant}`
+}
+
+const value = badgeClass('secondary')
+//    ^?
+```
