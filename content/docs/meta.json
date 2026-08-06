@@ -1,5 +1,12 @@
 {
   "title": "Framework",
   "description": "A minimal selection from the official Fumadocs framework docs",
-  "pages": ["index", "what-is-fumadocs", "comparisons", "test", "mdx-syntax-example"]
+  "pages": [
+    "index",
+    "computer-organization",
+    "what-is-fumadocs",
+    "comparisons",
+    "test",
+    "mdx-syntax-example"
+  ]
 }
