@@ -87,9 +87,9 @@ flowchart TD
 
 一个完整的计算机系统由硬件和软件共同构成：
 
-\[
+```math
 \text{计算机系统}=\text{硬件系统}+\text{软件系统}
-\]
+```
 
 ### 1. 硬件系统
 
@@ -103,15 +103,15 @@ CPU + 主存 + I/O 系统
 
 其中 CPU 传统上由运算器和控制器构成：
 
-\[
+```math
 \text{CPU}=\text{运算器}+\text{控制器}
-\]
+```
 
 现代教材也常写成：
 
-\[
+```math
 \text{CPU}=\text{数据通路}+\text{控制单元}
-\]
+```
 
 - **数据通路**：ALU、寄存器、多路选择器和内部连接通路，负责保存并处理数据；
 - **控制单元**：产生控制信号，组织取指、译码和执行。
@@ -266,15 +266,15 @@ CPU 取指并执行
 
 顺序执行时：
 
-\[
+```math
 PC_{\text{new}}=PC_{\text{old}}+\text{当前指令长度}
-\]
+```
 
 发生跳转时：
 
-\[
+```math
 PC_{\text{new}}=\text{跳转目标地址}
-\]
+```
 
 ### 条件语句如何变成机器操作
 
@@ -481,9 +481,9 @@ ISA 是软件和硬件之间的接口，通常规定：
 
 同一种功能可以由硬件实现，也可以由软件模拟。例如没有硬件乘法器时，可以用加法和移位完成乘法。
 
-\[
+```math
 7\times 4=7+7+7+7
-\]
+```
 
 二者可以得到相同逻辑结果，但在速度、成本、功耗、灵活性和设计复杂度上并不相同。
 
@@ -507,54 +507,54 @@ ISA 是软件和硬件之间的接口，通常规定：
 
 主频表示每秒包含多少个时钟周期，时钟周期表示一个周期持续多久。二者互为倒数：
 
-\[
+```math
 T=\frac{1}{f}
-\]
+```
 
-\[
+```math
 f=\frac{1}{T}
-\]
+```
 
 例如主频为 2 GHz：
 
-\[
+```math
 \begin{aligned}
 T
 &=\frac{1}{2\times 10^9}\\
 &=0.5\times 10^{-9}\ \mathrm{s}\\
 &=0.5\ \mathrm{ns}
 \end{aligned}
-\]
+```
 
 常用单位：
 
-\[
+```math
 1\ \mathrm{MHz}=10^6\ \mathrm{Hz}
-\]
+```
 
-\[
+```math
 1\ \mathrm{GHz}=10^9\ \mathrm{Hz}
-\]
+```
 
-\[
+```math
 1\ \mathrm{ms}=10^{-3}\ \mathrm{s},\quad
 1\ \mathrm{\mu s}=10^{-6}\ \mathrm{s},\quad
 1\ \mathrm{ns}=10^{-9}\ \mathrm{s}
-\]
+```
 
 ### 3. CPI 与 IPC
 
 CPI 表示平均每条指令消耗的时钟周期数：
 
-\[
+```math
 \mathrm{CPI}=\frac{\text{总时钟周期数}}{\text{指令条数}}
-\]
+```
 
 IPC 表示平均每个时钟周期完成的指令数。在简化模型中：
 
-\[
+```math
 \mathrm{IPC}=\frac{1}{\mathrm{CPI}}
-\]
+```
 
 现代超标量处理器能够在同一周期并行完成多条指令，因此可能出现 CPI 小于 1、IPC 大于 1 的情况。
 
@@ -562,15 +562,15 @@ IPC 表示平均每个时钟周期完成的指令数。在简化模型中：
 
 若第 i 类指令占比为 α，单类 CPI 为对应的 CPI，则平均 CPI 必须按指令比例加权：
 
-\[
+```math
 \mathrm{CPI}_{\text{avg}}=\sum_i \alpha_i\mathrm{CPI}_i
-\]
+```
 
 并且：
 
-\[
+```math
 \sum_i\alpha_i=1
-\]
+```
 
 例如：
 
@@ -581,13 +581,13 @@ IPC 表示平均每个时钟周期完成的指令数。在简化模型中：
 | C | 10% | 4 |
 | D | 20% | 5 |
 
-\[
+```math
 \begin{aligned}
 \mathrm{CPI}_{\text{avg}}
 &=0.5\times 2+0.2\times 3+0.1\times 4+0.2\times 5\\
 &=3
 \end{aligned}
-\]
+```
 
 <Callout title="高频错误" type="warn">
   不能把不同类型的 CPI 简单相加后除以指令种类数，除非每类指令数量完全相同。
@@ -597,23 +597,23 @@ IPC 表示平均每个时钟周期完成的指令数。在简化模型中：
 
 设指令条数为 IC、平均 CPI 为 CPI、主频为 f，则总时钟周期数为：
 
-\[
+```math
 \text{总时钟周期数}=IC\times \mathrm{CPI}
-\]
+```
 
 CPU 执行时间为：
 
-\[
+```math
 T_{\mathrm{CPU}}=IC\times \mathrm{CPI}\times T
-\]
+```
 
 代入时钟周期与主频的倒数关系：
 
-\[
+```math
 \boxed{
 T_{\mathrm{CPU}}=\frac{IC\times \mathrm{CPI}}{f}
 }
-\]
+```
 
 <Callout title="全章最重要公式" type="success">
   所有性能题先写出“CPU 执行时间 = 指令条数 × 平均 CPI ÷ 主频”，再判断题目改变了哪一项。不要仅凭主频、MIPS 或某个局部指标直接下结论。
@@ -623,13 +623,13 @@ T_{\mathrm{CPU}}=\frac{IC\times \mathrm{CPI}}{f}
 
 机器 A：主频 3 GHz，CPI 为 3；机器 B：主频 2 GHz，CPI 为 1。若两者执行相同数量的指令，则平均每条指令耗时分别为：
 
-\[
+```math
 \frac{3}{3\times 10^9}=1\ \mathrm{ns}
-\]
+```
 
-\[
+```math
 \frac{1}{2\times 10^9}=0.5\ \mathrm{ns}
-\]
+```
 
 机器 A 主频更高，但机器 B 的平均指令耗时更短。因此性能由指令条数、CPI 和主频共同决定。
 
@@ -637,21 +637,21 @@ T_{\mathrm{CPU}}=\frac{IC\times \mathrm{CPI}}{f}
 
 性能与执行时间成反比：
 
-\[
+```math
 \text{性能}\propto\frac{1}{\text{执行时间}}
-\]
+```
 
 两台机器的性能比为：
 
-\[
+```math
 \frac{P_A}{P_B}=\frac{T_B}{T_A}
-\]
+```
 
 加速比为：
 
-\[
+```math
 S=\frac{T_{\text{old}}}{T_{\text{new}}}
-\]
+```
 
 执行时间越小，性能越高，所以性能比与时间比的方向必须相反。
 
@@ -664,19 +664,19 @@ S=\frac{T_{\text{old}}}{T_{\text{new}}}
 
 M1 总时钟周期数：
 
-\[
+```math
 C_1=10\times 2\times 10^9=2\times 10^{10}
-\]
+```
 
 由于指令条数相同，M2 的总周期数为：
 
-\[
+```math
 C_2=1.5C_1=3\times 10^{10}
-\]
+```
 
 因此：
 
-\[
+```math
 \begin{aligned}
 f_2
 &=\frac{C_2}{T_2}\\
@@ -684,7 +684,7 @@ f_2
 &=5\times 10^9\ \mathrm{Hz}\\
 &=5\ \mathrm{GHz}
 \end{aligned}
-\]
+```
 
 答案：5 GHz。
 
@@ -693,15 +693,15 @@ f_2
 
 原执行时间为 20 s。优化后指令条数变为原来的 70%，平均 CPI 变为原来的 1.2 倍，主频不变。
 
-\[
+```math
 \frac{T_{\text{new}}}{T_{\text{old}}}
 =0.7\times 1.2
 =0.84
-\]
+```
 
-\[
+```math
 T_{\text{new}}=20\times 0.84=16.8\ \mathrm{s}
-\]
+```
 
 指令条数减少并不意味着执行时间按相同比例减少，因为 CPI 也可能发生变化。
 
@@ -712,13 +712,13 @@ T_{\text{new}}=20\times 0.84=16.8\ \mathrm{s}
 
 速度提高 50% 表示新速度是原来的 1.5 倍，因此：
 
-\[
+```math
 T_{\mathrm{CPU,new}}=\frac{90}{1.5}=60\ \mathrm{s}
-\]
+```
 
-\[
+```math
 T_{\text{new}}=60+10=70\ \mathrm{s}
-\]
+```
 
 不能把整个 100 s 都除以 1.5，因为只有 CPU 部分被加速。
 
@@ -727,22 +727,22 @@ T_{\text{new}}=60+10=70\ \mathrm{s}
 
 程序执行 10000 条指令，其中 80% 的指令 CPI 为 1，20% 的指令 CPI 为 10，主频为 1 GHz。
 
-\[
+```math
 \mathrm{CPI}_{\text{avg}}=0.8\times 1+0.2\times 10=2.8
-\]
+```
 
-\[
+```math
 \text{总周期数}=10000\times 2.8=28000
-\]
+```
 
-\[
+```math
 \begin{aligned}
 T_{\mathrm{CPU}}
 &=\frac{28000}{10^9}\\
 &=2.8\times 10^{-5}\ \mathrm{s}\\
 &=28\ \mathrm{\mu s}
 \end{aligned}
-\]
+```
 
   </Tab>
 </Tabs>
@@ -753,33 +753,33 @@ T_{\mathrm{CPU}}
 
 IPS 表示每秒执行的指令数：
 
-\[
+```math
 \mathrm{IPS}=\frac{\text{指令条数}}{T_{\mathrm{CPU}}}
-\]
+```
 
 结合 CPU 执行时间公式：
 
-\[
+```math
 \mathrm{IPS}=\frac{f}{\mathrm{CPI}}
-\]
+```
 
 MIPS 表示每秒执行多少百万条指令：
 
-\[
+```math
 \mathrm{MIPS}=\frac{f}{\mathrm{CPI}\times 10^6}
-\]
+```
 
 当主频直接使用 MHz 表示时：
 
-\[
+```math
 \mathrm{MIPS}=\frac{\text{主频（MHz）}}{\mathrm{CPI}}
-\]
+```
 
 例如主频为 1.2 GHz，平均 CPI 为 3：
 
-\[
+```math
 \mathrm{MIPS}=\frac{1.2\times 10^9}{3\times 10^6}=400
-\]
+```
 
 ### 2. MIPS 的局限
 
@@ -804,9 +804,9 @@ FLOPS 表示每秒执行的浮点运算次数，常用于科学计算、GPU、�
 
 例如：
 
-\[
+```math
 93\ \mathrm{PFLOPS}=93\times 10^{15}=9.3\times 10^{16}\ \mathrm{FLOPS}
-\]
+```
 
 ```text
 MIPS：每秒执行多少百万条机器指令
@@ -893,47 +893,47 @@ FLOPS：每秒完成多少次浮点运算
 
 ### 时钟周期与主频
 
-\[
+```math
 \boxed{T=\frac{1}{f}}
-\]
+```
 
 ### 总时钟周期数
 
-\[
+```math
 \boxed{\text{总时钟周期数}=IC\times \mathrm{CPI}}
-\]
+```
 
 ### CPU 执行时间
 
-\[
+```math
 \boxed{T_{\mathrm{CPU}}=\frac{IC\times \mathrm{CPI}}{f}}
-\]
+```
 
 ### 平均 CPI
 
-\[
+```math
 \boxed{\mathrm{CPI}_{\text{avg}}=\sum_i\alpha_i\mathrm{CPI}_i}
-\]
+```
 
 ### IPS 与 MIPS
 
-\[
+```math
 \boxed{\mathrm{IPS}=\frac{f}{\mathrm{CPI}}}
-\]
+```
 
-\[
+```math
 \boxed{\mathrm{MIPS}=\frac{f}{\mathrm{CPI}\times 10^6}}
-\]
+```
 
 ### 性能比与加速比
 
-\[
+```math
 \boxed{\frac{P_A}{P_B}=\frac{T_B}{T_A}}
-\]
+```
 
-\[
+```math
 \boxed{S=\frac{T_{\text{old}}}{T_{\text{new}}}}
-\]
+```
 
 ## 十五、考前一分钟速记
 
