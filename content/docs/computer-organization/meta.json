@@ -1,0 +1,9 @@
+{
+  "title": "计算机组成原理",
+  "description": "面向考试与理解的计算机组成原理章节笔记",
+  "pages": [
+    "index",
+    "chapter-01-computer-system-overview"
+  ],
+  "defaultOpen": true
+}
