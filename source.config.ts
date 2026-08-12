@@ -12,6 +12,10 @@ export const docs = defineDocs({
   },
 });
 
+export const articles = defineDocs({
+  dir: 'content/articles',
+});
+
 export default defineConfig({
   mdxOptions: {
     remarkPlugins: [remarkMath, remarkMdxMermaid],

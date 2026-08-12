@@ -1,0 +1,9 @@
+{
+  "title": "English Articles",
+  "description": "Long-form notes on learning, software, and useful systems.",
+  "pages": [
+    "building-a-learning-system/en",
+    "building-a-learning-system/zh",
+    "building-a-learning-system/bilingual"
+  ]
+}

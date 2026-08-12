@@ -13,12 +13,20 @@ export default function HomePage() {
         <p className="mx-auto mt-6 max-w-xl text-balance text-fd-muted-foreground">
           文档在 GitHub Actions 中构建，并以预构建产物部署到 Vercel。
         </p>
-        <Link
-          href="/docs"
-          className="mt-8 inline-flex h-10 items-center rounded-md bg-fd-primary px-5 text-sm font-medium text-fd-primary-foreground"
-        >
-          打开文档
-        </Link>
+        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Link
+            href="/docs"
+            className="inline-flex h-10 items-center rounded-md bg-fd-primary px-5 text-sm font-medium text-fd-primary-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+          >
+            打开文档
+          </Link>
+          <Link
+            href="/articles"
+            className="inline-flex h-10 items-center rounded-md border border-fd-border px-5 text-sm font-medium text-fd-foreground transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+          >
+            English Articles
+          </Link>
+        </div>
       </div>
     </main>
   );

@@ -126,6 +126,10 @@
     var(--font-outfit), 'PingFang SC', 'Microsoft YaHei',
     'Noto Sans CJK SC', system-ui, sans-serif;
 
+  --font-article:
+    var(--font-newsreader), Georgia, 'Times New Roman', 'Noto Serif',
+    'Songti SC', 'SimSun', serif;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -219,6 +223,41 @@
 
   #docs-body :where(p, li) {
     text-wrap: pretty;
+  }
+
+  /* English articles use a reading-first serif with local CJK fallbacks. */
+  #article-body {
+    font-family:
+      var(--font-newsreader), Georgia, 'Times New Roman', 'Noto Serif',
+      'Songti SC', 'SimSun', serif;
+    font-size: 1.125rem;
+    line-height: 1.8;
+  }
+
+  #article-body :where(p, li, blockquote) {
+    line-height: inherit;
+  }
+
+  #article-body :where(h2, h3, h4) {
+    margin-top: 2.5rem;
+    font-weight: 500;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  #article-body :where(blockquote) {
+    border-inline-start: 2px solid var(--border);
+    color: var(--muted-foreground);
+    padding-inline-start: 1.25rem;
+  }
+
+  #article-body :where(ol, ul) {
+    padding-inline-start: 1.5rem;
+  }
+
+  #article-body :where(a) {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
   }
 }
 
