@@ -123,8 +123,13 @@
   --breakpoint-3xl: 1670px;
 
   --font-sans:
-    var(--font-outfit), 'PingFang SC', 'Microsoft YaHei',
+    var(--font-inter), 'PingFang SC', 'Microsoft YaHei',
     'Noto Sans CJK SC', system-ui, sans-serif;
+
+  /* Blog: Latin text in Source Serif 4, Chinese falls back to system fonts. */
+  --font-serif:
+    var(--font-source-serif), 'PingFang SC', 'Microsoft YaHei',
+    'Noto Sans CJK SC', system-ui, serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -195,7 +200,7 @@
 
   /*
    * Fumadocs Typography defaults to 16px. Chinese prose looks slightly smaller
-   * with the Outfit/system-font combination, so the documentation body is set
+   * with the Inter/system-font combination, so the documentation body is set
    * to 17px with a relaxed line height.
    */
   #docs-body {
@@ -220,6 +225,32 @@
   #docs-body :where(p, li) {
     text-wrap: pretty;
   }
+}
+
+/*
+ * Blog prose: Source Serif 4 reads smaller than sans at the same size,
+ * so long-form articles use a larger body size than the docs.
+ */
+#blog-body {
+  font-size: 1.125rem;
+  line-height: 1.85;
+}
+
+#blog-body :where(p, li, blockquote) {
+  line-height: inherit;
+}
+
+#blog-body :where(h1, h2, h3, h4, h5, h6) {
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+#blog-body :where(h2, h3, h4, h5, h6) {
+  scroll-margin-top: 6rem;
+}
+
+#blog-body :where(p, li) {
+  text-wrap: pretty;
 }
 
 /*

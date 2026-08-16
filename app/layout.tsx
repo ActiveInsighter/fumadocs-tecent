@@ -3,13 +3,19 @@ import 'katex/dist/katex.css';
 import './surface-overrides.css';
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import type { Metadata } from 'next';
-import { Outfit } from 'next/font/google';
+import { Inter, Source_Serif_4 } from 'next/font/google';
 import type { ReactNode } from 'react';
 
-const outfit = Outfit({
+const inter = Inter({
   subsets: ['latin'],
   display: 'swap',
-  variable: '--font-outfit',
+  variable: '--font-inter',
+});
+
+const sourceSerif4 = Source_Serif_4({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-source-serif',
 });
 
 export const metadata: Metadata = {
@@ -24,10 +30,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="zh-CN"
-      className={outfit.variable}
+      className={`${inter.variable} ${sourceSerif4.variable}`}
       suppressHydrationWarning
     >
-      <body className="flex min-h-screen flex-col font-sans">
+      <body className="flex min-h-screen flex-col font-sans" suppressHydrationWarning>
         <RootProvider>{children}</RootProvider>
       </body>
     </html>

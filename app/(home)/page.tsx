@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6">
+    <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center px-6">
       <div className="mx-auto max-w-2xl text-center">
         <p className="mb-3 text-sm font-medium text-fd-muted-foreground">
           Next.js 16 · Fumadocs · Vercel
