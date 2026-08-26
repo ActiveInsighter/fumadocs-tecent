@@ -37,14 +37,20 @@ server token.
    This build-time public URL is added to the extension host permissions and
    CSP.
 
-For the current production deployment, the public endpoints are:
+The n8n and EdgeOne endpoints currently verified for production are:
 
 ```text
-Fumadocs:             https://fumadocs.vercel.app
 n8n webhook:          https://n8n.any1.tech/webhook/anyworkflow-document-publish
 EdgeOne Blob signer:  https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url
 EdgeOne Blob gateway: https://fumadocs-upload-mimnflju.edgeone.cool/download
 ```
+
+Set `FUMADOCS_BASE_URL` on n8n and the corresponding Vercel variables to a
+stable Fumadocs production hostname. The latest deployment URL is
+`https://fumadocs-mkujjfj93-toms-projects-94e1afdf.vercel.app`, but Vercel
+deployment URLs are version-specific and should only be used temporarily;
+attach a custom domain or use the project's stable assigned domain before
+activating the workflow.
 
 If you later attach custom domains, update these URL variables while keeping
 the shared secrets unchanged.

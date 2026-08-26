@@ -9,7 +9,7 @@ services:
       NEW_API_BASE_URL: ${NEW_API_BASE_URL:-https://new-api.active1.ccwu.cc}
       NEW_API_MODEL: ${NEW_API_MODEL:-}
       NEW_API_API_KEY: ${NEW_API_API_KEY:-}
-      FUMADOCS_BASE_URL: ${FUMADOCS_BASE_URL:-https://fumadocs.vercel.app}
+      FUMADOCS_BASE_URL: ${FUMADOCS_BASE_URL:-}
       FUMADOCS_BLOB_UPLOAD_KEY: ${FUMADOCS_BLOB_UPLOAD_KEY:-}
       GITHUB_OWNER: ${GITHUB_OWNER:-ActiveInsighter}
       GITHUB_REPO: ${GITHUB_REPO:-fumadocs-vercel}
