@@ -14,6 +14,8 @@ permissions:
 
 env:
   EDGEONE_CLI_VERSION: 1.6.19
+  EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
+  EDGEONE_BLOB_PROJECT_URL: https://fumadocs-upload-mimnflju.edgeone.cool
   EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
 
 jobs:
@@ -59,20 +61,91 @@ jobs:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
           EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
           EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
-          EDGEONE_PAGES_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
         run: |
           set -euo pipefail
 
-          set_env() {
-            edgeone makers env set \
-              -t "${EDGEONE_API_TOKEN}" \
-              "$1" \
-              "$2" \
-              2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g'
-          }
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+          project_response="${api_tmp}/describe-pages-projects.json"
+          project_request="${api_tmp}/describe-pages-projects.request.json"
 
-          set_env INTERNAL_API_KEY "${EDGEONE_INTERNAL_API_KEY}"
-          set_env DOWNLOAD_GATEWAY_SECRET "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}"
+          jq -cn \
+            --arg project_name "${EDGEONE_PROJECT_NAME}" \
+            '{
+              Action: "DescribePagesProjects",
+              ProjectIds: [],
+              Filters: [{Name: "Name", Values: [$project_name]}]
+            }' > "${project_request}"
+
+          curl --silent --show-error --fail-with-body --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+            --data-binary "@${project_request}" \
+            --output "${project_response}" \
+            "${EDGEONE_PAGES_API_URL}"
+
+          project_id="$(
+            jq -r --arg project_name "${EDGEONE_PROJECT_NAME}" '
+              (.Data.Response // .Data // .)
+              | (.Projects // [])[]
+              | select(.Name == $project_name)
+              | .ProjectId
+            ' "${project_response}" | head -n 1
+          )"
+          if [ -z "${project_id}" ] || [ "${project_id}" = 'null' ]; then
+            echo '::error::EdgeOne Blob project was not found.'
+            exit 1
+          fi
+
+          response_file="${api_tmp}/modify-pages-project-envs.json"
+          jq -cn \
+            --arg project_id "${project_id}" \
+            --arg internal_key "${EDGEONE_INTERNAL_API_KEY}" \
+            --arg gateway_secret "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}" \
+            '{
+              Action: "ModifyPagesProjectEnvs",
+              ProjectId: $project_id,
+              EnvVars: [
+                {Key: "INTERNAL_API_KEY", Value: $internal_key},
+                {Key: "DOWNLOAD_GATEWAY_SECRET", Value: $gateway_secret}
+              ]
+            }' \
+            | curl --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${response_file}" \
+                "${EDGEONE_PAGES_API_URL}"
+
+          if ! jq -e '((.Code // .Data.Response.Code // .Data.Code // 0) == 0) and ((.Error // .Data.Response.Error // .Data.Error) == null)' "${response_file}" >/dev/null; then
+            echo '::error::EdgeOne Blob runtime variable update failed.'
+            exit 1
+          fi
+
+          env_response="${api_tmp}/describe-pages-project-envs.json"
+          jq -cn --arg project_id "${project_id}" \
+            '{Action: "DescribePagesProjectEnvs", ProjectId: $project_id}' \
+            | curl --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${env_response}" \
+                "${EDGEONE_PAGES_API_URL}"
+
+          missing=0
+          for name in INTERNAL_API_KEY DOWNLOAD_GATEWAY_SECRET; do
+            if jq -e --arg name "${name}" '
+              (.Data.Response // .Data // .)
+              | (.EnvVars // [])
+              | any(.[]; .Key == $name and ((.Value // "") | length > 0))
+            ' "${env_response}" >/dev/null; then
+              echo "${name}=present"
+            else
+              echo "::error::Missing or empty EdgeOne Blob runtime variable: ${name}"
+              missing=1
+            fi
+          done
+          exit "${missing}"
 
       - name: Deploy the Blob functions package
         shell: bash
@@ -83,3 +156,33 @@ jobs:
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
             2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
+
+      - name: Verify public EdgeOne Blob routes
+        shell: bash
+        env:
+          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
+        run: |
+          set -euo pipefail
+
+          status_for() {
+            local method="$1"
+            local url="$2"
+            shift 2
+            curl --fail-with-body --silent --show-error --max-time 30 \
+              --request "${method}" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$@" \
+              "${url}" || true
+          }
+
+          signer_status="$(status_for POST "${EDGEONE_BLOB_PROJECT_URL}/api/blob/upload-url")"
+          gateway_status="$(status_for GET \
+            "${EDGEONE_BLOB_PROJECT_URL}/download/edgeone-verification-probe/1/md" \
+            -H "X-Internal-Key: ${EDGEONE_DOWNLOAD_GATEWAY_SECRET}")"
+
+          echo "signer_without_key=${signer_status}"
+          echo "gateway_missing_artifact=${gateway_status}"
+
+          [[ "${signer_status}" == "401" ]]
+          [[ "${gateway_status}" == "404" ]]

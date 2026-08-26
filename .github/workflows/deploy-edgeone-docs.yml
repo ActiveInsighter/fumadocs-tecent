@@ -11,6 +11,8 @@ permissions:
 
 env:
   EDGEONE_CLI_VERSION: 1.6.19
+  EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
+  EDGEONE_DOCS_PROJECT_ID: makers-nycxgnmbk5ft
   EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
 
 jobs:
@@ -89,20 +91,9 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
-      - name: Link EdgeOne project for environment management
-        shell: bash
-        run: |
-          set -euo pipefail
-          edgeone makers link \
-            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
-
       - name: Configure Fumadocs runtime variables
         shell: bash
         env:
-          EDGEONE_PAGES_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
           EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
           EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
           N8N_DOCUMENT_PUBLISH_SECRET: ${{ secrets.N8N_DOCUMENT_PUBLISH_SECRET }}
@@ -110,37 +101,69 @@ jobs:
         run: |
           set -euo pipefail
 
-          set_env() {
-            edgeone makers env set \
-              -t "${EDGEONE_API_TOKEN}" \
-              "$1" \
-              "$2" \
-              2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g'
-          }
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+          response_file="${api_tmp}/modify-pages-project-envs.json"
 
-          set_env POCKETBASE_URL "https://pb.any1.tech"
-          set_env N8N_DOCUMENT_PUBLISH_URL "https://n8n.any1.tech/webhook/anyworkflow-document-publish"
-          set_env N8N_DOCUMENT_PUBLISH_SECRET "${N8N_DOCUMENT_PUBLISH_SECRET}"
-          set_env FUMADOCS_BLOB_UPLOAD_KEY "${FUMADOCS_BLOB_UPLOAD_KEY}"
-          set_env BLOB_SIGNER_URL "https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url"
-          set_env BLOB_SIGNER_SECRET "${EDGEONE_INTERNAL_API_KEY}"
-          set_env BLOB_DOWNLOAD_GATEWAY_URL "https://fumadocs-upload-mimnflju.edgeone.cool/download"
-          set_env BLOB_DOWNLOAD_GATEWAY_SECRET "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}"
+          jq -cn \
+            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
+            --arg n8n_secret "${N8N_DOCUMENT_PUBLISH_SECRET}" \
+            --arg upload_key "${FUMADOCS_BLOB_UPLOAD_KEY}" \
+            --arg signer_secret "${EDGEONE_INTERNAL_API_KEY}" \
+            --arg gateway_secret "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}" \
+            '{
+              Action: "ModifyPagesProjectEnvs",
+              ProjectId: $project_id,
+              EnvVars: [
+                {Key: "POCKETBASE_URL", Value: "https://pb.any1.tech"},
+                {Key: "N8N_DOCUMENT_PUBLISH_URL", Value: "https://n8n.any1.tech/webhook/anyworkflow-document-publish"},
+                {Key: "N8N_DOCUMENT_PUBLISH_SECRET", Value: $n8n_secret},
+                {Key: "FUMADOCS_BLOB_UPLOAD_KEY", Value: $upload_key},
+                {Key: "BLOB_SIGNER_URL", Value: "https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url"},
+                {Key: "BLOB_SIGNER_SECRET", Value: $signer_secret},
+                {Key: "BLOB_DOWNLOAD_GATEWAY_URL", Value: "https://fumadocs-upload-mimnflju.edgeone.cool/download"},
+                {Key: "BLOB_DOWNLOAD_GATEWAY_SECRET", Value: $gateway_secret}
+              ]
+            }' \
+            | curl --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${response_file}" \
+                "${EDGEONE_PAGES_API_URL}"
+
+          if ! jq -e '((.Code // .Data.Response.Code // .Data.Code // 0) == 0) and ((.Error // .Data.Response.Error // .Data.Error) == null)' "${response_file}" >/dev/null; then
+            echo '::error::EdgeOne runtime variable update failed.'
+            exit 1
+          fi
 
       - name: Verify Fumadocs runtime variables
         shell: bash
         run: |
           set -euo pipefail
 
-          env_file=".edgeone-runtime-env-${GITHUB_RUN_ID}"
-          trap 'rm -f -- "${env_file}"' EXIT
-          umask 077
-          : > "${env_file}"
-          chmod 600 "${env_file}"
-          edgeone makers env pull \
-            -t "${EDGEONE_API_TOKEN}" \
-            -f "${env_file}" \
-            >/dev/null 2>&1
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+          response_file="${api_tmp}/describe-pages-project-envs.json"
+
+          jq -cn \
+            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
+            '{Action: "DescribePagesProjectEnvs", ProjectId: $project_id}' \
+            | curl --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${response_file}" \
+                "${EDGEONE_PAGES_API_URL}"
+
+          api_env_present() {
+            local name="$1"
+            jq -e --arg name "${name}" '
+              (.Data.Response // .Data // .)
+              | (.EnvVars // [])
+              | any(.[]; .Key == $name and ((.Value // "") | length > 0))
+            ' "${response_file}" >/dev/null
+          }
 
           missing=0
           for name in \
@@ -152,7 +175,7 @@ jobs:
             BLOB_SIGNER_SECRET \
             BLOB_DOWNLOAD_GATEWAY_URL \
             BLOB_DOWNLOAD_GATEWAY_SECRET; do
-            if grep -Eq "^${name}=[^[:space:]]+" "${env_file}"; then
+            if api_env_present "${name}"; then
               echo "${name}=present"
             else
               echo "::error::Missing or empty EdgeOne runtime variable: ${name}"
@@ -195,15 +218,18 @@ jobs:
           set -euo pipefail
 
           status_for() {
+            local method="$1"
+            local url="$2"
             curl --fail-with-body --silent --show-error --max-time 30 \
+              --request "${method}" \
               -o /dev/null \
               -w '%{http_code}' \
-              "$1" || true
+              "${url}" || true
           }
 
-          homepage_status="$(status_for 'https://fumadocs.any1.tech/')"
-          signer_status="$(status_for 'https://fumadocs.any1.tech/api/blob/upload-url')"
-          download_status="$(status_for 'https://fumadocs.any1.tech/download/edgeone-verification-probe/1/md')"
+          homepage_status="$(status_for GET 'https://fumadocs.any1.tech/')"
+          signer_status="$(status_for POST 'https://fumadocs.any1.tech/api/blob/upload-url')"
+          download_status="$(status_for GET 'https://fumadocs.any1.tech/download/edgeone-verification-probe/1/md')"
 
           echo "homepage=${homepage_status}"
           echo "signer_without_key=${signer_status}"
