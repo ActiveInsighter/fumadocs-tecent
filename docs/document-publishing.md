@@ -46,11 +46,10 @@ EdgeOne Blob gateway: https://fumadocs-upload-mimnflju.edgeone.cool/download
 ```
 
 Set `FUMADOCS_BASE_URL` on n8n and the corresponding Vercel variables to a
-stable Fumadocs production hostname. The latest deployment URL is
-`https://fumadocs-mkujjfj93-toms-projects-94e1afdf.vercel.app`, but Vercel
-deployment URLs are version-specific and should only be used temporarily;
-attach a custom domain or use the project's stable assigned domain before
-activating the workflow.
+stable Fumadocs production hostname. The latest successful Vercel run prints a
+deployment-specific URL, but those URLs are version-specific and should only
+be used temporarily; attach a custom domain or use the project's stable
+assigned domain before activating the workflow.
 
 If you later attach custom domains, update these URL variables while keeping
 the shared secrets unchanged.
