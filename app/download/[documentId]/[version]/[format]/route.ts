@@ -108,6 +108,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
         'X-Blob-Gateway-Error-Cause',
         `${causeCode}:${causeMessage}`.replace(/[^\x20-\x7E]/gu, ' ').slice(0, 160),
       );
+      response.headers.set(
+        'X-Blob-Gateway-Proxy-Env',
+        Object.keys(process.env)
+          .filter((name) => /proxy/iu.test(name))
+          .sort()
+          .join(',') || 'none',
+      );
     }
     return response;
   }
