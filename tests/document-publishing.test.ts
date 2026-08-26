@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -11,31 +13,82 @@ import { parseAnyWorkflowPublishTrigger } from '../lib/document-publishing/inges
 import { normalizeUploadSignerResponse } from '../lib/document-publishing/signer';
 
 describe('document publishing contracts', () => {
-  it('follows a Blob gateway redirect instead of turning it into a fetch TypeError', async () => {
+  it('bypasses EdgeOne fetch proxy failures when downloading through the Blob gateway', async () => {
+    vi.resetModules();
     vi.stubEnv('BLOB_DOWNLOAD_GATEWAY_URL', 'https://blob.example.test/download');
     vi.stubEnv('BLOB_DOWNLOAD_GATEWAY_SECRET', 'a'.repeat(32));
 
+    const responses = [
+      {
+        statusCode: 302,
+        headers: { location: 'https://blob.example.test/download/edgeone-probe/1/md' },
+      },
+      { statusCode: 404, headers: {} as Record<string, string> },
+    ];
+    const nativeRequest = vi.fn(
+      (
+        _url: string | URL,
+        _options: object,
+        callback: (response: PassThrough & { headers: Record<string, string>; statusCode: number }) => void,
+      ) => {
+        const nextResponse = responses.shift();
+        if (!nextResponse) throw new Error('The fake HTTPS server ran out of responses.');
+
+        const response = new PassThrough() as PassThrough & {
+          headers: Record<string, string>;
+          statusCode: number;
+        };
+        response.headers = nextResponse.headers;
+        response.statusCode = nextResponse.statusCode;
+
+        const request = new EventEmitter() as EventEmitter & {
+          destroy: ReturnType<typeof vi.fn>;
+          end: ReturnType<typeof vi.fn>;
+          setTimeout: ReturnType<typeof vi.fn>;
+        };
+        request.destroy = vi.fn((error?: Error) => {
+          if (error) request.emit('error', error);
+          return request;
+        });
+        request.end = vi.fn(() => {
+          callback(response);
+          response.end();
+          return request;
+        });
+        request.setTimeout = vi.fn().mockReturnValue(request);
+        return request;
+      },
+    );
+    vi.doMock('node:https', () => ({ request: nativeRequest }));
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (_input: string | URL, init?: RequestInit) => {
-        if (init?.redirect === 'error') throw new TypeError('fetch failed');
-        return new Response(null, { status: 404 });
+      vi.fn(async () => {
+        const cause = Object.assign(new Error('getaddrinfo ENOTFOUND {{pages_proxy_host}}'), {
+          code: 'ENOTFOUND',
+        });
+        throw Object.assign(new TypeError('fetch failed'), { cause });
       }),
     );
 
-    const { GET } = await import('../app/download/[documentId]/[version]/[format]/route');
-    const response = await GET(
-      new Request('https://fumadocs.example.test/download/edgeone-probe/1/md'),
-      {
-        params: Promise.resolve({
-          documentId: 'edgeone-probe',
-          version: '1',
-          format: 'md',
-        }),
-      },
-    );
+    try {
+      const { GET } = await import('../app/download/[documentId]/[version]/[format]/route');
+      const response = await GET(
+        new Request('https://fumadocs.example.test/download/edgeone-probe/1/md'),
+        {
+          params: Promise.resolve({
+            documentId: 'edgeone-probe',
+            version: '1',
+            format: 'md',
+          }),
+        },
+      );
 
-    expect(response.status).toBe(404);
+      expect(response.status).toBe(404);
+      expect(nativeRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.doUnmock('node:https');
+      vi.resetModules();
+    }
   });
 
   it('uses a strong Blob read so a missing artifact is reported as 404', async () => {

@@ -3,7 +3,7 @@ import {
   contentTypeForFormat,
   parseArtifactReference,
 } from '@/lib/document-publishing/contracts';
-import { fetchWithTimeout, jsonError } from '@/lib/document-publishing/http';
+import { fetchWithNodeHttps, jsonError } from '@/lib/document-publishing/http';
 import {
   IntegrationConfigurationError,
   readDocumentIntegrationConfig,
@@ -45,7 +45,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     const headers: Record<string, string> = { Accept: contentTypeForFormat(reference.format) };
     headers['X-Internal-Key'] = required.blobDownloadGatewaySecret;
 
-    const upstream = await fetchWithTimeout(gatewayUrl, {
+    const upstream = await fetchWithNodeHttps(gatewayUrl, {
       headers,
       // EdgeOne custom domains can normalize a function request with a redirect.
       // The gateway URL is a trusted server-side configuration value.
