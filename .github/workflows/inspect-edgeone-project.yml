@@ -51,7 +51,12 @@ jobs:
             CustomDomains: project.CustomDomains,
           })), null, 2));
 
-          for (const projectId of ['makers-e032dznehcv2', 'makers-nycxgnmbk5ft']) {
+          const domain = 'fumadocs.any1.tech';
+          const oldProjectId = 'makers-e032dznehcv2';
+          const newProjectId = 'makers-nycxgnmbk5ft';
+          const domainResults = new Map();
+
+          for (const projectId of [oldProjectId, newProjectId]) {
             const result = await request({
               Action: 'DescribePagesZoneCustomDomains',
               ProjectId: projectId,
@@ -67,27 +72,61 @@ jobs:
                 PagesDomains: response?.PagesDomains,
               },
             }, null, 2));
+            domainResults.set(projectId, response?.PagesDomains ?? []);
           }
 
-          const readOnlyCandidates = [
-            'DescribePagesProjectDomains',
-            'DescribePagesDomains',
-            'DescribePagesCustomDomains',
-            'DescribePagesProjectCustomDomains',
-            'DescribePagesZoneDomains',
-            'DescribePagesDomain',
-          ];
-          for (const action of readOnlyCandidates) {
-            const result = await request({
-              Action: action,
-              ProjectId: 'makers-nycxgnmbk5ft',
+          const oldHasDomain = domainResults.get(oldProjectId).some((item) => item?.Domain === domain && item?.Type === 'Custom');
+          const newHasDomain = domainResults.get(newProjectId).some((item) => item?.Domain === domain && item?.Type === 'Custom');
+          if (oldHasDomain && newHasDomain) {
+            throw new Error('The custom domain is attached to both EdgeOne projects.');
+          }
+
+          if (!newHasDomain) {
+            if (oldHasDomain) {
+              const deleted = await request({
+                Action: 'DeletePagesProjectCustomDomains',
+                ProjectId: oldProjectId,
+                CustomDomains: [domain],
+              });
+              console.log(JSON.stringify({
+                action: 'DeletePagesProjectCustomDomains',
+                projectId: oldProjectId,
+                domain,
+                httpStatus: deleted.httpStatus,
+                code: deleted.payload?.Code,
+                message: deleted.payload?.Message,
+              }, null, 2));
+              if (deleted.httpStatus < 200 || deleted.httpStatus >= 300 || deleted.payload?.Code !== 0) {
+                throw new Error('Failed to detach the custom domain from the old project.');
+              }
+            }
+
+            const created = await request({
+              Action: 'CreatePagesZoneCustomDomain',
+              ProjectId: newProjectId,
+              Domain: domain,
             });
+            const createdResponse = created.payload?.Data?.Response ?? created.payload;
             console.log(JSON.stringify({
-              action,
-              httpStatus: result.httpStatus,
-              code: result.payload?.Code,
-              message: result.payload?.Message,
-              responseKeys: Object.keys(result.payload?.Data?.Response ?? {}),
-            }));
+              action: 'CreatePagesZoneCustomDomain',
+              projectId: newProjectId,
+              httpStatus: created.httpStatus,
+              code: created.payload?.Code,
+              message: created.payload?.Message,
+              domain: createdResponse?.Domain,
+              status: createdResponse?.Status,
+              cname: createdResponse?.Cname,
+              currentCname: createdResponse?.CurrentCname,
+            }, null, 2));
+            if (created.httpStatus < 200 || created.httpStatus >= 300 || created.payload?.Code !== 0) {
+              throw new Error('Failed to attach the custom domain to the new project.');
+            }
+          } else {
+            console.log(JSON.stringify({
+              action: 'CreatePagesZoneCustomDomain',
+              projectId: newProjectId,
+              domain,
+              result: 'already-attached',
+            }, null, 2));
           }
           NODE
