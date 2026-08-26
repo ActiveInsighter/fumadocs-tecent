@@ -119,9 +119,9 @@ jobs:
                 {Key: "N8N_DOCUMENT_PUBLISH_URL", Value: "https://n8n.any1.tech/webhook/anyworkflow-document-publish"},
                 {Key: "N8N_DOCUMENT_PUBLISH_SECRET", Value: $n8n_secret},
                 {Key: "FUMADOCS_BLOB_UPLOAD_KEY", Value: $upload_key},
-                {Key: "BLOB_SIGNER_URL", Value: "https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url"},
+                {Key: "BLOB_SIGNER_URL", Value: "https://fumadocs-upload.any1.tech/api/blob/upload-url"},
                 {Key: "BLOB_SIGNER_SECRET", Value: $signer_secret},
-                {Key: "BLOB_DOWNLOAD_GATEWAY_URL", Value: "https://fumadocs-upload-mimnflju.edgeone.cool/download"},
+                {Key: "BLOB_DOWNLOAD_GATEWAY_URL", Value: "https://fumadocs-upload.any1.tech/download"},
                 {Key: "BLOB_DOWNLOAD_GATEWAY_SECRET", Value: $gateway_secret}
               ]
             }' \

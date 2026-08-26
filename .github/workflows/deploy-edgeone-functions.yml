@@ -16,6 +16,7 @@ env:
   EDGEONE_CLI_VERSION: 1.6.19
   EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
   EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
+  EDGEONE_BLOB_CUSTOM_DOMAIN: fumadocs-upload.any1.tech
 
 jobs:
   deploy:
@@ -55,6 +56,7 @@ jobs:
           }
 
       - name: Configure Blob function secrets
+        id: configure
         shell: bash
         env:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
@@ -95,6 +97,7 @@ jobs:
             echo '::error::EdgeOne Blob project was not found.'
             exit 1
           fi
+          echo "project_id=${project_id}" >> "${GITHUB_OUTPUT}"
 
           response_file="${api_tmp}/modify-pages-project-envs.json"
           jq -cn \
@@ -145,6 +148,70 @@ jobs:
             fi
           done
           exit "${missing}"
+
+      - name: Ensure Blob custom domain binding
+        shell: bash
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_PROJECT_ID: ${{ steps.configure.outputs.project_id }}
+          EDGEONE_BLOB_CUSTOM_DOMAIN: ${{ env.EDGEONE_BLOB_CUSTOM_DOMAIN }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const endpoint = process.env.EDGEONE_PAGES_API_URL;
+          const projectId = process.env.EDGEONE_PROJECT_ID;
+          const domain = process.env.EDGEONE_BLOB_CUSTOM_DOMAIN;
+
+          const request = async (body) => {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${process.env.EDGEONE_API_TOKEN}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify(body),
+            });
+            const payload = await response.json();
+            return { httpStatus: response.status, payload };
+          };
+
+          const list = await request({
+            Action: 'DescribePagesZoneCustomDomains',
+            ProjectId: projectId,
+          });
+          if (list.httpStatus < 200 || list.httpStatus >= 300) {
+            throw new Error(`EdgeOne custom-domain query returned HTTP ${list.httpStatus}`);
+          }
+          const listResponse = list.payload?.Data?.Response ?? list.payload;
+          const current = (listResponse?.PagesDomains ?? []).find(
+            (item) => item?.Type === 'Custom' && item?.Domain === domain,
+          );
+
+          let binding = current;
+          if (!binding) {
+            const created = await request({
+              Action: 'CreatePagesZoneCustomDomain',
+              ProjectId: projectId,
+              Domain: domain,
+            });
+            const code = created.payload?.Code ?? created.payload?.Data?.Response?.Code;
+            if (
+              created.httpStatus < 200
+              || created.httpStatus >= 300
+              || (code !== undefined && code !== 0)
+            ) {
+              throw new Error('Failed to attach the Blob custom domain to EdgeOne.');
+            }
+            binding = created.payload?.Data?.Response ?? created.payload;
+          }
+
+          console.log(JSON.stringify({
+            Domain: binding?.Domain ?? domain,
+            Status: binding?.Status ?? 'unknown',
+            Cname: binding?.Cname ?? null,
+            CurrentCname: binding?.CurrentCname ?? null,
+          }, null, 2));
+          NODE
 
       - name: Deploy the Blob functions package
         shell: bash

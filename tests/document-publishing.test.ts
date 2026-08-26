@@ -168,4 +168,21 @@ describe('document publishing contracts', () => {
     expect(workflow).not.toContain('md-to-pdf');
     expect(workflow).not.toMatch(/^\s*EDGEONE_API_TOKEN:\s*(?!\$\{\{)[^\s#]/mu);
   });
+
+  it('keeps the Blob gateway on a stable custom domain', () => {
+    const functionsWorkflow = readFileSync(
+      new URL('../.github/workflows/deploy-edgeone-functions.yml', import.meta.url),
+      'utf8',
+    );
+    const docsWorkflow = readFileSync(
+      new URL('../.github/workflows/deploy-edgeone-docs.yml', import.meta.url),
+      'utf8',
+    );
+
+    expect(functionsWorkflow).toContain('CreatePagesZoneCustomDomain');
+    expect(functionsWorkflow).toContain('fumadocs-upload.any1.tech');
+    expect(docsWorkflow).toContain('https://fumadocs-upload.any1.tech/api/blob/upload-url');
+    expect(docsWorkflow).toContain('https://fumadocs-upload.any1.tech/download');
+    expect(docsWorkflow).not.toContain('fumadocs-upload-mimnflju.edgeone.cool');
+  });
 });

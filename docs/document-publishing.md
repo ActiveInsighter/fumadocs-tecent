@@ -41,8 +41,8 @@ The n8n and EdgeOne endpoints currently verified for production are:
 
 ```text
 n8n webhook:          https://n8n.any1.tech/webhook/anyworkflow-document-publish
-EdgeOne Blob signer:  https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url
-EdgeOne Blob gateway: https://fumadocs-upload-mimnflju.edgeone.cool/download
+EdgeOne Blob signer:  https://fumadocs-upload.any1.tech/api/blob/upload-url
+EdgeOne Blob gateway: https://fumadocs-upload.any1.tech/download
 ```
 
 Set `FUMADOCS_BASE_URL` on n8n to the stable EdgeOne production hostname. The
