@@ -21,7 +21,8 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: Request, context: RouteContext): Promise<Response> {
+export async function GET(request: Request, context: RouteContext): Promise<Response> {
+  const diagnosticsRequested = request.headers.get('x-edgeone-diagnostics') === '1';
   let reference;
   try {
     const params = await context.params;
@@ -52,7 +53,9 @@ export async function GET(_request: Request, context: RouteContext): Promise<Res
     if (upstream.status === 404) return jsonError(404, 'NOT_FOUND', 'The document file was not found.');
     if (!upstream.ok) {
       console.error('[document-download] Blob gateway failed', upstream.status);
-      return jsonError(502, 'UPSTREAM_UNAVAILABLE', 'The document file is temporarily unavailable.');
+      const response = jsonError(502, 'UPSTREAM_UNAVAILABLE', 'The document file is temporarily unavailable.');
+      if (diagnosticsRequested) response.headers.set('X-Blob-Gateway-Status', String(upstream.status));
+      return response;
     }
 
     const expectedContentType = contentTypeForFormat(reference.format);
@@ -77,7 +80,14 @@ export async function GET(_request: Request, context: RouteContext): Promise<Res
       console.error('[document-download] configuration is incomplete', error.missing.join(','));
       return jsonError(503, 'NOT_CONFIGURED', 'Document downloads are not configured.');
     }
-    console.error('[document-download] request failed');
-    return jsonError(502, 'UPSTREAM_UNAVAILABLE', 'The document file is temporarily unavailable.');
+    console.error('[document-download] request failed', error instanceof Error ? error.name : 'unknown');
+    const response = jsonError(502, 'UPSTREAM_UNAVAILABLE', 'The document file is temporarily unavailable.');
+    if (diagnosticsRequested) {
+      response.headers.set(
+        'X-Blob-Gateway-Error',
+        error instanceof Error ? error.name : 'unknown',
+      );
+    }
+    return response;
   }
 }
