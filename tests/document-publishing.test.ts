@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   artifactKey,
@@ -11,6 +11,45 @@ import { parseAnyWorkflowPublishTrigger } from '../lib/document-publishing/inges
 import { normalizeUploadSignerResponse } from '../lib/document-publishing/signer';
 
 describe('document publishing contracts', () => {
+  it('uses a strong Blob read so a missing artifact is reported as 404', async () => {
+    vi.resetModules();
+    const get = async (
+      _key: string,
+      options?: { consistency?: string },
+    ): Promise<null> => {
+      if (options?.consistency !== 'strong') {
+        throw new Error('eventual Blob reads are unavailable in this test');
+      }
+      return null;
+    };
+    (vi.doMock as unknown as (
+      path: string,
+      factory: () => unknown,
+      options?: { virtual?: boolean },
+    ) => void)(
+      '@edgeone/pages-blob',
+      () => ({ getStore: () => ({ get }) }),
+      { virtual: true },
+    );
+
+    const { onRequestGet } = await import(
+      // @ts-expect-error EdgeOne function route has no local declaration file.
+      '../edgeone/cloud-functions/download/[documentId]/[version]/[format].js'
+    );
+    const response = await onRequestGet({
+      request: new Request('https://fumadocs-upload.any1.tech/download/edgeone-probe/1/md', {
+        headers: { 'X-Internal-Key': 'a'.repeat(32) },
+      }),
+      params: { documentId: 'edgeone-probe', version: '1', format: 'md' },
+      env: { DOWNLOAD_GATEWAY_SECRET: 'a'.repeat(32) },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    vi.doUnmock('@edgeone/pages-blob');
+    vi.resetModules();
+  });
+
   it('creates a versioned Blob key and gateway URL from a safe reference', () => {
     const reference = parseArtifactReference({
       documentId: 'message-abc_123',

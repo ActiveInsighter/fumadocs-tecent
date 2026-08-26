@@ -25,6 +25,7 @@ export async function onRequestGet(context) {
   try {
     const stream = await getStore(ARTIFACT_STORE_NAME).get(artifactKey(reference), {
       type: 'stream',
+      consistency: 'strong',
     });
     if (!stream) return jsonError(404, 'NOT_FOUND', 'The document file was not found.');
 
