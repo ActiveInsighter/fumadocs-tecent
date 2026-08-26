@@ -1,0 +1,156 @@
+name: Deploy Fumadocs to EdgeOne
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.19
+  EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
+
+jobs:
+  deploy:
+    name: Deploy Fumadocs site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          edgeone --version
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in EDGEONE_API_TOKEN EDGEONE_DOCS_PROJECT_NAME; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions value: ${name}"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Deploy the Fumadocs application
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          edgeone makers deploy . \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production \
+            2>&1 \
+            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
+            | tee edgeone-docs-deploy.log
+
+          deployment_url="$(
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
+              || true
+          )"
+          console_url="$(
+            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
+              || true
+          )"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure Fumadocs runtime variables
+        shell: bash
+        env:
+          EDGEONE_PAGES_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
+          EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
+          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
+          N8N_DOCUMENT_PUBLISH_SECRET: ${{ secrets.N8N_DOCUMENT_PUBLISH_SECRET }}
+          FUMADOCS_BLOB_UPLOAD_KEY: ${{ secrets.FUMADOCS_BLOB_UPLOAD_KEY }}
+        run: |
+          set -euo pipefail
+
+          set_env() {
+            edgeone makers env set \
+              -t "${EDGEONE_API_TOKEN}" \
+              "$1" \
+              "$2" \
+              2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g'
+          }
+
+          set_env POCKETBASE_URL "https://pb.any1.tech"
+          set_env N8N_DOCUMENT_PUBLISH_URL "https://n8n.any1.tech/webhook/anyworkflow-document-publish"
+          set_env N8N_DOCUMENT_PUBLISH_SECRET "${N8N_DOCUMENT_PUBLISH_SECRET}"
+          set_env FUMADOCS_BLOB_UPLOAD_KEY "${FUMADOCS_BLOB_UPLOAD_KEY}"
+          set_env BLOB_SIGNER_URL "https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url"
+          set_env BLOB_SIGNER_SECRET "${EDGEONE_INTERNAL_API_KEY}"
+          set_env BLOB_DOWNLOAD_GATEWAY_URL "https://fumadocs-upload-mimnflju.edgeone.cool/download"
+          set_env BLOB_DOWNLOAD_GATEWAY_SECRET "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}"
+
+      - name: Redeploy with configured runtime
+        id: redeploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          edgeone makers deploy . \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production \
+            2>&1 \
+            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | tee edgeone-docs-redeploy.log
+
+          deployment_url="$(
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
+              || true
+          )"
+          console_url="$(
+            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
+              | tail -n 1 \
+              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
+              || true
+          )"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## EdgeOne Fumadocs deployment"
+            echo
+            echo "- Project: \`${EDGEONE_DOCS_PROJECT_NAME}\`"
+            echo "- Environment: \`production\`"
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            if [ -n "${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}" ]; then
+              echo "- Site endpoint: ${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}"
+            fi
+            if [ -n "${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}" ]; then
+              echo "- Console: ${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

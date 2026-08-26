@@ -3,9 +3,9 @@
 The publishing path is event-driven:
 
 ```text
-AnyWorkflow → PocketBase message → Fumadocs ingest API → n8n
+AnyWorkflow → PocketBase message → EdgeOne-hosted Fumadocs ingest API → n8n
 → New API metadata → mdTOpdf GitHub Action → EdgeOne Blob
-→ GitHub content/docs/*.mdx → Vercel build → Fumadocs page and download links
+→ GitHub content/docs/*.mdx → EdgeOne build → Fumadocs page and download links
 ```
 
 The PocketBase message body is not copied into the browser notification. The
@@ -29,9 +29,9 @@ server token.
 4. Import `n8n/document-publish.workflow.json` into n8n, import
    `n8n/document-publish-error.workflow.json` as its Error Workflow, and set
    the environment variables listed in the n8n README.
-5. Configure the Fumadocs server variables in `.env.example` in Vercel. The
-   Fumadocs deployment must be able to reach PocketBase, n8n, and the EdgeOne
-   signer/gateway; the browser never receives these secrets.
+5. Configure the Fumadocs server variables in the EdgeOne `fumadocs-docs`
+   project. The Fumadocs deployment must be able to reach PocketBase, n8n, and
+   the EdgeOne signer/gateway; the browser never receives these secrets.
 6. Build the extension with
    `VITE_FUMADOCS_DOCUMENT_INGEST_URL=https://<fumadocs-host>/api/integrations/anyworkflow`.
    This build-time public URL is added to the extension host permissions and
@@ -45,11 +45,10 @@ EdgeOne Blob signer:  https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upl
 EdgeOne Blob gateway: https://fumadocs-upload-mimnflju.edgeone.cool/download
 ```
 
-Set `FUMADOCS_BASE_URL` on n8n and the corresponding Vercel variables to a
-stable Fumadocs production hostname. The latest successful Vercel run prints a
-deployment-specific URL, but those URLs are version-specific and should only
-be used temporarily; attach a custom domain or use the project's stable
-assigned domain before activating the workflow.
+Set `FUMADOCS_BASE_URL` on n8n to the stable EdgeOne production hostname. The
+latest successful EdgeOne run prints the project endpoint; use the project's
+stable assigned domain or an attached custom domain before activating the
+workflow.
 
 If you later attach custom domains, update these URL variables while keeping
 the shared secrets unchanged.

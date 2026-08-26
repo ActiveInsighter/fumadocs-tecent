@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  EDGEONE_CLI_VERSION: 1.6.19
   EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
 
 jobs:
@@ -36,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --global edgeone@1.6.19 --no-audit --no-fund
+          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
           edgeone --version
 
       - name: Validate deployment configuration
@@ -51,6 +52,27 @@ jobs:
             echo "::error::Missing GitHub Actions secret: EDGEONE_API_TOKEN"
             exit 1
           }
+
+      - name: Configure Blob function secrets
+        shell: bash
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
+          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
+          EDGEONE_PAGES_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
+        run: |
+          set -euo pipefail
+
+          set_env() {
+            edgeone makers env set \
+              -t "${EDGEONE_API_TOKEN}" \
+              "$1" \
+              "$2" \
+              2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g'
+          }
+
+          set_env INTERNAL_API_KEY "${EDGEONE_INTERNAL_API_KEY}"
+          set_env DOWNLOAD_GATEWAY_SECRET "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}"
 
       - name: Deploy the Blob functions package
         shell: bash

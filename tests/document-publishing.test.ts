@@ -161,7 +161,8 @@ describe('document publishing contracts', () => {
 
     expect(workflow).toContain("'edgeone/**'");
     expect(workflow).toContain('edgeone makers deploy ./edgeone');
-    expect(workflow).toContain('edgeone@1.6.19');
+    expect(workflow).toContain('EDGEONE_CLI_VERSION: 1.6.19');
+    expect(workflow).toContain('edgeone@${EDGEONE_CLI_VERSION}');
     expect(workflow).toContain('EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}');
     expect(workflow).toContain('EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}');
     expect(workflow).not.toContain('md-to-pdf');

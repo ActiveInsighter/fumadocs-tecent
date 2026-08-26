@@ -11,6 +11,9 @@
 # Vercel project linkage and local output
 /.vercel
 
+# EdgeOne project linkage and local output
+/.edgeone
+
 # environment files
 .env
 .env.*

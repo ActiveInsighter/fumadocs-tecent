@@ -1,4 +1,4 @@
-# fumadocs-vercel
+# Fumadocs on EdgeOne
 
 A minimal Fumadocs documentation site built with Next.js 16 and Tailwind CSS 4.
 
@@ -13,16 +13,31 @@ Open `http://localhost:3000/docs`.
 
 ## Deployment
 
-Deployments are built in GitHub Actions and uploaded to Vercel as prebuilt output:
+Production documentation deployments run in GitHub Actions and are uploaded to
+Tencent EdgeOne Makers. The repository uses two direct-upload projects:
 
-- pushes to `main` use Vercel **Production** environment variables and update the production deployment;
-- pushes to any other branch use Vercel **Preview** environment variables and create a preview deployment;
-- Vercel Git-triggered builds are disabled in `vercel.json` to avoid duplicate builds.
+- `fumadocs-docs` hosts the complete Next.js/Fumadocs application, including the
+  server-side integration routes;
+- `fumadocs-upload` hosts the private Blob signer and download gateway functions.
+
+`edgeone.json` pins the install command, build command, and Node.js version used
+by the EdgeOne build. Both workflows deploy only after validating their API
+token and project variable.
 
 Required GitHub Actions secrets:
 
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+- `EDGEONE_API_TOKEN`
+- `EDGEONE_INTERNAL_API_KEY`
+- `EDGEONE_DOWNLOAD_GATEWAY_SECRET`
+- `N8N_DOCUMENT_PUBLISH_SECRET`
+- `FUMADOCS_BLOB_UPLOAD_KEY`
 
-Each deployment run uploads a `workflow-run-<run-id>` artifact containing the current run ID and the latest workflow run metadata.
+Required GitHub Actions variables:
+
+- `EDGEONE_PROJECT_NAME` — the existing Upload-provider project for Blob
+  functions (`fumadocs-upload`);
+- `EDGEONE_DOCS_PROJECT_NAME` — the Upload-provider project for the site
+  (`fumadocs-docs`).
+
+Do not commit any of these secret values. Runtime variables are written to the
+EdgeOne project by CI and are never exposed to the browser.
