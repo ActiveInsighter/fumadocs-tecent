@@ -168,7 +168,7 @@ jobs:
             local method="$1"
             local url="$2"
             shift 2
-            curl --fail-with-body --silent --show-error --max-time 30 \
+            curl --silent --show-error --max-time 30 \
               --request "${method}" \
               -o /dev/null \
               -w '%{http_code}' \
@@ -176,8 +176,23 @@ jobs:
               "${url}" || true
           }
 
-          signer_status="$(status_for POST "${EDGEONE_BLOB_PROJECT_URL}/api/blob/upload-url")"
-          gateway_status="$(status_for GET \
+          wait_for_status() {
+            local expected="$1"
+            shift
+            local status='000'
+            for attempt in {1..12}; do
+              status="$(status_for "$@")"
+              if [[ "${status}" == "${expected}" ]]; then
+                printf '%s' "${status}"
+                return 0
+              fi
+              sleep 5
+            done
+            printf '%s' "${status}"
+          }
+
+          signer_status="$(wait_for_status 401 POST "${EDGEONE_BLOB_PROJECT_URL}/api/blob/upload-url")"
+          gateway_status="$(wait_for_status 404 GET \
             "${EDGEONE_BLOB_PROJECT_URL}/download/edgeone-verification-probe/1/md" \
             -H "X-Internal-Key: ${EDGEONE_DOWNLOAD_GATEWAY_SECRET}")"
 
