@@ -11,6 +11,13 @@ export const docs = defineDocs({
     postprocess: {
       includeProcessedMarkdown: true,
     },
+    schema: pageSchema.extend({
+      documentId: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u)
+        .optional(),
+      documentVersion: z.coerce.number().int().positive().max(999_999_999).optional(),
+    }),
   },
 });
 

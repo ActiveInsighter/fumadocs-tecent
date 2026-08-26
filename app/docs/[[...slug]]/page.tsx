@@ -1,4 +1,5 @@
 import { getMDXComponents } from '@/components/mdx';
+import { DocumentDownloadMenu } from '@/components/document-download-menu';
 import { source } from '@/lib/source';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -38,6 +39,12 @@ export default async function Page({ params }: PageParameters) {
           markdownUrl={markdownUrl}
           githubUrl={`https://github.com/ActiveInsighter/fumadocs-vercel/blob/main/content/docs/${page.path}`}
         />
+        {page.data.documentId && page.data.documentVersion ? (
+          <DocumentDownloadMenu
+            documentId={page.data.documentId}
+            version={page.data.documentVersion}
+          />
+        ) : null}
       </div>
       <DocsBody id="docs-body" className="pb-10 pt-4">
         <MDX

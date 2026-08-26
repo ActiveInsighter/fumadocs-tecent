@@ -1,0 +1,132 @@
+{
+  "id": "document-publish-error-v1",
+  "name": "AnyWorkflow Document Publish Error",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "document-publish-error-1",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const root = $input.first().json;\nconst runData = root.execution?.data?.resultData?.runData || {};\nconst candidates = [];\nfor (const runs of Object.values(runData)) {\n  for (const run of Array.isArray(runs) ? runs : []) {\n    const items = run.data?.main?.flat?.() || [];\n    for (const item of items) if (item?.json) candidates.push(item.json);\n  }\n}\nconst candidate = [...candidates].reverse().find((item) => item.documentRecord?.id || item.documentRecordId);\nif (!candidate) return { json: { skip: true } };\nconst documentRecordId = candidate.documentRecord?.id || candidate.documentRecordId;\nconst message = root.execution?.error?.message || 'Document publishing failed.';\nreturn { json: { documentRecordId, lastError: String(message).slice(0, 8192) } };"
+      },
+      "id": "document-publish-error-2",
+      "name": "Extract Failed Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ Boolean($json.documentRecordId) }}",
+              "operation": "isTrue"
+            }
+          ]
+        }
+      },
+      "id": "document-publish-error-3",
+      "name": "Has Document",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_documents/records/' + $json.documentRecordId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'failed', lastError: $json.lastError }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "document-publish-error-4",
+      "name": "Mark Document Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Failed Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Failed Document": {
+      "main": [
+        [
+          {
+            "node": "Has Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Document": {
+      "main": [
+        [
+          {
+            "node": "Mark Document Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "versionId": "document-publish-error-workflow-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
