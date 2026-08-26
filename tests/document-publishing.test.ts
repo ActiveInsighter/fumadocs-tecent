@@ -11,6 +11,33 @@ import { parseAnyWorkflowPublishTrigger } from '../lib/document-publishing/inges
 import { normalizeUploadSignerResponse } from '../lib/document-publishing/signer';
 
 describe('document publishing contracts', () => {
+  it('follows a Blob gateway redirect instead of turning it into a fetch TypeError', async () => {
+    vi.stubEnv('BLOB_DOWNLOAD_GATEWAY_URL', 'https://blob.example.test/download');
+    vi.stubEnv('BLOB_DOWNLOAD_GATEWAY_SECRET', 'a'.repeat(32));
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string | URL, init?: RequestInit) => {
+        if (init?.redirect === 'error') throw new TypeError('fetch failed');
+        return new Response(null, { status: 404 });
+      }),
+    );
+
+    const { GET } = await import('../app/download/[documentId]/[version]/[format]/route');
+    const response = await GET(
+      new Request('https://fumadocs.example.test/download/edgeone-probe/1/md'),
+      {
+        params: Promise.resolve({
+          documentId: 'edgeone-probe',
+          version: '1',
+          format: 'md',
+        }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   it('uses a strong Blob read so a missing artifact is reported as 404', async () => {
     vi.resetModules();
     const get = async (

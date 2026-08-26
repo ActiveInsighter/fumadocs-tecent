@@ -47,7 +47,9 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
     const upstream = await fetchWithTimeout(gatewayUrl, {
       headers,
-      redirect: 'error',
+      // EdgeOne custom domains can normalize a function request with a redirect.
+      // The gateway URL is a trusted server-side configuration value.
+      redirect: 'follow',
       cache: 'no-store',
     });
     if (upstream.status === 404) return jsonError(404, 'NOT_FOUND', 'The document file was not found.');
