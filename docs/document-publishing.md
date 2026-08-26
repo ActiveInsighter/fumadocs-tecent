@@ -37,6 +37,18 @@ server token.
    This build-time public URL is added to the extension host permissions and
    CSP.
 
+For the current production deployment, the public endpoints are:
+
+```text
+Fumadocs:             https://fumadocs.vercel.app
+n8n webhook:          https://n8n.any1.tech/webhook/anyworkflow-document-publish
+EdgeOne Blob signer:  https://fumadocs-upload-mimnflju.edgeone.cool/api/blob/upload-url
+EdgeOne Blob gateway: https://fumadocs-upload-mimnflju.edgeone.cool/download
+```
+
+If you later attach custom domains, update these URL variables while keeping
+the shared secrets unchanged.
+
 ## mdTOpdf job lifecycle
 
 n8n uses the mdTOpdf Supabase REST and Storage APIs:
