@@ -89,6 +89,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
         'X-Blob-Gateway-Error',
         error instanceof Error ? error.name : 'unknown',
       );
+      response.headers.set(
+        'X-Blob-Gateway-Error-Detail',
+        error instanceof Error
+          ? error.message.replace(/[^\x20-\x7E]/gu, ' ').slice(0, 160)
+          : 'unknown',
+      );
     }
     return response;
   }
