@@ -28,9 +28,8 @@ jobs:
             },
             body: JSON.stringify({
               Action: 'DescribePagesProjects',
-              Filters: [{ Name: 'ProjectId', Values: ['makers-nycxgnmbk5ft'] }],
               Offset: 0,
-              Limit: 10,
+              Limit: 100,
             }),
           });
           if (!response.ok) throw new Error(`EdgeOne API returned HTTP ${response.status}`);
