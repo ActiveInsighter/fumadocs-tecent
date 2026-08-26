@@ -149,20 +149,40 @@ jobs:
 
       - name: Deploy the Blob functions package
         shell: bash
-        run: |
-          set -euo pipefail
-          edgeone makers deploy ./edgeone \
-            -n "${EDGEONE_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production \
-            2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
-
-      - name: Verify public EdgeOne Blob routes
-        shell: bash
         env:
           EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
         run: |
           set -euo pipefail
+
+          deploy_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${deploy_tmp}"' EXIT
+          deploy_log="${deploy_tmp}/edgeone-functions-deploy.log"
+
+          if ! edgeone makers deploy ./edgeone \
+            -n "${EDGEONE_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production \
+            > "${deploy_log}" 2>&1; then
+            sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' "${deploy_log}"
+            exit 1
+          fi
+          sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' "${deploy_log}"
+
+          deployment_url="$(
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' "${deploy_log}" \
+              | tail -n 1 \
+              | sed -E 's/^Deploy URL: //; s/[),.;]+$//'
+          )"
+          if [ -z "${deployment_url}" ]; then
+            echo '::error::EdgeOne deployment URL was not returned.'
+            exit 1
+          fi
+
+          deployment_base="${deployment_url%%\?*}"
+          deployment_query=''
+          if [[ "${deployment_url}" == *\?* ]]; then
+            deployment_query="?${deployment_url#*\?}"
+          fi
 
           status_for() {
             local method="$1"
@@ -191,9 +211,13 @@ jobs:
             printf '%s' "${status}"
           }
 
-          signer_status="$(wait_for_status 401 POST "${EDGEONE_BLOB_PROJECT_URL}/api/blob/upload-url")"
+          route_url() {
+            printf '%s%s%s' "${deployment_base}" "$1" "${deployment_query}"
+          }
+
+          signer_status="$(wait_for_status 401 POST "$(route_url '/api/blob/upload-url')")"
           gateway_status="$(wait_for_status 404 GET \
-            "${EDGEONE_BLOB_PROJECT_URL}/download/edgeone-verification-probe/1/md" \
+            "$(route_url '/download/edgeone-verification-probe/1/md')" \
             -H "X-Internal-Key: ${EDGEONE_DOWNLOAD_GATEWAY_SECRET}")"
 
           echo "signer_without_key=${signer_status}"

@@ -212,6 +212,41 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
+      - name: Check EdgeOne custom domain binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const endpoint = process.env.EDGEONE_PAGES_API_URL;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${process.env.EDGEONE_API_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              Action: 'DescribePagesZoneCustomDomains',
+              ProjectId: process.env.EDGEONE_DOCS_PROJECT_ID,
+            }),
+          });
+          if (!response.ok) throw new Error(`EdgeOne domain query returned HTTP ${response.status}`);
+          const payload = await response.json();
+          const pagesDomains = payload?.Data?.Response?.PagesDomains ?? [];
+          const customDomain = pagesDomains.find(
+            (item) => item?.Type === 'Custom' && item?.Domain === 'fumadocs.any1.tech',
+          );
+          console.log(JSON.stringify(pagesDomains.map((item) => ({
+            Domain: item?.Domain,
+            Type: item?.Type,
+            Status: item?.Status,
+            CurrentCname: item?.CurrentCname,
+            Cname: item?.Cname,
+            MainDomain: item?.MainDomain,
+            Env: item?.Env,
+          })), null, 2));
+          if (!customDomain) throw new Error('fumadocs.any1.tech is not attached to the EdgeOne docs project.');
+          NODE
+
       - name: Verify public EdgeOne routes
         shell: bash
         run: |
