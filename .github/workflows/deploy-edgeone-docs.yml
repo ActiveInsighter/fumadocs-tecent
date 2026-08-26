@@ -51,13 +51,22 @@ jobs:
           done
           exit "${missing}"
 
-      - name: Deploy the Fumadocs application
+      - name: Build the Fumadocs application locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          edgeone makers build --mode prod \
+            2>&1 \
+            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | tee edgeone-docs-build.log
+
+      - name: Deploy the prebuilt Fumadocs application
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
 
-          edgeone makers deploy . \
+          edgeone makers deploy .edgeone \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
@@ -113,7 +122,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          edgeone makers deploy . \
+          edgeone makers deploy .edgeone \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
