@@ -16,3 +16,8 @@ Configure these EdgeOne environment variables without committing their values:
 
 The Blob store name is fixed to `document-artifacts`; create or select that store
 in the EdgeOne project before deploying.
+
+The repository workflow `.github/workflows/deploy-edgeone-functions.yml` deploys
+only this directory to the direct-upload project named by the GitHub Actions
+variable `EDGEONE_PROJECT_NAME`. It runs on changes under `edgeone/` or by
+manual dispatch and reads `EDGEONE_API_TOKEN` from GitHub Actions Secrets.

@@ -152,4 +152,19 @@ describe('document publishing contracts', () => {
       if (jsCode) expect(() => new Function(jsCode)).not.toThrow();
     }
   });
+
+  it('deploys only the EdgeOne Blob functions through a pinned CLI workflow', () => {
+    const workflow = readFileSync(
+      new URL('../.github/workflows/deploy-edgeone-functions.yml', import.meta.url),
+      'utf8',
+    );
+
+    expect(workflow).toContain("'edgeone/**'");
+    expect(workflow).toContain('edgeone makers deploy ./edgeone');
+    expect(workflow).toContain('edgeone@1.6.19');
+    expect(workflow).toContain('EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}');
+    expect(workflow).toContain('EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}');
+    expect(workflow).not.toContain('md-to-pdf');
+    expect(workflow).not.toMatch(/^\s*EDGEONE_API_TOKEN:\s*(?!\$\{\{)[^\s#]/mu);
+  });
 });
