@@ -89,6 +89,16 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
+      - name: Link EdgeOne project for environment management
+        shell: bash
+        run: |
+          set -euo pipefail
+          edgeone makers link \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            2>&1 \
+            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
+
       - name: Configure Fumadocs runtime variables
         shell: bash
         env:
