@@ -85,6 +85,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     console.error('[document-download] request failed', error instanceof Error ? error.name : 'unknown');
     const response = jsonError(502, 'UPSTREAM_UNAVAILABLE', 'The document file is temporarily unavailable.');
     if (diagnosticsRequested) {
+      const cause = error instanceof Error ? error.cause : undefined;
+      const causeCode =
+        cause && typeof cause === 'object' && 'code' in cause
+          ? String((cause as { code?: unknown }).code ?? '')
+          : '';
+      const causeMessage =
+        cause && typeof cause === 'object' && 'message' in cause
+          ? String((cause as { message?: unknown }).message ?? '')
+          : '';
       response.headers.set(
         'X-Blob-Gateway-Error',
         error instanceof Error ? error.name : 'unknown',
@@ -94,6 +103,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
         error instanceof Error
           ? error.message.replace(/[^\x20-\x7E]/gu, ' ').slice(0, 160)
           : 'unknown',
+      );
+      response.headers.set(
+        'X-Blob-Gateway-Error-Cause',
+        `${causeCode}:${causeMessage}`.replace(/[^\x20-\x7E]/gu, ' ').slice(0, 160),
       );
     }
     return response;
