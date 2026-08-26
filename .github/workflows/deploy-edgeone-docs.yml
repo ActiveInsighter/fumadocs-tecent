@@ -117,6 +117,38 @@ jobs:
           set_env BLOB_DOWNLOAD_GATEWAY_URL "https://fumadocs-upload-mimnflju.edgeone.cool/download"
           set_env BLOB_DOWNLOAD_GATEWAY_SECRET "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}"
 
+      - name: Verify Fumadocs runtime variables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          env_file="$(mktemp)"
+          trap 'rm -f "${env_file}"' EXIT
+          chmod 600 "${env_file}"
+          edgeone makers env pull \
+            -t "${EDGEONE_API_TOKEN}" \
+            -f "${env_file}" \
+            >/dev/null 2>&1
+
+          missing=0
+          for name in \
+            POCKETBASE_URL \
+            N8N_DOCUMENT_PUBLISH_URL \
+            N8N_DOCUMENT_PUBLISH_SECRET \
+            FUMADOCS_BLOB_UPLOAD_KEY \
+            BLOB_SIGNER_URL \
+            BLOB_SIGNER_SECRET \
+            BLOB_DOWNLOAD_GATEWAY_URL \
+            BLOB_DOWNLOAD_GATEWAY_SECRET; do
+            if grep -Eq "^${name}=[^[:space:]]+" "${env_file}"; then
+              echo "${name}=present"
+            else
+              echo "::error::Missing or empty EdgeOne runtime variable: ${name}"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
       - name: Redeploy with configured runtime
         id: redeploy
         shell: bash
@@ -144,6 +176,30 @@ jobs:
           )"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify public EdgeOne routes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          status_for() {
+            curl --fail-with-body --silent --show-error --max-time 30 \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$1" || true
+          }
+
+          homepage_status="$(status_for 'https://fumadocs.any1.tech/')"
+          signer_status="$(status_for 'https://fumadocs.any1.tech/api/blob/upload-url')"
+          download_status="$(status_for 'https://fumadocs.any1.tech/download/edgeone-verification-probe/1/md')"
+
+          echo "homepage=${homepage_status}"
+          echo "signer_without_key=${signer_status}"
+          echo "download_missing_artifact=${download_status}"
+
+          [[ "${homepage_status}" == "200" ]]
+          [[ "${signer_status}" == "401" ]]
+          [[ "${download_status}" == "404" ]]
 
       - name: Write deployment summary
         if: always()
