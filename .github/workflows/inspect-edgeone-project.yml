@@ -20,21 +20,29 @@ jobs:
         run: |
           set -euo pipefail
           node <<'NODE'
-          const response = await fetch('https://pages-api.cloud.tencent.com/v1', {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${process.env.EDGEONE_API_TOKEN}`,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-              Action: 'DescribePagesProjects',
-              Offset: 0,
-              Limit: 100,
-            }),
+          const endpoint = 'https://pages-api.cloud.tencent.com/v1';
+          const request = async (body) => {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${process.env.EDGEONE_API_TOKEN}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify(body),
+            });
+            const payload = await response.json();
+            return { httpStatus: response.status, payload };
+          };
+
+          const projectsResult = await request({
+            Action: 'DescribePagesProjects',
+            Offset: 0,
+            Limit: 100,
           });
-          if (!response.ok) throw new Error(`EdgeOne API returned HTTP ${response.status}`);
-          const payload = await response.json();
-          const projects = payload?.Data?.Response?.Projects ?? [];
+          if (projectsResult.httpStatus < 200 || projectsResult.httpStatus >= 300) {
+            throw new Error(`EdgeOne API returned HTTP ${projectsResult.httpStatus}`);
+          }
+          const projects = projectsResult.payload?.Data?.Response?.Projects ?? [];
           console.log(JSON.stringify(projects.map((project) => ({
             Name: project.Name,
             ProjectId: project.ProjectId,
@@ -42,4 +50,44 @@ jobs:
             IsTld: project.IsTld,
             CustomDomains: project.CustomDomains,
           })), null, 2));
+
+          for (const projectId of ['makers-e032dznehcv2', 'makers-nycxgnmbk5ft']) {
+            const result = await request({
+              Action: 'DescribePagesZoneCustomDomains',
+              ProjectId: projectId,
+            });
+            const response = result.payload?.Data?.Response ?? result.payload;
+            console.log(JSON.stringify({
+              action: 'DescribePagesZoneCustomDomains',
+              projectId,
+              httpStatus: result.httpStatus,
+              code: result.payload?.Code,
+              message: result.payload?.Message,
+              response: {
+                PagesDomains: response?.PagesDomains,
+              },
+            }, null, 2));
+          }
+
+          const readOnlyCandidates = [
+            'DescribePagesProjectDomains',
+            'DescribePagesDomains',
+            'DescribePagesCustomDomains',
+            'DescribePagesProjectCustomDomains',
+            'DescribePagesZoneDomains',
+            'DescribePagesDomain',
+          ];
+          for (const action of readOnlyCandidates) {
+            const result = await request({
+              Action: action,
+              ProjectId: 'makers-nycxgnmbk5ft',
+            });
+            console.log(JSON.stringify({
+              action,
+              httpStatus: result.httpStatus,
+              code: result.payload?.Code,
+              message: result.payload?.Message,
+              responseKeys: Object.keys(result.payload?.Data?.Response ?? {}),
+            }));
+          }
           NODE
