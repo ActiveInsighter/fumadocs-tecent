@@ -149,6 +149,45 @@ jobs:
           done
           exit "${missing}"
 
+      - name: Link Blob project for Pages storage runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          edgeone makers link \
+            -n "${EDGEONE_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
+
+      - name: Verify EdgeOne Blob storage access
+        shell: bash
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_PROJECT_ID: ${{ steps.configure.outputs.project_id }}
+        run: |
+          set -euo pipefail
+
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+          response_file="${api_tmp}/blob-sts.json"
+          http_status="$({
+            curl --silent --show-error --max-time 30 \
+              -H 'Content-Type: application/json' \
+              -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+              --data-binary "{\"ProjectId\":\"${EDGEONE_PROJECT_ID}\"}" \
+              --output "${response_file}" \
+              -w '%{http_code}' \
+              https://blob-sts.edgeone.site/
+          } || true)"
+
+          echo "blob_sts_http_status=${http_status}"
+          if [[ "${http_status}" != 2* ]] || ! jq -e '
+            ((.data // .) | .tmpSecretId and .tmpSecretKey and .sessionToken and .expiredTime)
+          ' "${response_file}" >/dev/null; then
+            echo '::error::EdgeOne Blob storage credentials were not issued for this project.'
+            exit 1
+          fi
+          echo 'EdgeOne Blob storage credentials=available'
+
       - name: Ensure Blob custom domain binding
         shell: bash
         env:
@@ -229,3 +268,40 @@ jobs:
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
             2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
+
+      - name: Verify public EdgeOne Blob routes
+        shell: bash
+        env:
+          EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
+          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
+        run: |
+          set -euo pipefail
+
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+
+          signer_response="${api_tmp}/signer.json"
+          signer_status="$({
+            curl --silent --show-error --max-time 30 \
+              --request POST \
+              -H 'Accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H "X-Internal-Key: ${EDGEONE_INTERNAL_API_KEY}" \
+              --data-binary '{"documentId":"edgeone-verification-probe","version":1,"format":"md"}' \
+              --output "${signer_response}" \
+              -w '%{http_code}' \
+              https://fumadocs-upload.any1.tech/api/blob/upload-url
+          } || true)"
+          gateway_status="$({
+            curl --silent --show-error --max-time 30 \
+              --request GET \
+              -H "X-Internal-Key: ${EDGEONE_DOWNLOAD_GATEWAY_SECRET}" \
+              --output /dev/null \
+              -w '%{http_code}' \
+              https://fumadocs-upload.any1.tech/download/edgeone-verification-probe/1/md
+          } || true)"
+
+          echo "signer_with_key=${signer_status}"
+          echo "gateway_missing_artifact=${gateway_status}"
+          [[ "${signer_status}" == '200' ]]
+          [[ "${gateway_status}" == '404' ]]

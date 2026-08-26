@@ -204,6 +204,9 @@ describe('document publishing contracts', () => {
     expect(workflow).toContain('edgeone@${EDGEONE_CLI_VERSION}');
     expect(workflow).toContain('EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}');
     expect(workflow).toContain('EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}');
+    expect(workflow).toContain('edgeone makers link');
+    expect(workflow).toContain('https://blob-sts.edgeone.site/');
+    expect(workflow).toContain('signer_with_key=');
     expect(workflow).not.toContain('md-to-pdf');
     expect(workflow).not.toMatch(/^\s*EDGEONE_API_TOKEN:\s*(?!\$\{\{)[^\s#]/mu);
   });
