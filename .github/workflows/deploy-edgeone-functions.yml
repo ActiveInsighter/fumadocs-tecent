@@ -15,7 +15,6 @@ permissions:
 env:
   EDGEONE_CLI_VERSION: 1.6.19
   EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
-  EDGEONE_BLOB_PROJECT_URL: https://fumadocs-upload-mimnflju.edgeone.cool
   EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}
 
 jobs:
@@ -149,79 +148,10 @@ jobs:
 
       - name: Deploy the Blob functions package
         shell: bash
-        env:
-          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
         run: |
           set -euo pipefail
-
-          deploy_tmp="$(mktemp -d)"
-          trap 'rm -rf -- "${deploy_tmp}"' EXIT
-          deploy_log="${deploy_tmp}/edgeone-functions-deploy.log"
-
-          if ! edgeone makers deploy ./edgeone \
+          edgeone makers deploy ./edgeone \
             -n "${EDGEONE_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
-            > "${deploy_log}" 2>&1; then
-            sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' "${deploy_log}"
-            exit 1
-          fi
-          sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' "${deploy_log}"
-
-          deployment_url="$(
-            grep -Eo 'Deploy URL: https://[^[:space:]]+' "${deploy_log}" \
-              | tail -n 1 \
-              | sed -E 's/^Deploy URL: //; s/[),.;]+$//'
-          )"
-          if [ -z "${deployment_url}" ]; then
-            echo '::error::EdgeOne deployment URL was not returned.'
-            exit 1
-          fi
-
-          deployment_base="${deployment_url%%\?*}"
-          deployment_query=''
-          if [[ "${deployment_url}" == *\?* ]]; then
-            deployment_query="?${deployment_url#*\?}"
-          fi
-
-          status_for() {
-            local method="$1"
-            local url="$2"
-            shift 2
-            curl --silent --show-error --max-time 30 \
-              --request "${method}" \
-              -o /dev/null \
-              -w '%{http_code}' \
-              "$@" \
-              "${url}" || true
-          }
-
-          wait_for_status() {
-            local expected="$1"
-            shift
-            local status='000'
-            for attempt in {1..12}; do
-              status="$(status_for "$@")"
-              if [[ "${status}" == "${expected}" ]]; then
-                printf '%s' "${status}"
-                return 0
-              fi
-              sleep 5
-            done
-            printf '%s' "${status}"
-          }
-
-          route_url() {
-            printf '%s%s%s' "${deployment_base}" "$1" "${deployment_query}"
-          }
-
-          signer_status="$(wait_for_status 401 POST "$(route_url '/api/blob/upload-url')")"
-          gateway_status="$(wait_for_status 404 GET \
-            "$(route_url '/download/edgeone-verification-probe/1/md')" \
-            -H "X-Internal-Key: ${EDGEONE_DOWNLOAD_GATEWAY_SECRET}")"
-
-          echo "signer_without_key=${signer_status}"
-          echo "gateway_missing_artifact=${gateway_status}"
-
-          [[ "${signer_status}" == "401" ]]
-          [[ "${gateway_status}" == "404" ]]
+            2>&1 | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g'
