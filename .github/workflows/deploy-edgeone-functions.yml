@@ -202,7 +202,14 @@ jobs:
             ) {
               throw new Error('Failed to attach the Blob custom domain to EdgeOne.');
             }
-            binding = created.payload?.Data?.Response ?? created.payload;
+            const refreshed = await request({
+              Action: 'DescribePagesZoneCustomDomains',
+              ProjectId: projectId,
+            });
+            const refreshedResponse = refreshed.payload?.Data?.Response ?? refreshed.payload;
+            binding = (refreshedResponse?.PagesDomains ?? []).find(
+              (item) => item?.Type === 'Custom' && item?.Domain === domain,
+            ) ?? created.payload?.Data?.Response ?? created.payload;
           }
 
           console.log(JSON.stringify({
