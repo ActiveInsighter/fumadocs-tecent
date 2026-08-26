@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -167,6 +167,16 @@ describe('document publishing contracts', () => {
     expect(workflow).toContain('EDGEONE_PROJECT_NAME: ${{ vars.EDGEONE_PROJECT_NAME }}');
     expect(workflow).not.toContain('md-to-pdf');
     expect(workflow).not.toMatch(/^\s*EDGEONE_API_TOKEN:\s*(?!\$\{\{)[^\s#]/mu);
+  });
+
+  it('places Node.js Blob handlers in EdgeOne cloud-functions routes', () => {
+    const cloudFunctionsDir = new URL('../edgeone/cloud-functions/', import.meta.url);
+    const legacyFunctionsDir = new URL('../edgeone/functions/', import.meta.url);
+
+    expect(existsSync(cloudFunctionsDir)).toBe(true);
+    expect(existsSync(new URL('api/blob/upload-url.js', cloudFunctionsDir))).toBe(true);
+    expect(existsSync(new URL('download/[documentId]/[version]/[format].js', cloudFunctionsDir))).toBe(true);
+    expect(existsSync(legacyFunctionsDir)).toBe(false);
   });
 
   it('keeps the Blob gateway on a stable custom domain', () => {

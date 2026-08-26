@@ -23,7 +23,7 @@ server token.
    `ActiveInsighter/md-to-pdf/.github/workflows/build-pdf-api.yml`. mdTOpdf is
    not deployed on either cloud server; n8n invokes that GitHub Action with a
    `job_id`.
-3. Deploy `edgeone/functions` as EdgeOne Node Functions. The upload signer is
+3. Deploy `edgeone/cloud-functions` as EdgeOne Node.js Cloud Functions. The upload signer is
    `/api/blob/upload-url`; the download gateway is
    `/download/:documentId/:version/:format`.
 4. Import `n8n/document-publish.workflow.json` into n8n, import
