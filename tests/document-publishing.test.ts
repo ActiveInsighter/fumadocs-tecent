@@ -349,4 +349,10 @@ describe('document publishing contracts', () => {
     expect(docsWorkflow).toContain('https://fumadocs-upload.any1.tech/download');
     expect(docsWorkflow).not.toContain('fumadocs-upload-mimnflju.edgeone.cool');
   });
+
+  it('does not require third-party blog images during the production build', () => {
+    const sourceConfig = readFileSync(new URL('../source.config.ts', import.meta.url), 'utf8');
+
+    expect(sourceConfig).toMatch(/remarkImageOptions:\s*\{\s*external:\s*false\s*\}/u);
+  });
 });

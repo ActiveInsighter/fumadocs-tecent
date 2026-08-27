@@ -33,6 +33,8 @@ export const blog = defineCollections({
 export default defineConfig({
   mdxOptions: {
     remarkPlugins: [remarkMath, remarkMdxMermaid],
+    // Do not make production builds depend on third-party image hosts.
+    remarkImageOptions: { external: false },
     // KaTeX must run before Fumadocs' syntax highlighter.
     rehypePlugins: (plugins) => [rehypeKatex, ...plugins],
   },
