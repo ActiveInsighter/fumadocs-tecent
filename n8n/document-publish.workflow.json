@@ -22,7 +22,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst input = $input.first().json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\nconst headers = input.headers && typeof input.headers === 'object' ? input.headers : {};\nconst receivedSecret = headers['x-internal-key'] || headers['X-Internal-Key'];\nconst expectedSecret = $env.N8N_DOCUMENT_PUBLISH_SECRET;\nif (typeof expectedSecret !== 'string' || expectedSecret.length < 16 || receivedSecret !== expectedSecret) {\n  throw new Error('Document publish webhook authentication failed.');\n}\nif (\n  body.schemaVersion !== 1 ||\n  body.kind !== 'message' ||\n  typeof body.eventId !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.eventId) ||\n  typeof body.ownerId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.ownerId) ||\n  typeof body.messageRecordId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.messageRecordId) ||\n  typeof body.entryKey !== 'string' ||\n  body.entryKey.length < 1 ||\n  body.entryKey.length > 512 ||\n  typeof body.checksum !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.checksum)\n) {\n  throw new Error('Document publish webhook payload is invalid.');\n}\nreturn {\n  json: {\n    eventId: body.eventId,\n    ownerId: body.ownerId,\n    messageRecordId: body.messageRecordId,\n    entryKey: body.entryKey,\n    checksum: body.checksum,\n    source: 'anyworkflow',\n  },\n};"
+        "jsCode": "\nconst input = $json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\nconst headers = input.headers && typeof input.headers === 'object' ? input.headers : {};\nconst receivedSecret = headers['x-internal-key'] || headers['X-Internal-Key'];\nconst expectedSecret = $env.N8N_DOCUMENT_PUBLISH_SECRET;\nif (typeof expectedSecret !== 'string' || expectedSecret.length < 16 || receivedSecret !== expectedSecret) {\n  throw new Error('Document publish webhook authentication failed.');\n}\nif (\n  body.schemaVersion !== 1 ||\n  body.kind !== 'message' ||\n  typeof body.eventId !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.eventId) ||\n  typeof body.ownerId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.ownerId) ||\n  typeof body.messageRecordId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.messageRecordId) ||\n  typeof body.entryKey !== 'string' ||\n  body.entryKey.length < 1 ||\n  body.entryKey.length > 512 ||\n  typeof body.checksum !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.checksum)\n) {\n  throw new Error('Document publish webhook payload is invalid.');\n}\nreturn {\n  json: {\n    eventId: body.eventId,\n    ownerId: body.ownerId,\n    messageRecordId: body.messageRecordId,\n    entryKey: body.entryKey,\n    checksum: body.checksum,\n    source: 'anyworkflow',\n  },\n};"
       },
       "id": "document-publish-2",
       "name": "Validate Event",
@@ -73,7 +73,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst event = $('Validate Event').item.json;\nconst message = $input.first().json;\nif (\n  message.id !== event.messageRecordId ||\n  message.owner !== event.ownerId ||\n  typeof message.userMarkdown !== 'string' ||\n  typeof message.assistantMarkdown !== 'string' ||\n  message.assistantMarkdown.trim().length === 0\n) {\n  throw new Error('PocketBase returned an invalid or cross-owner message.');\n}\nreturn {\n  json: {\n    ...event,\n    message,\n    assistantMarkdown: message.assistantMarkdown,\n    userMarkdown: message.userMarkdown,\n  },\n};"
+        "jsCode": "\nconst event = $('Validate Event').item.json;\nconst message = $json;\nif (\n  message.id !== event.messageRecordId ||\n  message.owner !== event.ownerId ||\n  typeof message.userMarkdown !== 'string' ||\n  typeof message.assistantMarkdown !== 'string' ||\n  message.assistantMarkdown.trim().length === 0\n) {\n  throw new Error('PocketBase returned an invalid or cross-owner message.');\n}\nreturn {\n  json: {\n    ...event,\n    message,\n    assistantMarkdown: message.assistantMarkdown,\n    userMarkdown: message.userMarkdown,\n  },\n};"
       },
       "id": "document-publish-4",
       "name": "Merge Message",
@@ -87,7 +87,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $input.first().json;\nconst filter = 'owner = \"' + base.ownerId + '\" && documentId = \"' + base.messageRecordId + '\"';\nreturn {\n  json: {\n    ...base,\n    documentLookupUrl: $env.POCKETBASE_URL + '/api/collections/aw_documents/records?perPage=2&filter=' + encodeURIComponent(filter),\n  },\n};"
+        "jsCode": "\nconst base = $json;\nconst filter = 'owner = \"' + base.ownerId + '\" && documentId = \"' + base.messageRecordId + '\"';\nreturn {\n  json: {\n    ...base,\n    documentLookupUrl: $env.POCKETBASE_URL + '/api/collections/aw_documents/records?perPage=2&filter=' + encodeURIComponent(filter),\n  },\n};"
       },
       "id": "document-publish-5",
       "name": "Prepare Document Lookup",
@@ -138,7 +138,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Merge Message').item.json;\nconst result = $input.first().json;\nconst records = Array.isArray(result.items) ? result.items : [];\nif (records.length > 1) throw new Error('PocketBase returned duplicate document identities.');\nconst existing = records[0];\nconst sameSource = existing && existing.sourceChecksum === base.checksum;\nconst inProgress = Boolean(sameSource && existing.status === 'processing');\nconst duplicate = Boolean(sameSource && ['processing', 'published'].includes(existing.status));\nconst version = sameSource\n  ? Math.max(1, Number(existing.version) || 1)\n  : Math.max(1, Number(existing?.version) || 0) + (existing ? 1 : 0);\nreturn {\n  json: {\n    ...base,\n    documentId: base.messageRecordId,\n    documentRecordId: existing?.id,\n    existingDocument: existing || null,\n    documentVersion: version,\n    inProgress,\n    duplicate,\n  },\n};"
+        "jsCode": "\nconst base = $('Merge Message').item.json;\nconst result = $json;\nconst records = Array.isArray(result.items) ? result.items : [];\nif (records.length > 1) throw new Error('PocketBase returned duplicate document identities.');\nconst existing = records[0];\nconst sameSource = existing && existing.sourceChecksum === base.checksum;\nconst inProgress = Boolean(sameSource && existing.status === 'processing');\nconst duplicate = Boolean(sameSource && ['processing', 'published'].includes(existing.status));\nconst version = sameSource\n  ? Math.max(1, Number(existing.version) || 1)\n  : Math.max(1, Number(existing?.version) || 0) + (existing ? 1 : 0);\nreturn {\n  json: {\n    ...base,\n    documentId: base.messageRecordId,\n    documentRecordId: existing?.id,\n    existingDocument: existing || null,\n    documentVersion: version,\n    inProgress,\n    duplicate,\n  },\n};"
       },
       "id": "document-publish-7",
       "name": "Prepare Document State",
@@ -152,12 +152,24 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.duplicate }}",
-              "operation": "isTrue"
+              "id": "document-publish-condition-duplicate",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
       "id": "document-publish-8",
@@ -186,7 +198,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $input.first().json;\nconst system = 'You normalize an AI answer into document metadata. Return only JSON with title, slug, summary, and tags. title is a concise human title; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 300 Chinese characters; tags is an array of at most 8 short strings. Do not invent technical claims.';\nconst user = 'Original user request:\\n' + base.userMarkdown + '\\n\\nAssistant answer:\\n' + base.assistantMarkdown;\nreturn {\n  json: {\n    ...base,\n    newApiRequest: {\n      model: $env.NEW_API_MODEL,\n      temperature: 0.2,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: system },\n        { role: 'user', content: user },\n      ],\n    },\n  },\n};"
+        "jsCode": "\nconst base = $json;\nconst system = 'You normalize an AI answer into document metadata. Return only JSON with title, slug, summary, and tags. title is a concise human title; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 300 Chinese characters; tags is an array of at most 8 short strings. Do not invent technical claims.';\nconst user = 'Original user request:\\n' + base.userMarkdown + '\\n\\nAssistant answer:\\n' + base.assistantMarkdown;\nreturn {\n  json: {\n    ...base,\n    newApiRequest: {\n      model: $env.NEW_API_MODEL,\n      temperature: 0.2,\n      stream: false,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: system },\n        { role: 'user', content: user },\n      ],\n    },\n  },\n};"
       },
       "id": "document-publish-10",
       "name": "Prepare Metadata Request",
@@ -225,7 +237,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -245,7 +257,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Prepare Metadata Request').item.json;\nconst response = $input.first().json;\nlet raw = response?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API metadata was not valid JSON.');\n}\nconst heading = base.assistantMarkdown.match(/^#\\s+(.+)$/mu)?.[1]?.trim();\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : (heading || 'AI Document').slice(0, 512);\nconst fallbackSlug = 'document';\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : fallbackSlug;\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nreturn {\n  json: {\n    ...base,\n    metadata: { title, slug, summary, tags },\n  },\n};"
+        "jsCode": "\nconst base = $('Prepare Metadata Request').item.json;\nconst response = $json;\nconst responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nif (responseBody?.error && typeof responseBody.error.message === 'string') {\n  throw new Error('New API metadata request failed: ' + responseBody.error.message.slice(0, 300));\n}\nlet raw = responseBody?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API metadata was not valid JSON.');\n}\nconst heading = base.assistantMarkdown.match(/^#\\s+(.+)$/mu)?.[1]?.trim();\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : (heading || 'AI Document').slice(0, 512);\nconst fallbackSlug = 'document';\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : fallbackSlug;\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nreturn {\n  json: {\n    ...base,\n    metadata: { title, slug, summary, tags },\n  },\n};"
       },
       "id": "document-publish-12",
       "name": "Parse Metadata",
@@ -312,7 +324,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -332,7 +344,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Prepare Document Write').item.json;\nconst record = $input.first().json;\nif (!record.id || record.owner !== base.ownerId) throw new Error('PocketBase document write returned an invalid record.');\nreturn {\n  json: { ...base, documentRecord: record },\n  binary: $('Prepare Document Write').item.binary,\n};"
+        "jsCode": "\nconst base = $('Prepare Document Write').item.json;\nconst record = $json;\nif (!record.id || record.owner !== base.ownerId) throw new Error('PocketBase document write returned an invalid record.');\nreturn {\n  json: { ...base, documentRecord: record },\n  binary: $('Prepare Document Write').item.binary,\n};"
       },
       "id": "document-publish-16",
       "name": "Merge Document Response",
@@ -346,7 +358,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $input.first().json;\nconst supabaseUrl = typeof $env.MDTO_PDF_SUPABASE_URL === 'string'\n  ? $env.MDTO_PDF_SUPABASE_URL.trim().replace(/\\/+$/u, '')\n  : '';\nconst serviceKey = typeof $env.MDTO_PDF_SUPABASE_SERVICE_KEY === 'string'\n  ? $env.MDTO_PDF_SUPABASE_SERVICE_KEY.trim()\n  : '';\nconst userId = typeof $env.MDTO_PDF_SUPABASE_USER_ID === 'string'\n  ? $env.MDTO_PDF_SUPABASE_USER_ID.trim()\n  : '';\nconst bucket = (typeof $env.MDTO_PDF_SUPABASE_BUCKET === 'string' && $env.MDTO_PDF_SUPABASE_BUCKET.trim())\n  ? $env.MDTO_PDF_SUPABASE_BUCKET.trim()\n  : 'pdf-jobs';\nconst theme = (typeof $env.MDTO_PDF_THEME === 'string' && $env.MDTO_PDF_THEME.trim())\n  ? $env.MDTO_PDF_THEME.trim()\n  : 'chatgpt-light';\nlet parsedUrl;\ntry {\n  parsedUrl = new URL(supabaseUrl);\n} catch {\n  throw new Error('mdTOpdf Supabase URL configuration is invalid.');\n}\nif (\n  parsedUrl.protocol !== 'https:'\n  || parsedUrl.username\n  || parsedUrl.password\n  || parsedUrl.search\n  || parsedUrl.hash\n  || !serviceKey\n  || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(userId)\n  || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u.test(bucket)\n  || !new Set(['chatgpt-light', 'academic', 'github']).has(theme)\n) {\n  throw new Error('mdTOpdf Supabase integration configuration is invalid.');\n}\nconst sourceCandidate = typeof base.fumadocsPath === 'string'\n  ? base.fumadocsPath.split('/').pop()?.replace(/\\.mdx$/iu, '.md')\n  : '';\nconst sourceFilename = typeof sourceCandidate === 'string'\n  && /^[A-Za-z0-9][A-Za-z0-9._-]{0,170}\\.md$/u.test(sourceCandidate)\n  ? sourceCandidate\n  : 'document-' + base.documentId.slice(-8) + '.md';\nconst documentName = sourceFilename.slice(0, -3).slice(0, 160) || 'document';\nconst randomUuid = globalThis.crypto?.randomUUID;\nif (typeof randomUuid !== 'function') throw new Error('The n8n runtime does not provide crypto.randomUUID.');\nconst jobId = randomUuid.call(globalThis.crypto);\nif (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(jobId)) {\n  throw new Error('mdTOpdf generated an invalid job ID.');\n}\nconst inputPath = 'jobs/' + jobId + '/input.md';\nconst outputPath = 'jobs/' + jobId + '/output.pdf';\nconst encodePath = (value) => value.split('/').map((part) => encodeURIComponent(part)).join('/');\nconst encodedInputPath = encodePath(inputPath);\nconst encodedOutputPath = encodePath(outputPath);\nconst repoBase = 'https://api.github.com/repos/ActiveInsighter/md-to-pdf';\nreturn {\n  json: {\n    ...base,\n    mdToPdfSupabaseUrl: supabaseUrl,\n    mdToPdfSupabaseBucket: bucket,\n    mdToPdfJobId: jobId,\n    mdToPdfInputPath: inputPath,\n    mdToPdfOutputPath: outputPath,\n    mdToPdfSourceFilename: sourceFilename,\n    mdToPdfJobInsertUrl: supabaseUrl + '/rest/v1/pdf_jobs',\n    mdToPdfJobUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId,\n    mdToPdfJobStatusUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId\n      + '&select=id,status,output_path,error_message,github_run_id',\n    mdToPdfMarkUploadedUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId + '&status=eq.created',\n    mdToPdfQueueUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId + '&status=eq.uploaded',\n    mdToPdfUploadUrl: supabaseUrl + '/storage/v1/object/' + encodeURIComponent(bucket) + '/' + encodedInputPath,\n    mdToPdfOutputDownloadUrl: supabaseUrl + '/storage/v1/object/authenticated/'\n      + encodeURIComponent(bucket) + '/' + encodedOutputPath,\n    mdToPdfDispatchUrl: repoBase + '/actions/workflows/build-pdf-api.yml/dispatches',\n    mdToPdfWorkflowFile: 'build-pdf-api.yml',\n    mdToPdfWorkflowRef: 'main',\n    mdToPdfWorkflowEvent: 'workflow_dispatch',\n    mdToPdfJobBody: {\n      id: jobId,\n      user_id: userId,\n      status: 'created',\n      input_path: inputPath,\n      assets_path: null,\n      output_path: null,\n      has_assets: false,\n      theme,\n      options: { breaks: true, toc: true },\n      source_filename: sourceFilename,\n      source_name: sourceFilename,\n      document_name: documentName,\n      output_filename: documentName + '.pdf',\n      is_favorite: false,\n    },\n  },\n};"
+        "jsCode": "\nconst base = $json;\nconst supabaseUrl = typeof $env.MDTO_PDF_SUPABASE_URL === 'string'\n  ? $env.MDTO_PDF_SUPABASE_URL.trim().replace(/\\/+$/u, '')\n  : '';\nconst serviceKey = typeof $env.MDTO_PDF_SUPABASE_SERVICE_KEY === 'string'\n  ? $env.MDTO_PDF_SUPABASE_SERVICE_KEY.trim()\n  : '';\nconst userId = typeof $env.MDTO_PDF_SUPABASE_USER_ID === 'string'\n  ? $env.MDTO_PDF_SUPABASE_USER_ID.trim()\n  : '';\nconst bucket = (typeof $env.MDTO_PDF_SUPABASE_BUCKET === 'string' && $env.MDTO_PDF_SUPABASE_BUCKET.trim())\n  ? $env.MDTO_PDF_SUPABASE_BUCKET.trim()\n  : 'pdf-jobs';\nconst theme = (typeof $env.MDTO_PDF_THEME === 'string' && $env.MDTO_PDF_THEME.trim())\n  ? $env.MDTO_PDF_THEME.trim()\n  : 'chatgpt-light';\nconst supabaseUrlIsValid = /^https:\\/\\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/iu.test(supabaseUrl);\nif (\n  !supabaseUrlIsValid\n  || !serviceKey\n  || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(userId)\n  || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u.test(bucket)\n  || !new Set(['chatgpt-light', 'academic', 'github']).has(theme)\n) {\n  throw new Error('mdTOpdf Supabase integration configuration is invalid.');\n}\nconst sourceCandidate = typeof base.fumadocsPath === 'string'\n  ? base.fumadocsPath.split('/').pop()?.replace(/\\.mdx$/iu, '.md')\n  : '';\nconst sourceFilename = typeof sourceCandidate === 'string'\n  && /^[A-Za-z0-9][A-Za-z0-9._-]{0,170}\\.md$/u.test(sourceCandidate)\n  ? sourceCandidate\n  : 'document-' + base.documentId.slice(-8) + '.md';\nconst documentName = sourceFilename.slice(0, -3).slice(0, 160) || 'document';\nfunction createJobId() {\n  const bytes = new Uint8Array(16);\n  if (typeof globalThis.crypto?.getRandomValues === 'function') {\n    globalThis.crypto.getRandomValues(bytes);\n  } else {\n    for (let index = 0; index < bytes.length; index += 1) {\n      bytes[index] = Math.floor(Math.random() * 256);\n    }\n  }\n  bytes[6] = (bytes[6] & 0x0f) | 0x40;\n  bytes[8] = (bytes[8] & 0x3f) | 0x80;\n  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');\n  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);\n}\nconst jobId = createJobId();\nif (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(jobId)) {\n  throw new Error('mdTOpdf generated an invalid job ID.');\n}\nconst inputPath = 'jobs/' + jobId + '/input.md';\nconst outputPath = 'jobs/' + jobId + '/output.pdf';\nconst encodePath = (value) => value.split('/').map((part) => encodeURIComponent(part)).join('/');\nconst encodedInputPath = encodePath(inputPath);\nconst encodedOutputPath = encodePath(outputPath);\nconst repoBase = 'https://api.github.com/repos/ActiveInsighter/md-to-pdf';\nreturn {\n  json: {\n    ...base,\n    mdToPdfSupabaseUrl: supabaseUrl,\n    mdToPdfSupabaseBucket: bucket,\n    mdToPdfJobId: jobId,\n    mdToPdfInputPath: inputPath,\n    mdToPdfOutputPath: outputPath,\n    mdToPdfSourceFilename: sourceFilename,\n    mdToPdfJobInsertUrl: supabaseUrl + '/rest/v1/pdf_jobs',\n    mdToPdfJobUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId,\n    mdToPdfJobStatusUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId\n      + '&select=id,status,output_path,error_message,github_run_id',\n    mdToPdfMarkUploadedUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId + '&status=eq.created',\n    mdToPdfQueueUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + jobId + '&status=eq.uploaded',\n    mdToPdfUploadUrl: supabaseUrl + '/storage/v1/object/' + encodeURIComponent(bucket) + '/' + encodedInputPath,\n    mdToPdfOutputDownloadUrl: supabaseUrl + '/storage/v1/object/authenticated/'\n      + encodeURIComponent(bucket) + '/' + encodedOutputPath,\n    mdToPdfDispatchUrl: repoBase + '/actions/workflows/build-pdf-api.yml/dispatches',\n    mdToPdfWorkflowFile: 'build-pdf-api.yml',\n    mdToPdfWorkflowRef: 'main',\n    mdToPdfWorkflowEvent: 'workflow_dispatch',\n    mdToPdfJobBody: {\n      id: jobId,\n      user_id: userId,\n      status: 'created',\n      input_path: inputPath,\n      assets_path: null,\n      output_path: null,\n      has_assets: false,\n      theme,\n      options: { breaks: true, toc: true },\n      source_filename: sourceFilename,\n      source_name: sourceFilename,\n      document_name: documentName,\n      output_filename: documentName + '.pdf',\n      is_favorite: false,\n    },\n  },\n};"
       },
       "id": "document-publish-17",
       "name": "Prepare mdTOpdf Input",
@@ -393,7 +405,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json",
+              "responseFormat": "autodetect",
               "fullResponse": true,
               "neverError": true
             }
@@ -415,7 +427,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Prepare mdTOpdf Input').item.json;\nconst response = $input.first().json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf job creation failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst job = rows[0];\nif (!job || job.id !== base.mdToPdfJobId || job.status !== 'created' || job.input_path !== base.mdToPdfInputPath) {\n  throw new Error('mdTOpdf returned an invalid created job.');\n}\nreturn {\n  json: { ...base, mdToPdfJobRecord: job },\n};"
+        "jsCode": "\nconst base = $('Prepare mdTOpdf Input').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf job creation failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst job = rows[0];\nif (!job || job.id !== base.mdToPdfJobId || job.status !== 'created' || job.input_path !== base.mdToPdfInputPath) {\n  throw new Error('mdTOpdf returned an invalid created job.');\n}\nreturn {\n  json: { ...base, mdToPdfJobRecord: job },\n};"
       },
       "id": "document-publish-19",
       "name": "Parse mdTOpdf Job",
@@ -466,7 +478,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json",
+              "responseFormat": "autodetect",
               "fullResponse": true,
               "neverError": true
             }
@@ -488,7 +500,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Parse mdTOpdf Job').item.json;\nconst response = $input.first().json;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf Markdown upload failed with status ' + statusCode + '.');\n}\nreturn { json: base };"
+        "jsCode": "\nconst base = $('Parse mdTOpdf Job').item.json;\nconst response = $json;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf Markdown upload failed with status ' + statusCode + '.');\n}\nreturn { json: base };"
       },
       "id": "document-publish-21",
       "name": "Parse mdTOpdf Upload",
@@ -535,7 +547,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json",
+              "responseFormat": "autodetect",
               "fullResponse": true,
               "neverError": true
             }
@@ -557,7 +569,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Parse mdTOpdf Upload').item.json;\nconst response = $input.first().json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf uploaded-state update failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nif (rows.length > 0 && rows[0].status !== 'uploaded') {\n  throw new Error('mdTOpdf did not enter the uploaded state.');\n}\nreturn { json: { ...base, mdToPdfUploaded: true } };"
+        "jsCode": "\nconst base = $('Parse mdTOpdf Upload').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf uploaded-state update failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nif (rows.length > 0 && rows[0].status !== 'uploaded') {\n  throw new Error('mdTOpdf did not enter the uploaded state.');\n}\nreturn { json: { ...base, mdToPdfUploaded: true } };"
       },
       "id": "document-publish-23",
       "name": "Parse mdTOpdf Uploaded",
@@ -604,7 +616,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json",
+              "responseFormat": "autodetect",
               "fullResponse": true,
               "neverError": true
             }
@@ -626,7 +638,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Parse mdTOpdf Uploaded').item.json;\nconst response = $input.first().json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf queue update failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nif (rows.length > 0 && rows[0].status !== 'queued') {\n  throw new Error('mdTOpdf did not enter the queued state.');\n}\nreturn { json: { ...base, mdToPdfQueued: true } };"
+        "jsCode": "\nconst base = $('Parse mdTOpdf Uploaded').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf queue update failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nif (rows.length > 0 && rows[0].status !== 'queued') {\n  throw new Error('mdTOpdf did not enter the queued state.');\n}\nreturn { json: { ...base, mdToPdfQueued: true } };"
       },
       "id": "document-publish-25",
       "name": "Parse mdTOpdf Queued",
@@ -683,7 +695,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "text",
+              "responseFormat": "autodetect",
               "fullResponse": true,
               "neverError": true
             }
@@ -705,7 +717,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Prepare mdTOpdf Dispatch').item.json;\nconst response = $input.first().json;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 204) {\n  throw new Error('mdTOpdf workflow dispatch failed with status ' + statusCode + '.');\n}\nreturn { json: { ...base, mdToPdfPollCount: 0 } };"
+        "jsCode": "\nconst base = $('Prepare mdTOpdf Dispatch').item.json;\nconst response = $json;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 204) {\n  throw new Error('mdTOpdf workflow dispatch failed with status ' + statusCode + '.');\n}\nreturn { json: { ...base, mdToPdfPollCount: 0 } };"
       },
       "id": "document-publish-28",
       "name": "Parse mdTOpdf Dispatch",
@@ -777,7 +789,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst input = $input.first().json;\nconst base = input?.mdToPdfJobId\n  ? input\n  : $('Wait mdTOpdf Action').item.json;\nconst response = input?.mdTOpdfResponse && typeof input.mdTOpdfResponse === 'object'\n  ? input.mdTOpdfResponse\n  : input;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && (statusCode < 200 || statusCode >= 300)) {\n  throw new Error('mdTOpdf job status lookup failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst job = rows[0];\nif (!job || job.id !== base.mdToPdfJobId || typeof job.status !== 'string') {\n  throw new Error('mdTOpdf returned an invalid job status response.');\n}\nconst pollCount = Number(base.mdToPdfPollCount || 0) + 1;\nconst dispatchedAt = Date.parse(base.mdToPdfDispatchedAt);\nif (!Number.isFinite(dispatchedAt) || pollCount > 165 || Date.now() - dispatchedAt > 27 * 60 * 1000) {\n  throw new Error('Timed out waiting for the mdTOpdf GitHub Action job.');\n}\nif (job.status === 'failed') {\n  throw new Error('mdTOpdf GitHub Action failed: ' + String(job.error_message || 'unknown error').slice(0, 500));\n}\nif (!new Set(['queued', 'building', 'uploading', 'completed']).has(job.status)) {\n  throw new Error('mdTOpdf returned an unexpected job status: ' + job.status);\n}\nif (job.status === 'completed' && job.output_path !== base.mdToPdfOutputPath) {\n  throw new Error('mdTOpdf completed without the expected output path.');\n}\nreturn {\n  json: {\n    ...base,\n    mdToPdfPollCount: pollCount,\n    mdToPdfStatus: job.status,\n    mdToPdfReady: job.status === 'completed',\n  },\n};"
+        "jsCode": "\nconst input = $json;\nconst base = input?.mdToPdfJobId\n  ? input\n  : $('Wait mdTOpdf Action').item.json;\nconst response = input?.mdTOpdfResponse && typeof input.mdTOpdfResponse === 'object'\n  ? input.mdTOpdfResponse\n  : input;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && (statusCode < 200 || statusCode >= 300)) {\n  throw new Error('mdTOpdf job status lookup failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst job = rows[0];\nif (!job || job.id !== base.mdToPdfJobId || typeof job.status !== 'string') {\n  throw new Error('mdTOpdf returned an invalid job status response.');\n}\nconst pollCount = Number(base.mdToPdfPollCount || 0) + 1;\nconst dispatchedAt = Date.parse(base.mdToPdfDispatchedAt);\nif (!Number.isFinite(dispatchedAt) || pollCount > 165 || Date.now() - dispatchedAt > 27 * 60 * 1000) {\n  throw new Error('Timed out waiting for the mdTOpdf GitHub Action job.');\n}\nif (job.status === 'failed') {\n  throw new Error('mdTOpdf GitHub Action failed: ' + String(job.error_message || 'unknown error').slice(0, 500));\n}\nif (!new Set(['queued', 'building', 'uploading', 'completed']).has(job.status)) {\n  throw new Error('mdTOpdf returned an unexpected job status: ' + job.status);\n}\nif (job.status === 'completed' && job.output_path !== base.mdToPdfOutputPath) {\n  throw new Error('mdTOpdf completed without the expected output path.');\n}\nreturn {\n  json: {\n    ...base,\n    mdToPdfPollCount: pollCount,\n    mdToPdfStatus: job.status,\n    mdToPdfReady: job.status === 'completed',\n  },\n};"
       },
       "id": "document-publish-31",
       "name": "Parse mdTOpdf Job Status",
@@ -791,12 +803,24 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.mdToPdfReady }}",
-              "operation": "isTrue"
+              "id": "document-publish-condition-pdf-ready",
+              "leftValue": "={{ $json.mdToPdfReady }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
       "id": "document-publish-32",
@@ -854,7 +878,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst input = $input.first();\nconst base = input?.json?.mdToPdfJobId\n  ? input.json\n  : $('Parse mdTOpdf Job Status').item.json;\nconst pdf = input.binary?.data;\nif (!pdf) throw new Error('mdTOpdf returned no PDF binary.');\nconst looksLikePdf = pdf.mimeType === 'application/pdf'\n  || pdf.fileExtension?.toLowerCase() === 'pdf'\n  || pdf.fileName?.toLowerCase().endsWith('.pdf');\nif (!looksLikePdf && !pdf.data) throw new Error('mdTOpdf returned an invalid PDF binary.');\nconst fileName = base.fumadocsPath.split('/').pop()?.replace(/\\.mdx$/iu, '.pdf') || 'document.pdf';\nreturn {\n  json: { ...base, mdToPdfPdfFileName: fileName },\n  binary: {\n    data: {\n      ...pdf,\n      fileName,\n      fileExtension: 'pdf',\n      mimeType: 'application/pdf',\n    },\n  },\n};"
+        "jsCode": "\nconst input = $input.item;\nconst base = input?.json?.mdToPdfJobId\n  ? input.json\n  : $('Parse mdTOpdf Job Status').item.json;\nconst pdf = input.binary?.data;\nif (!pdf) throw new Error('mdTOpdf returned no PDF binary.');\nconst looksLikePdf = pdf.mimeType === 'application/pdf'\n  || pdf.fileExtension?.toLowerCase() === 'pdf'\n  || pdf.fileName?.toLowerCase().endsWith('.pdf');\nif (!looksLikePdf && !pdf.data) throw new Error('mdTOpdf returned an invalid PDF binary.');\nconst fileName = base.fumadocsPath.split('/').pop()?.replace(/\\.mdx$/iu, '.pdf') || 'document.pdf';\nreturn {\n  json: { ...base, mdToPdfPdfFileName: fileName },\n  binary: {\n    data: {\n      ...pdf,\n      fileName,\n      fileExtension: 'pdf',\n      mimeType: 'application/pdf',\n    },\n  },\n};"
       },
       "id": "document-publish-34",
       "name": "Select mdTOpdf PDF",
@@ -868,7 +892,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Merge Document Response').item.json;\nconst item = $input.first();\nif (!item.binary?.data) throw new Error('mdTOpdf did not return a PDF binary.');\nreturn {\n  json: { ...base },\n  binary: item.binary,\n};"
+        "jsCode": "\nconst base = $('Merge Document Response').item.json;\nconst item = $input.item;\nif (!item.binary?.data) throw new Error('mdTOpdf did not return a PDF binary.');\nreturn {\n  json: { ...base },\n  binary: item.binary,\n};"
       },
       "id": "document-publish-35",
       "name": "Merge PDF",
@@ -882,7 +906,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst base = $input.first();\nconst common = {\n  ...base.json,\n  artifactReference: {\n    documentId: base.json.documentId,\n    version: base.json.documentVersion,\n  },\n};\nreturn [\n  {\n    json: {\n      ...common,\n      artifact: { format: 'md', contentType: 'text/markdown', body: base.json.markdown },\n      artifactReference: { ...common.artifactReference, format: 'md' },\n    },\n  },\n  {\n    json: {\n      ...common,\n      artifact: { format: 'pdf', contentType: 'application/pdf' },\n      artifactReference: { ...common.artifactReference, format: 'pdf' },\n    },\n    binary: base.binary,\n  },\n];"
+        "jsCode": "\nconst base = $input.item;\nconst common = {\n  ...base.json,\n  artifactReference: {\n    documentId: base.json.documentId,\n    version: base.json.documentVersion,\n  },\n};\nreturn [\n  {\n    json: {\n      ...common,\n      artifact: { format: 'md', contentType: 'text/markdown', body: base.json.markdown },\n      artifactReference: { ...common.artifactReference, format: 'md' },\n    },\n  },\n  {\n    json: {\n      ...common,\n      artifact: { format: 'pdf', contentType: 'application/pdf' },\n      artifactReference: { ...common.artifactReference, format: 'pdf' },\n    },\n    binary: base.binary,\n  },\n];"
       },
       "id": "document-publish-36",
       "name": "Create Artifact Items",
@@ -921,7 +945,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -941,7 +965,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst source = $('Create Artifact Items').item;\nconst signer = $input.first().json;\nif (\n  signer.key !== 'documents/' + source.json.documentId + '/v' + source.json.documentVersion + '/document.' + source.json.artifact.format ||\n  typeof signer.uploadUrl !== 'string' ||\n  signer.contentType !== source.json.artifact.contentType\n) throw new Error('Fumadocs returned an invalid Blob upload signer response.');\nreturn {\n  json: { ...source.json, signer },\n  binary: source.binary,\n};"
+        "jsCode": "\nconst source = $('Create Artifact Items').item;\nconst signer = $json;\nif (\n  signer.key !== 'documents/' + source.json.documentId + '/v' + source.json.documentVersion + '/document.' + source.json.artifact.format ||\n  typeof signer.uploadUrl !== 'string' ||\n  signer.contentType !== source.json.artifact.contentType\n) throw new Error('Fumadocs returned an invalid Blob upload signer response.');\nreturn {\n  json: { ...source.json, signer },\n  binary: source.binary,\n};"
       },
       "id": "document-publish-38",
       "name": "Merge Signer Response",
@@ -955,13 +979,23 @@
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.artifact.format }}",
-              "operation": "equals",
-              "value2": "md"
+              "id": "document-publish-condition-markdown",
+              "leftValue": "={{ $json.artifact.format }}",
+              "rightValue": "md",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
       "id": "document-publish-39",
@@ -993,7 +1027,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "text"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -1142,7 +1176,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Merge Artifact Uploads').item.json;\nconst result = $input.first().json;\nconst records = Array.isArray(result.items) ? result.items : [];\nif (records.length > 1) throw new Error('PocketBase returned duplicate artifact identities.');\nconst existing = records[0];\nreturn {\n  json: {\n    ...base,\n    existingArtifactId: existing?.id,\n    artifactWriteMethod: existing?.id ? 'PATCH' : 'POST',\n    artifactWriteUrl: $env.POCKETBASE_URL + (existing?.id\n      ? '/api/collections/aw_document_artifacts/records/' + existing.id\n      : '/api/collections/aw_document_artifacts/records'),\n  },\n  binary: $('Merge Artifact Uploads').item.binary,\n};"
+        "jsCode": "\nconst base = $('Merge Artifact Uploads').item.json;\nconst result = $json;\nconst records = Array.isArray(result.items) ? result.items : [];\nif (records.length > 1) throw new Error('PocketBase returned duplicate artifact identities.');\nconst existing = records[0];\nreturn {\n  json: {\n    ...base,\n    existingArtifactId: existing?.id,\n    artifactWriteMethod: existing?.id ? 'PATCH' : 'POST',\n    artifactWriteUrl: $env.POCKETBASE_URL + (existing?.id\n      ? '/api/collections/aw_document_artifacts/records/' + existing.id\n      : '/api/collections/aw_document_artifacts/records'),\n  },\n  binary: $('Merge Artifact Uploads').item.binary,\n};"
       },
       "id": "document-publish-47",
       "name": "Merge Artifact Lookup",
@@ -1181,7 +1215,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -1215,7 +1249,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $input.first().json;\nconst encodedPath = base.fumadocsPath.split('/').map((part) => encodeURIComponent(part)).join('/');\nreturn {\n  json: {\n    ...base,\n    githubBranch: $env.GITHUB_BRANCH || 'main',\n    githubUrl: 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/' + encodedPath,\n  },\n};"
+        "jsCode": "\nconst base = $json;\nconst encodedPath = base.fumadocsPath.split('/').map((part) => encodeURIComponent(part)).join('/');\nreturn {\n  json: {\n    ...base,\n    githubBranch: $env.GITHUB_BRANCH || 'main',\n    githubUrl: 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/' + encodedPath,\n  },\n};"
       },
       "id": "document-publish-50",
       "name": "Prepare GitHub Lookup",
@@ -1272,7 +1306,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Prepare GitHub Lookup').item.json;\nconst response = $input.first().json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {\n  throw new Error('GitHub file lookup failed with status ' + statusCode + '.');\n}\nif (Number.isFinite(statusCode) && statusCode === 200 && typeof body.sha !== 'string') {\n  throw new Error('GitHub file lookup returned no file SHA.');\n}\nif (!Number.isFinite(statusCode) && body.message && typeof body.message === 'string') {\n  throw new Error('GitHub file lookup failed.');\n}\nreturn {\n  json: {\n    ...base,\n    githubSha: typeof body.sha === 'string' ? body.sha : undefined,\n  },\n};"
+        "jsCode": "\nconst base = $('Prepare GitHub Lookup').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {\n  throw new Error('GitHub file lookup failed with status ' + statusCode + '.');\n}\nif (Number.isFinite(statusCode) && statusCode === 200 && typeof body.sha !== 'string') {\n  throw new Error('GitHub file lookup returned no file SHA.');\n}\nif (!Number.isFinite(statusCode) && body.message && typeof body.message === 'string') {\n  throw new Error('GitHub file lookup failed.');\n}\nreturn {\n  json: {\n    ...base,\n    githubSha: typeof body.sha === 'string' ? body.sha : undefined,\n  },\n};"
       },
       "id": "document-publish-52",
       "name": "Parse GitHub File",
@@ -1329,7 +1363,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -1348,15 +1382,149 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "\nconst base = $('Build GitHub Request').item.json;\nconst publishedAt = new Date().toISOString();\nconst items = [\n  {\n    json: {\n      finalizationUrl: $env.POCKETBASE_URL + '/api/collections/aw_documents/records/' + base.documentRecord.id,\n      finalizationBody: {\n        ...base.documentBody,\n        status: 'published',\n        publishedAt,\n        lastError: '',\n      },\n    },\n  },\n];\nfor (const artifact of base.artifactRecords) {\n  items.push({\n    json: {\n      finalizationUrl: $env.POCKETBASE_URL + '/api/collections/aw_document_artifacts/records/' + artifact.id,\n      finalizationBody: { status: 'published' },\n    },\n  });\n}\nreturn items;"
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $json;\nconst sidebarPath = 'content/docs/meta.json';\nconst encodedPath = sidebarPath.split('/').map((part) => encodeURIComponent(part)).join('/');\nreturn {\n  json: {\n    ...base,\n    githubSidebarPath: sidebarPath,\n    githubSidebarUrl: 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/' + encodedPath,\n  },\n};"
       },
       "id": "document-publish-55",
-      "name": "Prepare Finalization Items",
+      "name": "Prepare GitHub Sidebar Lookup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         7480,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.githubSidebarUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "document-publish-56",
+      "name": "Get GitHub Sidebar",
+      "type": "n8n-nodes-base.httpRequest",
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "typeVersion": 4.2,
+      "position": [
+        7700,
+        180
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Prepare GitHub Sidebar Lookup').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {\n  throw new Error('GitHub sidebar lookup failed with status ' + statusCode + '.');\n}\nlet sidebar = { pages: [] };\nlet githubSidebarSha;\nif (statusCode === 200) {\n  if (typeof body.content !== 'string' || body.encoding !== 'base64' || typeof body.sha !== 'string') {\n    throw new Error('GitHub sidebar lookup returned an invalid meta.json.');\n  }\n  try {\n    sidebar = JSON.parse(Buffer.from(body.content.replace(/\\s/gu, ''), 'base64').toString('utf8'));\n  } catch {\n    throw new Error('GitHub sidebar meta.json was not valid JSON.');\n  }\n  githubSidebarSha = body.sha;\n}\nif (!sidebar || typeof sidebar !== 'object' || !Array.isArray(sidebar.pages)) {\n  throw new Error('GitHub sidebar meta.json has no pages array.');\n}\nif (sidebar.pages.some((page) => typeof page !== 'string')) {\n  throw new Error('GitHub sidebar meta.json contains an invalid page entry.');\n}\nconst pageEntry = typeof base.fumadocsPath === 'string'\n  ? base.fumadocsPath.replace(/^content\\/docs\\//u, '').replace(/\\.mdx$/iu, '')\n  : '';\nif (!/^[A-Za-z0-9][A-Za-z0-9/_-]{0,180}$/u.test(pageEntry)) {\n  throw new Error('Generated Fumadocs page path is invalid for the sidebar.');\n}\nif (!sidebar.pages.includes(pageEntry)) sidebar.pages.push(pageEntry);\nreturn {\n  json: {\n    ...base,\n    githubSidebarSha,\n    githubSidebarMeta: sidebar,\n  },\n};"
+      },
+      "id": "document-publish-57",
+      "name": "Parse GitHub Sidebar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7920,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse GitHub Sidebar').item.json;\nconst content = JSON.stringify(base.githubSidebarMeta, null, 2) + '\\n';\nconst payload = {\n  message: 'docs: add ' + base.metadata.slug + ' to sidebar',\n  content: Buffer.from(content, 'utf8').toString('base64'),\n  branch: base.githubBranch,\n};\nif (base.githubSidebarSha) payload.sha = base.githubSidebarSha;\nreturn {\n  json: { ...base, githubSidebarPayload: payload },\n};"
+      },
+      "id": "document-publish-58",
+      "name": "Build GitHub Sidebar Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8140,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.githubSidebarUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.githubSidebarPayload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "document-publish-59",
+      "name": "Put GitHub Sidebar",
+      "type": "n8n-nodes-base.httpRequest",
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "typeVersion": 4.2,
+      "position": [
+        8360,
+        180
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build GitHub Request').item.json;\nconst publishedAt = new Date().toISOString();\nconst items = [\n  {\n    json: {\n      finalizationUrl: $env.POCKETBASE_URL + '/api/collections/aw_documents/records/' + base.documentRecord.id,\n      finalizationBody: {\n        ...base.documentBody,\n        status: 'published',\n        publishedAt,\n        lastError: '',\n      },\n    },\n  },\n];\nfor (const artifact of base.artifactRecords) {\n  items.push({\n    json: {\n      finalizationUrl: $env.POCKETBASE_URL + '/api/collections/aw_document_artifacts/records/' + artifact.id,\n      finalizationBody: { status: 'published' },\n    },\n  });\n}\nreturn items;"
+      },
+      "id": "document-publish-60",
+      "name": "Prepare Finalization Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8580,
         180
       ]
     },
@@ -1388,19 +1556,19 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
       },
-      "id": "document-publish-56",
+      "id": "document-publish-61",
       "name": "Finalize PocketBase",
       "type": "n8n-nodes-base.httpRequest",
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "typeVersion": 4.2,
       "position": [
-        7700,
+        8800,
         180
       ],
       "retryOnFail": true
@@ -2001,6 +2169,61 @@
       ]
     },
     "Put GitHub File": {
+      "main": [
+        [
+          {
+            "node": "Prepare GitHub Sidebar Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GitHub Sidebar Lookup": {
+      "main": [
+        [
+          {
+            "node": "Get GitHub Sidebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GitHub Sidebar": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Sidebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Sidebar": {
+      "main": [
+        [
+          {
+            "node": "Build GitHub Sidebar Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build GitHub Sidebar Request": {
+      "main": [
+        [
+          {
+            "node": "Put GitHub Sidebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Put GitHub Sidebar": {
       "main": [
         [
           {

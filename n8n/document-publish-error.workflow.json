@@ -13,7 +13,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const root = $input.first().json;\nconst runData = root.execution?.data?.resultData?.runData || {};\nconst candidates = [];\nfor (const runs of Object.values(runData)) {\n  for (const run of Array.isArray(runs) ? runs : []) {\n    const items = run.data?.main?.flat?.() || [];\n    for (const item of items) if (item?.json) candidates.push(item.json);\n  }\n}\nconst candidate = [...candidates].reverse().find((item) => item.documentRecord?.id || item.documentRecordId);\nif (!candidate) return { json: { skip: true } };\nconst documentRecordId = candidate.documentRecord?.id || candidate.documentRecordId;\nconst message = root.execution?.error?.message || 'Document publishing failed.';\nreturn { json: { documentRecordId, lastError: String(message).slice(0, 8192) } };"
+        "jsCode": "const root = $json;\nconst runData = root.execution?.data?.resultData?.runData || {};\nconst candidates = [];\nfor (const runs of Object.values(runData)) {\n  for (const run of Array.isArray(runs) ? runs : []) {\n    const items = run.data?.main?.flat?.() || [];\n    for (const item of items) if (item?.json) candidates.push(item.json);\n  }\n}\nconst candidate = [...candidates].reverse().find((item) => item.documentRecord?.id || item.documentRecordId);\nif (!candidate) return { json: { skip: true } };\nconst documentRecordId = candidate.documentRecord?.id || candidate.documentRecordId;\nconst message = root.execution?.error?.message || 'Document publishing failed.';\nreturn { json: { documentRecordId, lastError: String(message).slice(0, 8192) } };"
       },
       "id": "document-publish-error-2",
       "name": "Extract Failed Document",

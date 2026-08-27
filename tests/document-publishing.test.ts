@@ -242,6 +242,11 @@ describe('document publishing contracts', () => {
         'Select mdTOpdf PDF',
         'Sign Artifact Upload',
         'Put GitHub File',
+        'Prepare GitHub Sidebar Lookup',
+        'Get GitHub Sidebar',
+        'Parse GitHub Sidebar',
+        'Build GitHub Sidebar Request',
+        'Put GitHub Sidebar',
         'Finalize PocketBase',
       ]),
     );
@@ -258,6 +263,7 @@ describe('document publishing contracts', () => {
     expect(workflowText).toContain('build-pdf-api.yml');
     expect(workflowText).toContain('workflow_dispatch');
     expect(workflowText).toContain('/rest/v1/pdf_jobs');
+    expect(workflowText).toContain('content/docs/meta.json');
     expect(pollCode).toContain('mdToPdfReady');
     expect(pollCode).toContain('mdToPdfPollCount');
     const connections = workflow.connections as Record<string, { main: Array<Array<{ node: string }>> }>;
@@ -265,6 +271,8 @@ describe('document publishing contracts', () => {
     expect(connections['Merge Document Response']?.main?.[0]?.[0]?.node).toBe('Prepare mdTOpdf Input');
     expect(connections['Is mdTOpdf Ready']?.main?.[0]?.[0]?.node).toBe('Download mdTOpdf PDF');
     expect(connections['Is mdTOpdf Ready']?.main?.[1]?.[0]?.node).toBe('Wait mdTOpdf Action');
+    expect(connections['Put GitHub File']?.main?.[0]?.[0]?.node).toBe('Prepare GitHub Sidebar Lookup');
+    expect(connections['Put GitHub Sidebar']?.main?.[0]?.[0]?.node).toBe('Prepare Finalization Items');
     expect(JSON.stringify(workflow)).not.toMatch(/(?:eyJ|sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}/u);
     for (const node of workflow.nodes) {
       const jsCode = node.parameters?.jsCode;
@@ -289,6 +297,30 @@ describe('document publishing contracts', () => {
     expect(workflow).toContain('signer_with_key=');
     expect(workflow).not.toContain('md-to-pdf');
     expect(workflow).not.toMatch(/^\s*EDGEONE_API_TOKEN:\s*(?!\$\{\{)[^\s#]/mu);
+  });
+
+  it('keeps per-item Code nodes compatible with n8n execution mode', () => {
+    const workflowFiles = [
+      '../n8n/document-publish.workflow.json',
+      '../n8n/document-publish-error.workflow.json',
+    ];
+
+    for (const workflowFile of workflowFiles) {
+      const workflow = JSON.parse(
+        readFileSync(new URL(workflowFile, import.meta.url), 'utf8'),
+      ) as {
+        nodes: Array<{ name: string; parameters?: { mode?: string; jsCode?: string } }>;
+      };
+
+      for (const node of workflow.nodes) {
+        if (node.parameters?.mode !== 'runOnceForEachItem') continue;
+        const jsCode = node.parameters.jsCode ?? '';
+        expect(jsCode, `${workflowFile}:${node.name}`).not.toContain('$input.first()');
+        expect(jsCode, `${workflowFile}:${node.name}`).not.toContain('$input.all()');
+        expect(jsCode, `${workflowFile}:${node.name}`).not.toContain('crypto.randomUUID');
+        expect(jsCode, `${workflowFile}:${node.name}`).not.toContain('new URL(');
+      }
+    }
   });
 
   it('places Node.js Blob handlers in EdgeOne cloud-functions routes', () => {

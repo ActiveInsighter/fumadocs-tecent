@@ -51,7 +51,7 @@ function connect(from, to, output = 0, input = 0) {
 }
 
 const validateEventCode = String.raw`
-const input = $input.first().json;
+const input = $json;
 const body = input.body && typeof input.body === 'object' ? input.body : input;
 const headers = input.headers && typeof input.headers === 'object' ? input.headers : {};
 const receivedSecret = headers['x-internal-key'] || headers['X-Internal-Key'];
@@ -89,7 +89,7 @@ return {
 
 const mergeMessageCode = String.raw`
 const event = $('Validate Event').item.json;
-const message = $input.first().json;
+const message = $json;
 if (
   message.id !== event.messageRecordId ||
   message.owner !== event.ownerId ||
@@ -109,7 +109,7 @@ return {
 };`;
 
 const documentLookupCode = String.raw`
-const base = $input.first().json;
+const base = $json;
 const filter = 'owner = "' + base.ownerId + '" && documentId = "' + base.messageRecordId + '"';
 return {
   json: {
@@ -120,7 +120,7 @@ return {
 
 const documentStateCode = String.raw`
 const base = $('Merge Message').item.json;
-const result = $input.first().json;
+const result = $json;
 const records = Array.isArray(result.items) ? result.items : [];
 if (records.length > 1) throw new Error('PocketBase returned duplicate document identities.');
 const existing = records[0];
@@ -143,7 +143,7 @@ return {
 };`;
 
 const metadataRequestCode = String.raw`
-const base = $input.first().json;
+const base = $json;
 const system = 'You normalize an AI answer into document metadata. Return only JSON with title, slug, summary, and tags. title is a concise human title; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 300 Chinese characters; tags is an array of at most 8 short strings. Do not invent technical claims.';
 const user = 'Original user request:\n' + base.userMarkdown + '\n\nAssistant answer:\n' + base.assistantMarkdown;
 return {
@@ -152,6 +152,7 @@ return {
     newApiRequest: {
       model: $env.NEW_API_MODEL,
       temperature: 0.2,
+      stream: false,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -163,8 +164,14 @@ return {
 
 const metadataParseCode = String.raw`
 const base = $('Prepare Metadata Request').item.json;
-const response = $input.first().json;
-let raw = response?.choices?.[0]?.message?.content;
+const response = $json;
+const responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)
+  ? response.body
+  : response;
+if (responseBody?.error && typeof responseBody.error.message === 'string') {
+  throw new Error('New API metadata request failed: ' + responseBody.error.message.slice(0, 300));
+}
+let raw = responseBody?.choices?.[0]?.message?.content;
 if (raw && typeof raw === 'object') raw = JSON.stringify(raw);
 if (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no metadata.');
 const fence = String.fromCharCode(96).repeat(3);
@@ -258,7 +265,7 @@ return {
 };`;
 
 const mdToPdfInputCode = String.raw`
-const base = $input.first().json;
+const base = $json;
 const supabaseUrl = typeof $env.MDTO_PDF_SUPABASE_URL === 'string'
   ? $env.MDTO_PDF_SUPABASE_URL.trim().replace(/\/+$/u, '')
   : '';
@@ -274,18 +281,9 @@ const bucket = (typeof $env.MDTO_PDF_SUPABASE_BUCKET === 'string' && $env.MDTO_P
 const theme = (typeof $env.MDTO_PDF_THEME === 'string' && $env.MDTO_PDF_THEME.trim())
   ? $env.MDTO_PDF_THEME.trim()
   : 'chatgpt-light';
-let parsedUrl;
-try {
-  parsedUrl = new URL(supabaseUrl);
-} catch {
-  throw new Error('mdTOpdf Supabase URL configuration is invalid.');
-}
+const supabaseUrlIsValid = /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/iu.test(supabaseUrl);
 if (
-  parsedUrl.protocol !== 'https:'
-  || parsedUrl.username
-  || parsedUrl.password
-  || parsedUrl.search
-  || parsedUrl.hash
+  !supabaseUrlIsValid
   || !serviceKey
   || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(userId)
   || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u.test(bucket)
@@ -301,9 +299,21 @@ const sourceFilename = typeof sourceCandidate === 'string'
   ? sourceCandidate
   : 'document-' + base.documentId.slice(-8) + '.md';
 const documentName = sourceFilename.slice(0, -3).slice(0, 160) || 'document';
-const randomUuid = globalThis.crypto?.randomUUID;
-if (typeof randomUuid !== 'function') throw new Error('The n8n runtime does not provide crypto.randomUUID.');
-const jobId = randomUuid.call(globalThis.crypto);
+function createJobId() {
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+}
+const jobId = createJobId();
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(jobId)) {
   throw new Error('mdTOpdf generated an invalid job ID.');
 }
@@ -356,7 +366,7 @@ return {
 
 const mdToPdfJobResponseCode = String.raw`
 const base = $('Prepare mdTOpdf Input').item.json;
-const response = $input.first().json;
+const response = $json;
 const body = response.body && typeof response.body === 'object' ? response.body : response;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {
@@ -373,7 +383,7 @@ return {
 
 const mdToPdfUploadResponseCode = String.raw`
 const base = $('Parse mdTOpdf Job').item.json;
-const response = $input.first().json;
+const response = $json;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {
   throw new Error('mdTOpdf Markdown upload failed with status ' + statusCode + '.');
@@ -382,7 +392,7 @@ return { json: base };`;
 
 const mdToPdfUploadedResponseCode = String.raw`
 const base = $('Parse mdTOpdf Upload').item.json;
-const response = $input.first().json;
+const response = $json;
 const body = response.body && typeof response.body === 'object' ? response.body : response;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {
@@ -396,7 +406,7 @@ return { json: { ...base, mdToPdfUploaded: true } };`;
 
 const mdToPdfQueuedResponseCode = String.raw`
 const base = $('Parse mdTOpdf Uploaded').item.json;
-const response = $input.first().json;
+const response = $json;
 const body = response.body && typeof response.body === 'object' ? response.body : response;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {
@@ -424,7 +434,7 @@ return {
 
 const mdToPdfDispatchResponseCode = String.raw`
 const base = $('Prepare mdTOpdf Dispatch').item.json;
-const response = $input.first().json;
+const response = $json;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 204) {
   throw new Error('mdTOpdf workflow dispatch failed with status ' + statusCode + '.');
@@ -432,7 +442,7 @@ if (Number.isFinite(statusCode) && statusCode !== 204) {
 return { json: { ...base, mdToPdfPollCount: 0 } };`;
 
 const mdToPdfJobStatusCode = String.raw`
-const input = $input.first().json;
+const input = $json;
 const base = input?.mdToPdfJobId
   ? input
   : $('Wait mdTOpdf Action').item.json;
@@ -473,7 +483,7 @@ return {
 };`;
 
 const mdToPdfPdfSelectionCode = String.raw`
-const input = $input.first();
+const input = $input.item;
 const base = input?.json?.mdToPdfJobId
   ? input.json
   : $('Parse mdTOpdf Job Status').item.json;
@@ -498,7 +508,7 @@ return {
 
 const mergePdfCode = String.raw`
 const base = $('Merge Document Response').item.json;
-const item = $input.first();
+const item = $input.item;
 if (!item.binary?.data) throw new Error('mdTOpdf did not return a PDF binary.');
 return {
   json: { ...base },
@@ -520,7 +530,7 @@ return {
 
 const mergeDocumentCode = String.raw`
 const base = $('Prepare Document Write').item.json;
-const record = $input.first().json;
+const record = $json;
 if (!record.id || record.owner !== base.ownerId) throw new Error('PocketBase document write returned an invalid record.');
 return {
   json: { ...base, documentRecord: record },
@@ -528,7 +538,7 @@ return {
 };`;
 
 const artifactItemsCode = String.raw`
-const base = $input.first();
+const base = $input.item;
 const common = {
   ...base.json,
   artifactReference: {
@@ -556,7 +566,7 @@ return [
 
 const mergeSignerCode = String.raw`
 const source = $('Create Artifact Items').item;
-const signer = $input.first().json;
+const signer = $json;
 if (
   signer.key !== 'documents/' + source.json.documentId + '/v' + source.json.documentVersion + '/document.' + source.json.artifact.format ||
   typeof signer.uploadUrl !== 'string' ||
@@ -617,7 +627,7 @@ return {
 
 const mergeArtifactLookupCode = String.raw`
 const base = $('Merge Artifact Uploads').item.json;
-const result = $input.first().json;
+const result = $json;
 const records = Array.isArray(result.items) ? result.items : [];
 if (records.length > 1) throw new Error('PocketBase returned duplicate artifact identities.');
 const existing = records[0];
@@ -659,7 +669,7 @@ return {
 };`;
 
 const githubLookupCode = String.raw`
-const base = $input.first().json;
+const base = $json;
 const encodedPath = base.fumadocsPath.split('/').map((part) => encodeURIComponent(part)).join('/');
 return {
   json: {
@@ -671,7 +681,7 @@ return {
 
 const githubResponseCode = String.raw`
 const base = $('Prepare GitHub Lookup').item.json;
-const response = $input.first().json;
+const response = $json;
 const body = response.body && typeof response.body === 'object' ? response.body : response;
 const statusCode = Number(response.statusCode);
 if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {
@@ -700,6 +710,75 @@ const payload = {
 if (base.githubSha) payload.sha = base.githubSha;
 return {
   json: { ...base, githubPayload: payload },
+};`;
+
+const githubSidebarLookupCode = String.raw`
+const base = $json;
+const sidebarPath = 'content/docs/meta.json';
+const encodedPath = sidebarPath.split('/').map((part) => encodeURIComponent(part)).join('/');
+return {
+  json: {
+    ...base,
+    githubSidebarPath: sidebarPath,
+    githubSidebarUrl: 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/' + encodedPath,
+  },
+};`;
+
+const githubSidebarResponseCode = String.raw`
+const base = $('Prepare GitHub Sidebar Lookup').item.json;
+const response = $json;
+const body = response.body && typeof response.body === 'object' && !Array.isArray(response.body)
+  ? response.body
+  : response;
+const statusCode = Number(response.statusCode);
+if (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {
+  throw new Error('GitHub sidebar lookup failed with status ' + statusCode + '.');
+}
+let sidebar = { pages: [] };
+let githubSidebarSha;
+if (statusCode === 200) {
+  if (typeof body.content !== 'string' || body.encoding !== 'base64' || typeof body.sha !== 'string') {
+    throw new Error('GitHub sidebar lookup returned an invalid meta.json.');
+  }
+  try {
+    sidebar = JSON.parse(Buffer.from(body.content.replace(/\s/gu, ''), 'base64').toString('utf8'));
+  } catch {
+    throw new Error('GitHub sidebar meta.json was not valid JSON.');
+  }
+  githubSidebarSha = body.sha;
+}
+if (!sidebar || typeof sidebar !== 'object' || !Array.isArray(sidebar.pages)) {
+  throw new Error('GitHub sidebar meta.json has no pages array.');
+}
+if (sidebar.pages.some((page) => typeof page !== 'string')) {
+  throw new Error('GitHub sidebar meta.json contains an invalid page entry.');
+}
+const pageEntry = typeof base.fumadocsPath === 'string'
+  ? base.fumadocsPath.replace(/^content\/docs\//u, '').replace(/\.mdx$/iu, '')
+  : '';
+if (!/^[A-Za-z0-9][A-Za-z0-9/_-]{0,180}$/u.test(pageEntry)) {
+  throw new Error('Generated Fumadocs page path is invalid for the sidebar.');
+}
+if (!sidebar.pages.includes(pageEntry)) sidebar.pages.push(pageEntry);
+return {
+  json: {
+    ...base,
+    githubSidebarSha,
+    githubSidebarMeta: sidebar,
+  },
+};`;
+
+const githubSidebarRequestCode = String.raw`
+const base = $('Parse GitHub Sidebar').item.json;
+const content = JSON.stringify(base.githubSidebarMeta, null, 2) + '\n';
+const payload = {
+  message: 'docs: add ' + base.metadata.slug + ' to sidebar',
+  content: Buffer.from(content, 'utf8').toString('base64'),
+  branch: base.githubBranch,
+};
+if (base.githubSidebarSha) payload.sha = base.githubSidebarSha;
+return {
+  json: { ...base, githubSidebarPayload: payload },
 };`;
 
 const finalizationCode = String.raw`
@@ -759,7 +838,16 @@ addHttp('Get Existing Document', {
 }, [1100, 0]);
 addCode('Prepare Document State', documentStateCode, 'runOnceForEachItem', [1320, 0]);
 addNode('Is Duplicate', 'n8n-nodes-base.if', {
-  conditions: { boolean: [{ value1: '={{ $json.duplicate }}', operation: 'isTrue' }] },
+  conditions: {
+    options: { caseSensitive: true, typeValidation: 'strict', version: 2 },
+    conditions: [{
+      id: 'document-publish-condition-duplicate',
+      leftValue: '={{ $json.duplicate }}',
+      rightValue: '',
+      operator: { type: 'boolean', operation: 'true', singleValue: true },
+    }],
+    combinator: 'and',
+  },
 }, { typeVersion: 2.2, position: [1540, 0] });
 addCode('Duplicate Ignored', "return { json: { accepted: true, duplicate: true, inProgress: Boolean($json.inProgress), eventId: $json.eventId } };", 'runOnceForEachItem', [1760, -180]);
 addCode('Prepare Metadata Request', metadataRequestCode, 'runOnceForEachItem', [1760, 180]);
@@ -776,7 +864,7 @@ addHttp('New API Metadata', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.newApiRequest) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [1980, 180]);
 addCode('Parse Metadata', metadataParseCode, 'runOnceForEachItem', [2200, 180]);
 addCode('Build Document', buildDocumentCode, 'runOnceForEachItem', [2420, 180]);
@@ -794,7 +882,7 @@ addHttp('Write Document', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.documentBody) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [2860, 180]);
 addCode('Merge Document Response', mergeDocumentCode, 'runOnceForEachItem', [3080, 180]);
 addCode('Prepare mdTOpdf Input', mdToPdfInputCode, 'runOnceForEachItem', [3300, 180]);
@@ -813,7 +901,7 @@ addHttp('Create mdTOpdf Job', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.mdToPdfJobBody) }}',
-  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } } },
 }, [3520, 180]);
 addCode('Parse mdTOpdf Job', mdToPdfJobResponseCode, 'runOnceForEachItem', [3740, 180]);
 addHttp('Upload mdTOpdf Markdown', {
@@ -832,7 +920,7 @@ addHttp('Upload mdTOpdf Markdown', {
   contentType: 'raw',
   rawContentType: 'text/markdown',
   body: '={{ $json.markdown }}',
-  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } } },
 }, [3960, 180]);
 addCode('Parse mdTOpdf Upload', mdToPdfUploadResponseCode, 'runOnceForEachItem', [4180, 180]);
 addHttp('Mark mdTOpdf Uploaded', {
@@ -850,7 +938,7 @@ addHttp('Mark mdTOpdf Uploaded', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ status: 'uploaded' }) }}",
-  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } } },
 }, [4400, 180]);
 addCode('Parse mdTOpdf Uploaded', mdToPdfUploadedResponseCode, 'runOnceForEachItem', [4620, 180]);
 addHttp('Queue mdTOpdf Job', {
@@ -868,7 +956,7 @@ addHttp('Queue mdTOpdf Job', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ status: 'queued' }) }}",
-  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } } },
 }, [4840, 180]);
 addCode('Parse mdTOpdf Queued', mdToPdfQueuedResponseCode, 'runOnceForEachItem', [5060, 180]);
 addCode('Prepare mdTOpdf Dispatch', mdToPdfDispatchRequestCode, 'runOnceForEachItem', [5280, 180]);
@@ -886,7 +974,7 @@ addHttp('Dispatch mdTOpdf Action', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.mdToPdfDispatchPayload) }}',
-  options: { response: { response: { responseFormat: 'text', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } } },
 }, [5500, 180]);
 addCode('Parse mdTOpdf Dispatch', mdToPdfDispatchResponseCode, 'runOnceForEachItem', [5720, 180]);
 addNode('Wait mdTOpdf Action', 'n8n-nodes-base.wait', {
@@ -907,7 +995,16 @@ addHttp('Get mdTOpdf Job', {
 }, [6160, 180]);
 addCode('Parse mdTOpdf Job Status', mdToPdfJobStatusCode, 'runOnceForEachItem', [6380, 180]);
 addNode('Is mdTOpdf Ready', 'n8n-nodes-base.if', {
-  conditions: { boolean: [{ value1: '={{ $json.mdToPdfReady }}', operation: 'isTrue' }] },
+  conditions: {
+    options: { caseSensitive: true, typeValidation: 'strict', version: 2 },
+    conditions: [{
+      id: 'document-publish-condition-pdf-ready',
+      leftValue: '={{ $json.mdToPdfReady }}',
+      rightValue: '',
+      operator: { type: 'boolean', operation: 'true', singleValue: true },
+    }],
+    combinator: 'and',
+  },
 }, { typeVersion: 2.2, position: [6600, 180] });
 addHttp('Download mdTOpdf PDF', {
   method: 'GET',
@@ -938,11 +1035,20 @@ addHttp('Sign Artifact Upload', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.artifactReference) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [3960, 180]);
 addCode('Merge Signer Response', mergeSignerCode, 'runOnceForEachItem', [4180, 180]);
 addNode('Is Markdown', 'n8n-nodes-base.if', {
-  conditions: { string: [{ value1: '={{ $json.artifact.format }}', operation: 'equals', value2: 'md' }] },
+  conditions: {
+    options: { caseSensitive: true, typeValidation: 'strict', version: 2 },
+    conditions: [{
+      id: 'document-publish-condition-markdown',
+      leftValue: '={{ $json.artifact.format }}',
+      rightValue: 'md',
+      operator: { type: 'string', operation: 'equals' },
+    }],
+    combinator: 'and',
+  },
 }, { typeVersion: 2.2, position: [4400, 180] });
 addHttp('Upload Markdown', {
   method: 'PUT',
@@ -955,7 +1061,7 @@ addHttp('Upload Markdown', {
   contentType: 'raw',
   rawContentType: 'text/markdown',
   body: '={{ $json.artifact.body }}',
-  options: { response: { response: { responseFormat: 'text' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [4620, 0]);
 addCode('Prepare Markdown Artifact', prepareMarkdownArtifactCode, 'runOnceForEachItem', [4840, 0]);
 addHttp('Upload PDF', {
@@ -1000,7 +1106,7 @@ addHttp('Write Artifact Record', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.artifactBody) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [5940, 180]);
 addCode('Aggregate Artifact Records', aggregateArtifactsCode, 'runOnceForAllItems', [6160, 180]);
 addCode('Prepare GitHub Lookup', githubLookupCode, 'runOnceForEachItem', [6380, 180]);
@@ -1031,9 +1137,39 @@ addHttp('Put GitHub File', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.githubPayload) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [7260, 180]);
-addCode('Prepare Finalization Items', finalizationCode, 'runOnceForAllItems', [7480, 180]);
+addCode('Prepare GitHub Sidebar Lookup', githubSidebarLookupCode, 'runOnceForEachItem', [7480, 180]);
+addHttp('Get GitHub Sidebar', {
+  method: 'GET',
+  url: '={{ $json.githubSidebarUrl }}',
+  sendHeaders: true,
+  headerParameters: { parameters: [
+    { name: 'Authorization', value: "={{ 'Bearer ' + $env.GITHUB_TOKEN }}" },
+    { name: 'Accept', value: 'application/vnd.github+json' },
+    { name: 'X-GitHub-Api-Version', value: '2022-11-28' },
+  ] },
+  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+}, [7700, 180]);
+addCode('Parse GitHub Sidebar', githubSidebarResponseCode, 'runOnceForEachItem', [7920, 180]);
+addCode('Build GitHub Sidebar Request', githubSidebarRequestCode, 'runOnceForEachItem', [8140, 180]);
+addHttp('Put GitHub Sidebar', {
+  method: 'PUT',
+  url: '={{ $json.githubSidebarUrl }}',
+  sendHeaders: true,
+  headerParameters: { parameters: [
+    { name: 'Authorization', value: "={{ 'Bearer ' + $env.GITHUB_TOKEN }}" },
+    { name: 'Accept', value: 'application/vnd.github+json' },
+    { name: 'X-GitHub-Api-Version', value: '2022-11-28' },
+    { name: 'Content-Type', value: 'application/json' },
+  ] },
+  sendBody: true,
+  contentType: 'raw',
+  rawContentType: 'application/json',
+  body: '={{ JSON.stringify($json.githubSidebarPayload) }}',
+  options: { response: { response: { responseFormat: 'autodetect' } } },
+}, [8360, 180]);
+addCode('Prepare Finalization Items', finalizationCode, 'runOnceForAllItems', [8580, 180]);
 addHttp('Finalize PocketBase', {
   method: 'PATCH',
   url: '={{ $json.finalizationUrl }}',
@@ -1047,8 +1183,8 @@ addHttp('Finalize PocketBase', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.finalizationBody) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
-}, [7700, 180]);
+  options: { response: { response: { responseFormat: 'autodetect' } } },
+}, [8800, 180]);
 
 connect('Webhook', 'Validate Event');
 connect('Validate Event', 'Get PocketBase Message');
@@ -1105,7 +1241,12 @@ connect('Prepare GitHub Lookup', 'Get GitHub File');
 connect('Get GitHub File', 'Parse GitHub File');
 connect('Parse GitHub File', 'Build GitHub Request');
 connect('Build GitHub Request', 'Put GitHub File');
-connect('Put GitHub File', 'Prepare Finalization Items');
+connect('Put GitHub File', 'Prepare GitHub Sidebar Lookup');
+connect('Prepare GitHub Sidebar Lookup', 'Get GitHub Sidebar');
+connect('Get GitHub Sidebar', 'Parse GitHub Sidebar');
+connect('Parse GitHub Sidebar', 'Build GitHub Sidebar Request');
+connect('Build GitHub Sidebar Request', 'Put GitHub Sidebar');
+connect('Put GitHub Sidebar', 'Prepare Finalization Items');
 connect('Prepare Finalization Items', 'Finalize PocketBase');
 
 const workflow = {
