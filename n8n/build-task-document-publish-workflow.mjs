@@ -91,13 +91,13 @@ function pocketBaseWriteHeaders() {
   ] };
 }
 
-function supabaseHeaders() {
+function supabaseHeaders(prefer = 'return=representation') {
   return { parameters: [
     { name: 'apikey', value: '={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}' },
     { name: 'Authorization', value: "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}" },
     { name: 'Content-Type', value: 'application/json' },
     { name: 'Accept', value: 'application/json' },
-    { name: 'Prefer', value: 'return=representation' },
+    { name: 'Prefer', value: prefer },
   ] };
 }
 
@@ -608,8 +608,8 @@ const requests = base.documents.map((document) => {
   };
 });
 const chunks = [];
-for (let index = 0; index < requests.length; index += 200) {
-  chunks.push(requests.slice(index, index + 200));
+for (let index = 0; index < requests.length; index += 50) {
+  chunks.push(requests.slice(index, index + 50));
 }
 return chunks.map((chunk) => ({
   json: {
@@ -1079,8 +1079,8 @@ const requests = artifactItems.map((artifact) => {
   };
 });
 const chunks = [];
-for (let index = 0; index < requests.length; index += 200) {
-  chunks.push(requests.slice(index, index + 200));
+for (let index = 0; index < requests.length; index += 50) {
+  chunks.push(requests.slice(index, index + 50));
 }
 return chunks.map((chunk) => ({
   json: {
@@ -1216,7 +1216,7 @@ return files.map((file) => ({
 }));`;
 
 const collectGitHubBlobsCode = String.raw`
-const requests = $('Create GitHub Blobs').all();
+const requests = $('Prepare GitHub Blobs').all();
 const responses = $input.all();
 if (requests.length !== responses.length) {
   throw new Error('A GitHub blob creation did not complete.');
@@ -1259,7 +1259,13 @@ const treeSha = tree?.sha;
 if (typeof treeSha !== 'string' || !/^[0-9a-f]{40}$/u.test(treeSha)) {
   throw new Error('GitHub tree creation returned no valid SHA.');
 }
-return { json: { commitSha: base.commitSha, treeSha } };`;
+return {
+  json: {
+    commitSha: base.commitSha,
+    treeSha,
+    treeUnchanged: treeSha === base.baseTreeSha,
+  },
+};`;
 
 const parseGitHubCommitCreatedCode = String.raw`
 const base = $('Parse GitHub Tree').item.json;
@@ -1300,8 +1306,8 @@ for (const artifact of artifactRecords) {
   });
 }
 const chunks = [];
-for (let index = 0; index < requests.length; index += 200) {
-  chunks.push(requests.slice(index, index + 200));
+for (let index = 0; index < requests.length; index += 50) {
+  chunks.push(requests.slice(index, index + 50));
 }
 return chunks.map((chunk) => ({
   json: {
@@ -1346,7 +1352,7 @@ return {
 const publishCompleteCode = String.raw`
 const base = $('Verify Documents').first().json;
 const finalization = $('Verify Finalization').first().json;
-const commitSha = $('Verify GitHub Ref').first().json.commitSha;
+const commitSha = $('Merge GitHub Commit').first().json.commitSha;
 return {
   json: {
     accepted: true,
@@ -1461,15 +1467,15 @@ addIf('Build PDF', "={{ $('Verify Documents').first().json.buildPdf }}", 'true',
 addCode('Prepare PDF Jobs', preparePdfJobsCode, 'runOnceForAllItems', [4400, 60]);
 addHttp('Create PDF Jobs', {
   method: 'POST',
-  url: '={{ $json.jobInsertUrl }}',
+  url: "={{ $json.jobInsertUrl + '?on_conflict=id' }}",
   sendHeaders: true,
-  headerParameters: supabaseHeaders(),
+  headerParameters: supabaseHeaders('resolution=merge-duplicates,return=representation'),
   sendBody: true,
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.pdfJobBody) }}',
   options: {
-    response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } },
+    response: { response: { responseFormat: 'autodetect', fullResponse: true } },
     batching: { batch: { batchSize: 5, batchInterval: 500 } },
   },
 }, [4620, 60]);
@@ -1491,7 +1497,7 @@ addHttp('Upload PDF Markdown', {
   rawContentType: 'text/markdown',
   body: '={{ $json.markdown }}',
   options: {
-    response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } },
+    response: { response: { responseFormat: 'autodetect', fullResponse: true } },
     batching: { batch: { batchSize: 5, batchInterval: 500 } },
   },
 }, [5060, 60]);
@@ -1506,7 +1512,7 @@ addHttp('Advance PDF Jobs Uploaded', {
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ status: 'uploaded' }) }}",
   options: {
-    response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } },
+    response: { response: { responseFormat: 'autodetect', fullResponse: true } },
     batching: { batch: { batchSize: 5, batchInterval: 500 } },
   },
 }, [5500, 60]);
@@ -1520,7 +1526,7 @@ addHttp('Advance PDF Jobs Queued', {
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ status: 'queued' }) }}",
   options: {
-    response: { response: { responseFormat: 'autodetect', fullResponse: true, neverError: true } },
+    response: { response: { responseFormat: 'autodetect', fullResponse: true } },
     batching: { batch: { batchSize: 5, batchInterval: 500 } },
   },
 }, [5720, 60]);
@@ -1554,7 +1560,7 @@ addHttp('Get PDF Batch Status', {
     { name: 'Authorization', value: "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}" },
     { name: 'Accept', value: 'application/json' },
   ] },
-  options: { response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } },
+  options: { response: { response: { responseFormat: 'json', fullResponse: true } } },
 }, [6820, 60]);
 addCode('Parse PDF Batch Status', parsePdfBatchStatusCode, 'runOnceForEachItem', [6820, 60]);
 addIf('Is PDF Batch Ready', '={{ $json.pdfBatchReady }}', 'true', [7260, 60]);
@@ -1613,7 +1619,7 @@ addHttp('Upload Markdown Artifacts', {
   rawContentType: 'text/markdown',
   body: '={{ $json.body }}',
   options: {
-    response: { response: { responseFormat: 'text' } },
+    response: { response: { responseFormat: 'autodetect' } },
     batching: { batch: { batchSize: 5, batchInterval: 1000 } },
   },
 }, [9240, 20]);
@@ -1628,7 +1634,7 @@ addHttp('Upload PDF Artifacts', {
   contentType: 'binaryData',
   inputDataFieldName: 'data',
   options: {
-    response: { response: { responseFormat: 'text' } },
+    response: { response: { responseFormat: 'autodetect' } },
     batching: { batch: { batchSize: 3, batchInterval: 1000 } },
   },
 }, [9240, 240]);
@@ -1689,7 +1695,7 @@ addHttp('Create GitHub Blobs', {
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.blobBody) }}',
   options: {
-    response: { response: { responseFormat: 'json' } },
+    response: { response: { responseFormat: 'autodetect' } },
     batching: { batch: { batchSize: 8, batchInterval: 1000 } },
   },
 }, [12540, 200]);
@@ -1719,9 +1725,10 @@ addHttp('Create GitHub Tree', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ base_tree: $json.baseTreeSha, tree: $('Collect GitHub Blobs').first().json.treeEntries }) }}",
-  options: { response: { response: { responseFormat: 'json' } } },
+  options: { response: { response: { responseFormat: 'autodetect' } } },
 }, [13860, 200]);
 addCode('Parse GitHub Tree', parseGitHubTreeCode, 'runOnceForEachItem', [14080, 200]);
+addIf('Is GitHub Tree Unchanged', '={{ $json.treeUnchanged }}', 'true', [14300, 200]);
 addHttp('Create GitHub Commit', {
   method: 'POST',
   url: "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/commits' }}",
@@ -1731,9 +1738,9 @@ addHttp('Create GitHub Commit', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ message: 'docs: publish task ' + $('Verify Documents').first().json.taskPublishKey + ' (v' + $('Verify Documents').first().json.version + ')', tree: $json.treeSha, parents: [$json.commitSha] }) }}",
-  options: { response: { response: { responseFormat: 'json' } } },
-}, [14300, 200]);
-addCode('Parse GitHub Commit Created', parseGitHubCommitCreatedCode, 'runOnceForEachItem', [14520, 200]);
+  options: { response: { response: { responseFormat: 'autodetect' } } },
+}, [14520, 320]);
+addCode('Parse GitHub Commit Created', parseGitHubCommitCreatedCode, 'runOnceForEachItem', [14740, 320]);
 addHttp('Update GitHub Ref', {
   method: 'PATCH',
   url: "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/refs/heads/' + ($env.GITHUB_BRANCH || 'main') }}",
@@ -1743,10 +1750,11 @@ addHttp('Update GitHub Ref', {
   contentType: 'raw',
   rawContentType: 'application/json',
   body: '={{ JSON.stringify({ sha: $json.newCommitSha }) }}',
-  options: { response: { response: { responseFormat: 'json' } } },
-}, [14740, 200]);
-addCode('Verify GitHub Ref', verifyGitHubRefCode, 'runOnceForEachItem', [14960, 200]);
-addCode('Prepare Finalization', prepareFinalizationCode, 'runOnceForAllItems', [15180, 200]);
+  options: { response: { response: { responseFormat: 'autodetect' } } },
+}, [14960, 320]);
+addCode('Verify GitHub Ref', verifyGitHubRefCode, 'runOnceForEachItem', [15180, 320]);
+addMerge('Merge GitHub Commit', [15400, 200]);
+addCode('Prepare Finalization', prepareFinalizationCode, 'runOnceForAllItems', [15620, 200]);
 addHttp('Write Finalization', {
   method: 'POST',
   url: '={{ $json.batchUrl }}',
@@ -1757,8 +1765,8 @@ addHttp('Write Finalization', {
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.batchBody) }}',
   options: { response: { response: { responseFormat: 'autodetect' } } },
-}, [15400, 200]);
-addCode('Verify Finalization', verifyFinalizationCode, 'runOnceForAllItems', [15620, 200]);
+}, [15840, 200]);
+addCode('Verify Finalization', verifyFinalizationCode, 'runOnceForAllItems', [16060, 200]);
 addHttp('Mark Job Published', {
   method: 'PATCH',
   url: "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + $('Verify Documents').first().json.publishJobId }}",
@@ -1769,8 +1777,8 @@ addHttp('Mark Job Published', {
   rawContentType: 'application/json',
   body: "={{ JSON.stringify({ status: 'published', completedDocuments: $('Verify Finalization').first().json.documentCount, publishedAt: $('Verify Finalization').first().json.publishedAt, lastError: '' }) }}",
   options: { response: { response: { responseFormat: 'autodetect' } } },
-}, [15840, 200]);
-addCode('Publish Complete', publishCompleteCode, 'runOnceForEachItem', [16060, 200]);
+}, [16280, 200]);
+addCode('Publish Complete', publishCompleteCode, 'runOnceForEachItem', [16500, 200]);
 
 connect('Webhook', 'Validate Event');
 connect('Validate Event', 'Get Publish Job');
@@ -1845,11 +1853,14 @@ connect('Parse GitHub Ref', 'Get GitHub Commit');
 connect('Get GitHub Commit', 'Parse GitHub Commit');
 connect('Parse GitHub Commit', 'Create GitHub Tree');
 connect('Create GitHub Tree', 'Parse GitHub Tree');
-connect('Parse GitHub Tree', 'Create GitHub Commit');
+connect('Parse GitHub Tree', 'Is GitHub Tree Unchanged');
+connect('Is GitHub Tree Unchanged', 'Merge GitHub Commit', 0, 0);
+connect('Is GitHub Tree Unchanged', 'Create GitHub Commit', 1);
 connect('Create GitHub Commit', 'Parse GitHub Commit Created');
 connect('Parse GitHub Commit Created', 'Update GitHub Ref');
 connect('Update GitHub Ref', 'Verify GitHub Ref');
-connect('Verify GitHub Ref', 'Prepare Finalization');
+connect('Verify GitHub Ref', 'Merge GitHub Commit', 0, 1);
+connect('Merge GitHub Commit', 'Prepare Finalization');
 connect('Prepare Finalization', 'Write Finalization');
 connect('Write Finalization', 'Verify Finalization');
 connect('Verify Finalization', 'Mark Job Published');

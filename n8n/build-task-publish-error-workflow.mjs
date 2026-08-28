@@ -2,9 +2,11 @@ import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Builds "AnyWorkflow Task Publish Error": the shared error workflow for both
-// task workflows. Failures in the metadata workflow mark the task
-// metadataStatus=failed; failures around a publish job mark the job failed and
-// cascade the failure onto its still-processing documents.
+// task workflows. The n8n error-trigger payload only carries the failing
+// workflow name plus the error itself, so stuck records are located in
+// PocketBase within a freshness window: metadata failures fail a task stuck
+// in metadataStatus=processing, and any task-workflow failure fails a publish
+// job stuck in a non-terminal status and cascades onto its documents.
 
 const nodes = [];
 const connections = {};
@@ -87,54 +89,109 @@ function pocketBaseHeaders() {
   ] };
 }
 
-const CONTEXT_REF = "$('Extract Failure Context').item.json";
+const CONTEXT_REF = "$('Extract Failure Context').first().json";
+const TASK_REF = "$('Resolve Stuck Task').first().json";
+const JOB_REF = "$('Resolve Stuck Job').first().json";
 
 const extractFailureContextCode = String.raw`
 const root = $json;
 const execution = root.execution || {};
+// n8n 2.x error-trigger payloads keep the workflow at the top level; older
+// builds nested it inside execution. Support both shapes.
 const workflowName = String(
-  execution.workflow?.name ?? execution.workflowData?.name ?? '',
+  root.workflow?.name ?? execution.workflow?.name ?? execution.workflowData?.name ?? '',
 );
 const isMetadataWorkflow = workflowName.includes('Metadata');
 const isPublishWorkflow = workflowName.includes('Document Publish');
+const isTaskWorkflow = isMetadataWorkflow || isPublishWorkflow;
+const lastNodeExecuted = String(execution.lastNodeExecuted || '');
+// Authentication, ownership checks, duplicate exits, and lock attempts happen
+// before this execution owns any mutable PocketBase record. Never let a bad
+// public webhook request fail an unrelated in-flight task through the
+// freshness-window fallback.
+const metadataPreflightNodes = new Set([
+  'Webhook',
+  'Validate Event',
+  'Get PocketBase Task',
+  'Merge Task',
+  'Get Latest Publish Job',
+  'Evaluate Job State',
+  'Is Duplicate',
+  'Duplicate Ignored',
+  'Needs Enrichment',
+  'Lock Metadata',
+]);
+const metadataJobNodes = new Set([
+  'Create Publish Job',
+  'Parse Publish Job',
+  'Trigger Task Publish',
+  'Publish Triggered',
+]);
+const publishPreflightNodes = new Set([
+  'Webhook',
+  'Validate Event',
+  'Get Publish Job',
+  'Merge Publish Job',
+  'Is Job Finished',
+  'Publish Already Done',
+  'Get Task',
+  'Merge Task',
+  'Lock Publish Job',
+]);
+const markTask = Boolean(
+  isMetadataWorkflow
+  && lastNodeExecuted
+  && !metadataPreflightNodes.has(lastNodeExecuted)
+  && !metadataJobNodes.has(lastNodeExecuted)
+);
+const markJob = Boolean(
+  (isMetadataWorkflow && metadataJobNodes.has(lastNodeExecuted))
+  || (isPublishWorkflow && lastNodeExecuted && !publishPreflightNodes.has(lastNodeExecuted))
+);
+const shouldHandleFailure = markTask || markJob;
 const lastError = String(
   execution.error?.message
     || (typeof execution.error?.stack === 'string' ? execution.error.stack.split('\n')[0] : '')
     || 'Workflow execution failed.',
 ).slice(0, 8192);
-const runData = execution.data?.resultData?.runData || {};
-const candidates = [];
-for (const runs of Object.values(runData)) {
-  for (const run of Array.isArray(runs) ? runs : []) {
-    const items = run.data?.main?.flat?.() || [];
-    for (const item of items) if (item?.json) candidates.push(item.json);
-  }
-}
-const lastWith = (predicate) => [...candidates].reverse().find(predicate) || null;
-const jobItem = lastWith((item) => typeof item.publishJobId === 'string' && item.publishJobId.length > 0);
-const taskItem = lastWith((item) => typeof item.taskRecordId === 'string' && item.taskRecordId.length > 0);
-const publishJobId = jobItem ? jobItem.publishJobId : '';
-const taskRecordId = taskItem ? taskItem.taskRecordId : '';
-const lockRan = Object.prototype.hasOwnProperty.call(runData, 'Lock Metadata');
-// Metadata workflow failures only fail the task while enrichment is actually
-// in progress: once a publish job exists the metadata write already succeeded.
-const markTask = Boolean(isMetadataWorkflow && taskRecordId && lockRan && !publishJobId);
-const markJob = Boolean(publishJobId && (isMetadataWorkflow || isPublishWorkflow));
 return {
   json: {
     workflowName,
-    publishJobId,
-    taskRecordId,
+    isMetadataWorkflow,
+    isTaskWorkflow,
     markTask,
     markJob,
-    lastNodeExecuted: execution.lastNodeExecuted || '',
+    shouldHandleFailure,
+    lastNodeExecuted,
     lastError,
-    skipped: !markTask && !markJob,
+  },
+};`;
+
+const resolveStuckTaskCode = String.raw`
+const items = Array.isArray($json.items) ? $json.items : [];
+// The fallback has no execution-level record id. Fail closed when concurrent
+// candidates make ownership ambiguous instead of modifying the newest record.
+const task = items.length === 1 ? items[0] : null;
+return {
+  json: {
+    taskRecordId: task && typeof task.id === 'string' ? task.id : '',
+  },
+};`;
+
+const resolveStuckJobCode = String.raw`
+const items = Array.isArray($json.items) ? $json.items : [];
+// See Resolve Stuck Task: automatic recovery is safe only for one candidate.
+const job = items.length === 1 ? items[0] : null;
+return {
+  json: {
+    publishJobId: job && typeof job.id === 'string' ? job.id : '',
+    taskRecordId: job && typeof job.task === 'string' ? job.task : '',
   },
 };`;
 
 const prepareDocumentFailuresCode = String.raw`
 const context = ${CONTEXT_REF};
+const job = ${JOB_REF};
 const items = Array.isArray($json.items) ? $json.items : [];
 const requests = items
   .filter((record) => typeof record.id === 'string' && record.id.length > 0)
@@ -143,21 +200,37 @@ const requests = items
     url: '/api/collections/aw_documents/records/' + record.id,
     body: { status: 'failed', lastError: context.lastError },
   }));
-return {
+const chunks = [];
+for (let index = 0; index < requests.length; index += 50) {
+  chunks.push(requests.slice(index, index + 50));
+}
+if (chunks.length === 0) chunks.push([]);
+return chunks.map((chunk) => ({
   json: {
-    failureCount: requests.length,
+    failureCount: chunk.length,
+    publishJobId: job.publishJobId,
     batchUrl: $env.POCKETBASE_URL + '/api/batch',
-    batchBody: { requests },
+    batchBody: { requests: chunk },
   },
-};`;
+}));`;
 
 addNode('Error Trigger', 'n8n-nodes-base.errorTrigger', {}, { typeVersion: 1, position: [0, 0] });
 addCode('Extract Failure Context', extractFailureContextCode, 'runOnceForEachItem', [220, 0]);
-addBooleanIf('Has Failure To Mark', '={{ $json.markTask || $json.markJob }}', [440, 0]);
-addBooleanIf('Is Task Metadata Failure', '={{ $json.markTask }}', [660, 200]);
+addBooleanIf('Has Failure To Handle', '={{ $json.shouldHandleFailure }}', [440, 0]);
+addBooleanIf('Should Mark Task Metadata Failed', `={{ ${CONTEXT_REF}.markTask }}`, [660, -140]);
+
+addHttp('Find Stuck Task', {
+  method: 'GET',
+  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records?perPage=2&sort=-updated&fields=id,title&filter=' + encodeURIComponent("metadataStatus = 'processing' && updated > '" + $now.minus(60, 'minutes').toUTC().toFormat('yyyy-MM-dd HH:mm:ss') + "'") }}`,
+  sendHeaders: true,
+  headerParameters: pocketBaseHeaders(),
+  options: { response: { response: { responseFormat: 'json' } } },
+}, [880, -140]);
+addCode('Resolve Stuck Task', resolveStuckTaskCode, 'runOnceForAllItems', [1100, -140]);
+addStringIf('Has Stuck Task', `={{ $json.taskRecordId }}`, 'notEmpty', '', [1320, -140]);
 addHttp('Mark Task Metadata Failed', {
   method: 'PATCH',
-  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records/' + ${CONTEXT_REF}.taskRecordId }}`,
+  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records/' + ${TASK_REF}.taskRecordId }}`,
   sendHeaders: true,
   headerParameters: pocketBaseHeaders(),
   sendBody: true,
@@ -165,19 +238,22 @@ addHttp('Mark Task Metadata Failed', {
   rawContentType: 'application/json',
   body: `={{ JSON.stringify({ metadataStatus: 'failed', metadataError: ${CONTEXT_REF}.lastError }) }}`,
   options: { response: { response: { responseFormat: 'autodetect' } } },
-}, [880, 200]);
-addBooleanIf('Has Publish Job', `={{ ${CONTEXT_REF}.markJob }}`, [1100, 0]);
-addHttp('Get Publish Job', {
+}, [1540, -140]);
+
+addBooleanIf('Should Mark Publish Job Failed', `={{ ${CONTEXT_REF}.markJob }}`, [1760, 0]);
+
+addHttp('Find Stuck Publish Job', {
   method: 'GET',
-  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + ${CONTEXT_REF}.publishJobId }}`,
+  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records?perPage=2&sort=-updated&fields=id,task,status&filter=' + encodeURIComponent("status != 'published' && status != 'failed' && updated > '" + $now.minus(60, 'minutes').toUTC().toFormat('yyyy-MM-dd HH:mm:ss') + "'") }}`,
   sendHeaders: true,
   headerParameters: pocketBaseHeaders(),
   options: { response: { response: { responseFormat: 'json' } } },
-}, [1320, 0]);
-addStringIf('Should Mark Job Failed', '={{ $json.status }}', 'notEquals', 'published', [1540, 0]);
+}, [1980, 0]);
+addCode('Resolve Stuck Job', resolveStuckJobCode, 'runOnceForAllItems', [2200, 0]);
+addStringIf('Has Stuck Job', `={{ $json.publishJobId }}`, 'notEmpty', '', [2420, 0]);
 addHttp('Mark Publish Job Failed', {
   method: 'PATCH',
-  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + ${CONTEXT_REF}.publishJobId }}`,
+  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + ${JOB_REF}.publishJobId }}`,
   sendHeaders: true,
   headerParameters: pocketBaseHeaders(),
   sendBody: true,
@@ -185,16 +261,16 @@ addHttp('Mark Publish Job Failed', {
   rawContentType: 'application/json',
   body: `={{ JSON.stringify({ status: 'failed', lastError: ${CONTEXT_REF}.lastError }) }}`,
   options: { response: { response: { responseFormat: 'autodetect' } } },
-}, [1760, 0]);
+}, [2640, 0]);
 addHttp('List Processing Documents', {
   method: 'GET',
-  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_documents/records?perPage=500&filter=' + encodeURIComponent('publishJob = "' + ${CONTEXT_REF}.publishJobId + '" && status = "processing"') }}`,
+  url: `={{ $env.POCKETBASE_URL + '/api/collections/aw_documents/records?perPage=500&filter=' + encodeURIComponent('publishJob = "' + ${JOB_REF}.publishJobId + '" && status = "processing"') }}`,
   sendHeaders: true,
   headerParameters: pocketBaseHeaders(),
   options: { response: { response: { responseFormat: 'json' } } },
-}, [1980, 0]);
-addCode('Prepare Document Failures', prepareDocumentFailuresCode, 'runOnceForAllItems', [2200, 0]);
-addBooleanIf('Has Document Failures', '={{ $json.failureCount > 0 }}', [2420, 0]);
+}, [2860, 0]);
+addCode('Prepare Document Failures', prepareDocumentFailuresCode, 'runOnceForAllItems', [3080, 0]);
+addBooleanIf('Has Document Failures', '={{ $json.failureCount > 0 }}', [3300, 0]);
 addHttp('Write Document Failures', {
   method: 'POST',
   url: '={{ $json.batchUrl }}',
@@ -205,20 +281,26 @@ addHttp('Write Document Failures', {
   rawContentType: 'application/json',
   body: '={{ JSON.stringify($json.batchBody) }}',
   options: { response: { response: { responseFormat: 'autodetect' } } },
-}, [2640, 0]);
-addNode('Error Handled', 'n8n-nodes-base.noOp', {}, { typeVersion: 1, position: [2860, 200] });
+}, [3520, 0]);
+addNode('Error Handled', 'n8n-nodes-base.noOp', {}, { typeVersion: 1, position: [3740, 0] });
 
 connect('Error Trigger', 'Extract Failure Context');
-connect('Extract Failure Context', 'Has Failure To Mark');
-connect('Has Failure To Mark', 'Is Task Metadata Failure', 0);
-connect('Is Task Metadata Failure', 'Mark Task Metadata Failed', 0);
-connect('Is Task Metadata Failure', 'Has Publish Job', 1);
-connect('Mark Task Metadata Failed', 'Has Publish Job');
-connect('Has Publish Job', 'Get Publish Job', 0);
-connect('Has Publish Job', 'Error Handled', 1);
-connect('Get Publish Job', 'Should Mark Job Failed');
-connect('Should Mark Job Failed', 'Mark Publish Job Failed', 0);
-connect('Should Mark Job Failed', 'Error Handled', 1);
+connect('Extract Failure Context', 'Has Failure To Handle');
+connect('Has Failure To Handle', 'Should Mark Task Metadata Failed', 0);
+connect('Has Failure To Handle', 'Error Handled', 1);
+connect('Should Mark Task Metadata Failed', 'Find Stuck Task', 0);
+connect('Should Mark Task Metadata Failed', 'Should Mark Publish Job Failed', 1);
+connect('Find Stuck Task', 'Resolve Stuck Task');
+connect('Resolve Stuck Task', 'Has Stuck Task');
+connect('Has Stuck Task', 'Mark Task Metadata Failed', 0);
+connect('Has Stuck Task', 'Should Mark Publish Job Failed', 1);
+connect('Mark Task Metadata Failed', 'Should Mark Publish Job Failed');
+connect('Should Mark Publish Job Failed', 'Find Stuck Publish Job', 0);
+connect('Should Mark Publish Job Failed', 'Error Handled', 1);
+connect('Find Stuck Publish Job', 'Resolve Stuck Job');
+connect('Resolve Stuck Job', 'Has Stuck Job');
+connect('Has Stuck Job', 'Mark Publish Job Failed', 0);
+connect('Has Stuck Job', 'Error Handled', 1);
 connect('Mark Publish Job Failed', 'List Processing Documents');
 connect('List Processing Documents', 'Prepare Document Failures');
 connect('Prepare Document Failures', 'Has Document Failures');
@@ -238,7 +320,7 @@ const workflow = {
     saveDataErrorExecution: 'all',
     saveDataSuccessExecution: 'all',
   },
-  versionId: 'task-publish-error-workflow-v1',
+  versionId: 'task-publish-error-workflow-v2',
   meta: { templateCredsSetupCompleted: true },
   tags: [],
 };

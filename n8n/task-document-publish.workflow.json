@@ -425,7 +425,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst base = $('Build Snapshot').first().json;\nconst existingByDocumentId = new Map();\nfor (const record of $('Merge Document Lookups').first().json.existingDocuments || []) {\n  existingByDocumentId.set(record.documentId, record);\n}\nconst requests = base.documents.map((document) => {\n  const body = {\n    kind: document.kind,\n    publishJob: base.publishJobId,\n    task: base.taskRecordId,\n    event: document.eventRecordId || '',\n    act: document.actRecordId || '',\n    sourceMessage: document.sourceMessageRecordId || '',\n    publishKey: document.publishKey,\n    slug: document.publishKey,\n    title: document.title,\n    summary: document.summary,\n    tags: document.tags || [],\n    status: 'processing',\n    version: base.version,\n    sourceChecksum: document.sourceChecksum,\n    fumadocsPath: document.fumadocsPath,\n    lastError: '',\n  };\n  const existing = existingByDocumentId.get(document.documentId);\n  if (existing) {\n    return {\n      method: 'PATCH',\n      url: '/api/collections/aw_documents/records/' + existing.id,\n      body,\n    };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_documents/records',\n    body: { ...body, owner: base.ownerId, documentId: document.documentId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+        "jsCode": "\nconst base = $('Build Snapshot').first().json;\nconst existingByDocumentId = new Map();\nfor (const record of $('Merge Document Lookups').first().json.existingDocuments || []) {\n  existingByDocumentId.set(record.documentId, record);\n}\nconst requests = base.documents.map((document) => {\n  const body = {\n    kind: document.kind,\n    publishJob: base.publishJobId,\n    task: base.taskRecordId,\n    event: document.eventRecordId || '',\n    act: document.actRecordId || '',\n    sourceMessage: document.sourceMessageRecordId || '',\n    publishKey: document.publishKey,\n    slug: document.publishKey,\n    title: document.title,\n    summary: document.summary,\n    tags: document.tags || [],\n    status: 'processing',\n    version: base.version,\n    sourceChecksum: document.sourceChecksum,\n    fumadocsPath: document.fumadocsPath,\n    lastError: '',\n  };\n  const existing = existingByDocumentId.get(document.documentId);\n  if (existing) {\n    return {\n      method: 'PATCH',\n      url: '/api/collections/aw_documents/records/' + existing.id,\n      body,\n    };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_documents/records',\n    body: { ...body, owner: base.ownerId, documentId: document.documentId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 50) {\n  chunks.push(requests.slice(index, index + 50));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
       },
       "id": "task-publish-17",
       "name": "Prepare Document Writes",
@@ -589,7 +589,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.jobInsertUrl }}",
+        "url": "={{ $json.jobInsertUrl + '?on_conflict=id' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -611,7 +611,7 @@
             },
             {
               "name": "Prefer",
-              "value": "return=representation"
+              "value": "resolution=merge-duplicates,return=representation"
             }
           ]
         },
@@ -623,8 +623,7 @@
           "response": {
             "response": {
               "responseFormat": "autodetect",
-              "fullResponse": true,
-              "neverError": true
+              "fullResponse": true
             }
           },
           "batching": {
@@ -702,8 +701,7 @@
           "response": {
             "response": {
               "responseFormat": "autodetect",
-              "fullResponse": true,
-              "neverError": true
+              "fullResponse": true
             }
           },
           "batching": {
@@ -777,8 +775,7 @@
           "response": {
             "response": {
               "responseFormat": "autodetect",
-              "fullResponse": true,
-              "neverError": true
+              "fullResponse": true
             }
           },
           "batching": {
@@ -838,8 +835,7 @@
           "response": {
             "response": {
               "responseFormat": "autodetect",
-              "fullResponse": true,
-              "neverError": true
+              "fullResponse": true
             }
           },
           "batching": {
@@ -987,8 +983,7 @@
           "response": {
             "response": {
               "responseFormat": "json",
-              "fullResponse": true,
-              "neverError": true
+              "fullResponse": true
             }
           }
         }
@@ -1318,7 +1313,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "text"
+              "responseFormat": "autodetect"
             }
           },
           "batching": {
@@ -1360,7 +1355,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "text"
+              "responseFormat": "autodetect"
             }
           },
           "batching": {
@@ -1485,7 +1480,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst artifactItems = $('Collect Uploads').first().json.artifactItems;\nconst existingByKey = new Map();\nfor (const record of $('Merge Artifact Lookups').first().json.existingArtifacts || []) {\n  existingByKey.set(record.document + ':' + record.format, record);\n}\nconst requests = artifactItems.map((artifact) => {\n  const body = {\n    publishJob: base.publishJobId,\n    document: artifact.documentRecordId,\n    version: artifact.version,\n    format: artifact.format,\n    blobKey: artifact.signer.key,\n    contentType: artifact.contentType,\n    byteSize: artifact.byteSize,\n    checksum: artifact.checksum,\n    status: 'uploaded',\n    downloadPath: artifact.downloadPath,\n  };\n  const existing = existingByKey.get(artifact.documentRecordId + ':' + artifact.format);\n  if (existing) {\n    return { method: 'PATCH', url: '/api/collections/aw_document_artifacts/records/' + existing.id, body };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_document_artifacts/records',\n    body: { ...body, owner: base.ownerId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst artifactItems = $('Collect Uploads').first().json.artifactItems;\nconst existingByKey = new Map();\nfor (const record of $('Merge Artifact Lookups').first().json.existingArtifacts || []) {\n  existingByKey.set(record.document + ':' + record.format, record);\n}\nconst requests = artifactItems.map((artifact) => {\n  const body = {\n    publishJob: base.publishJobId,\n    document: artifact.documentRecordId,\n    version: artifact.version,\n    format: artifact.format,\n    blobKey: artifact.signer.key,\n    contentType: artifact.contentType,\n    byteSize: artifact.byteSize,\n    checksum: artifact.checksum,\n    status: 'uploaded',\n    downloadPath: artifact.downloadPath,\n  };\n  const existing = existingByKey.get(artifact.documentRecordId + ':' + artifact.format);\n  if (existing) {\n    return { method: 'PATCH', url: '/api/collections/aw_document_artifacts/records/' + existing.id, body };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_document_artifacts/records',\n    body: { ...body, owner: base.ownerId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 50) {\n  chunks.push(requests.slice(index, index + 50));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
       },
       "id": "task-publish-53",
       "name": "Prepare Artifact Writes",
@@ -1743,7 +1738,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           },
           "batching": {
@@ -1769,7 +1764,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst requests = $('Create GitHub Blobs').all();\nconst responses = $input.all();\nif (requests.length !== responses.length) {\n  throw new Error('A GitHub blob creation did not complete.');\n}\nconst entries = requests.map((request, index) => {\n  const sha = responses[index].json?.sha;\n  if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/u.test(sha)) {\n    throw new Error('GitHub blob creation returned no valid SHA for ' + request.json.path + '.');\n  }\n  return { path: request.json.path, mode: '100644', type: 'blob', sha };\n});\nreturn {\n  json: {\n    treeEntries: entries,\n    fileCount: entries.length,\n  },\n};"
+        "jsCode": "\nconst requests = $('Prepare GitHub Blobs').all();\nconst responses = $input.all();\nif (requests.length !== responses.length) {\n  throw new Error('A GitHub blob creation did not complete.');\n}\nconst entries = requests.map((request, index) => {\n  const sha = responses[index].json?.sha;\n  if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/u.test(sha)) {\n    throw new Error('GitHub blob creation returned no valid SHA for ' + request.json.path + '.');\n  }\n  return { path: request.json.path, mode: '100644', type: 'blob', sha };\n});\nreturn {\n  json: {\n    treeEntries: entries,\n    fileCount: entries.length,\n  },\n};"
       },
       "id": "task-publish-64",
       "name": "Collect GitHub Blobs",
@@ -1922,7 +1917,7 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
@@ -1942,7 +1937,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Parse GitHub Commit').item.json;\nconst tree = $json;\nconst treeSha = tree?.sha;\nif (typeof treeSha !== 'string' || !/^[0-9a-f]{40}$/u.test(treeSha)) {\n  throw new Error('GitHub tree creation returned no valid SHA.');\n}\nreturn { json: { commitSha: base.commitSha, treeSha } };"
+        "jsCode": "\nconst base = $('Parse GitHub Commit').item.json;\nconst tree = $json;\nconst treeSha = tree?.sha;\nif (typeof treeSha !== 'string' || !/^[0-9a-f]{40}$/u.test(treeSha)) {\n  throw new Error('GitHub tree creation returned no valid SHA.');\n}\nreturn {\n  json: {\n    commitSha: base.commitSha,\n    treeSha,\n    treeUnchanged: treeSha === base.baseTreeSha,\n  },\n};"
       },
       "id": "task-publish-70",
       "name": "Parse GitHub Tree",
@@ -1950,6 +1945,38 @@
       "typeVersion": 2,
       "position": [
         14080,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-71",
+              "leftValue": "={{ $json.treeUnchanged }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-71",
+      "name": "Is GitHub Tree Unchanged",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        14300,
         200
       ]
     },
@@ -1985,18 +2012,18 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
       },
-      "id": "task-publish-71",
+      "id": "task-publish-72",
       "name": "Create GitHub Commit",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        14300,
-        200
+        14520,
+        320
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -2007,13 +2034,13 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst base = $('Parse GitHub Tree').item.json;\nconst commit = $json;\nconst newCommitSha = commit?.sha;\nif (typeof newCommitSha !== 'string' || !/^[0-9a-f]{40}$/u.test(newCommitSha)) {\n  throw new Error('GitHub commit creation returned no valid SHA.');\n}\nreturn { json: { newCommitSha } };"
       },
-      "id": "task-publish-72",
+      "id": "task-publish-73",
       "name": "Parse GitHub Commit Created",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        14520,
-        200
+        14740,
+        320
       ]
     },
     {
@@ -2048,18 +2075,18 @@
         "options": {
           "response": {
             "response": {
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         }
       },
-      "id": "task-publish-73",
+      "id": "task-publish-74",
       "name": "Update GitHub Ref",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        14740,
-        200
+        14960,
+        320
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -2070,26 +2097,40 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst expected = $('Parse GitHub Commit Created').item.json.newCommitSha;\nconst ref = $json;\nif (ref?.object?.sha !== expected) {\n  throw new Error('GitHub did not advance the branch to the new commit.');\n}\nreturn { json: { commitSha: expected } };"
       },
-      "id": "task-publish-74",
+      "id": "task-publish-75",
       "name": "Verify GitHub Ref",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        14960,
+        15180,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "task-publish-76",
+      "name": "Merge GitHub Commit",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        15400,
         200
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst publishedAt = new Date().toISOString();\nlet artifactRecords = [];\ntry {\n  artifactRecords = $('Verify Artifact Records').first().json.artifactRecords || [];\n} catch {\n  artifactRecords = [];\n}\nconst requests = base.documentRecords.map((document) => ({\n  method: 'PATCH',\n  url: '/api/collections/aw_documents/records/' + document.documentRecordId,\n  body: { status: 'published', publishedAt, lastError: '' },\n}));\nfor (const artifact of artifactRecords) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_document_artifacts/records/' + artifact.id,\n    body: { status: 'published' },\n  });\n}\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst publishedAt = new Date().toISOString();\nlet artifactRecords = [];\ntry {\n  artifactRecords = $('Verify Artifact Records').first().json.artifactRecords || [];\n} catch {\n  artifactRecords = [];\n}\nconst requests = base.documentRecords.map((document) => ({\n  method: 'PATCH',\n  url: '/api/collections/aw_documents/records/' + document.documentRecordId,\n  body: { status: 'published', publishedAt, lastError: '' },\n}));\nfor (const artifact of artifactRecords) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_document_artifacts/records/' + artifact.id,\n    body: { status: 'published' },\n  });\n}\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 50) {\n  chunks.push(requests.slice(index, index + 50));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
       },
-      "id": "task-publish-75",
+      "id": "task-publish-77",
       "name": "Prepare Finalization",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        15180,
+        15620,
         200
       ]
     },
@@ -2126,12 +2167,12 @@
           }
         }
       },
-      "id": "task-publish-76",
+      "id": "task-publish-78",
       "name": "Write Finalization",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        15400,
+        15840,
         200
       ],
       "retryOnFail": true,
@@ -2143,12 +2184,12 @@
         "mode": "runOnceForAllItems",
         "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst isEntryOk = (entry) => {\n  if (!entry || typeof entry !== 'object') return false;\n  if (entry.error) return false;\n  if (Number.isFinite(Number(entry.status))) {\n    return Number(entry.status) >= 200 && Number(entry.status) < 300;\n  }\n  if (entry.body && typeof entry.body === 'object') return !entry.body.error;\n  return typeof entry.id === 'string';\n};\nlet artifactCount = 0;\ntry {\n  artifactCount = Number($('Verify Artifact Records').first().json.artifactCount || 0);\n} catch {\n  artifactCount = 0;\n}\nfor (const item of $input.all()) {\n  const body = item.json;\n  const entries = Array.isArray(body) ? body : [body];\n  for (const entry of entries) {\n    if (!isEntryOk(entry)) throw new Error('PocketBase finalization batch write failed.');\n  }\n}\nreturn {\n  json: {\n    finalized: true,\n    documentCount: base.documentRecords.length,\n    artifactCount,\n    publishedAt: new Date().toISOString(),\n  },\n};"
       },
-      "id": "task-publish-77",
+      "id": "task-publish-79",
       "name": "Verify Finalization",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        15620,
+        16060,
         200
       ]
     },
@@ -2185,12 +2226,12 @@
           }
         }
       },
-      "id": "task-publish-78",
+      "id": "task-publish-80",
       "name": "Mark Job Published",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        15840,
+        16280,
         200
       ],
       "retryOnFail": true,
@@ -2200,14 +2241,14 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst finalization = $('Verify Finalization').first().json;\nconst commitSha = $('Verify GitHub Ref').first().json.commitSha;\nreturn {\n  json: {\n    accepted: true,\n    published: true,\n    publishJobId: base.publishJobId,\n    taskRecordId: base.taskRecordId,\n    taskPublishKey: base.taskPublishKey,\n    version: base.version,\n    documentCount: finalization.documentCount,\n    artifactCount: finalization.artifactCount,\n    commitSha,\n    publishedAt: finalization.publishedAt,\n  },\n};"
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst finalization = $('Verify Finalization').first().json;\nconst commitSha = $('Merge GitHub Commit').first().json.commitSha;\nreturn {\n  json: {\n    accepted: true,\n    published: true,\n    publishJobId: base.publishJobId,\n    taskRecordId: base.taskRecordId,\n    taskPublishKey: base.taskPublishKey,\n    version: base.version,\n    documentCount: finalization.documentCount,\n    artifactCount: finalization.artifactCount,\n    commitSha,\n    publishedAt: finalization.publishedAt,\n  },\n};"
       },
-      "id": "task-publish-79",
+      "id": "task-publish-81",
       "name": "Publish Complete",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        16060,
+        16500,
         200
       ]
     }
@@ -3000,6 +3041,24 @@
       "main": [
         [
           {
+            "node": "Is GitHub Tree Unchanged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is GitHub Tree Unchanged": {
+      "main": [
+        [
+          {
+            "node": "Merge GitHub Commit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Create GitHub Commit",
             "type": "main",
             "index": 0
@@ -3041,6 +3100,17 @@
       ]
     },
     "Verify GitHub Ref": {
+      "main": [
+        [
+          {
+            "node": "Merge GitHub Commit",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge GitHub Commit": {
       "main": [
         [
           {

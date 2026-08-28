@@ -460,8 +460,8 @@ requests.push({
   },
 });
 const chunks = [];
-for (let index = 0; index < requests.length; index += 400) {
-  chunks.push(requests.slice(index, index + 400));
+for (let index = 0; index < requests.length; index += 50) {
+  chunks.push(requests.slice(index, index + 50));
 }
 return chunks.map((chunk) => ({
   json: {

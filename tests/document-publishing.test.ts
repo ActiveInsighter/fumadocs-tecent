@@ -407,6 +407,373 @@ describe('document publishing contracts', () => {
     }
   });
 
+  it('pairs GitHub blob responses with the paths prepared before the HTTP node', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-document-publish.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{ name: string; parameters?: { jsCode?: string } }>;
+    };
+    const code = workflow.nodes.find((node) => node.name === 'Collect GitHub Blobs')
+      ?.parameters?.jsCode;
+    expect(code).toBeTypeOf('string');
+
+    const prepared = [
+      { json: { path: 'content/docs/tasks/example/index.mdx' } },
+      { json: { path: 'content/docs/tasks/example/meta.json' } },
+    ];
+    const responses = [
+      { json: { sha: 'a'.repeat(40) } },
+      { json: { sha: 'b'.repeat(40) } },
+    ];
+    const selectNode = (name: string) => ({
+      all: () => (name === 'Prepare GitHub Blobs' ? prepared : responses),
+    });
+    const runCode = new Function('$', '$input', code ?? '');
+
+    expect(runCode(selectNode, { all: () => responses })).toEqual({
+      json: {
+        treeEntries: [
+          {
+            path: 'content/docs/tasks/example/index.mdx',
+            mode: '100644',
+            type: 'blob',
+            sha: 'a'.repeat(40),
+          },
+          {
+            path: 'content/docs/tasks/example/meta.json',
+            mode: '100644',
+            type: 'blob',
+            sha: 'b'.repeat(40),
+          },
+        ],
+        fileCount: 2,
+      },
+    });
+  });
+
+  it('reuses the current GitHub commit when a retry produces an unchanged tree', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-document-publish.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{
+        name: string;
+        parameters?: {
+          jsCode?: string;
+          conditions?: {
+            conditions?: Array<{ leftValue?: string }>;
+          };
+        };
+      }>;
+      connections: Record<
+        string,
+        { main: Array<Array<{ node: string; index: number }>> }
+      >;
+    };
+    const node = (name: string) => {
+      const match = workflow.nodes.find((candidate) => candidate.name === name);
+      expect(match, name).toBeDefined();
+      return match!;
+    };
+
+    const commitSha = 'a'.repeat(40);
+    const treeSha = 'b'.repeat(40);
+    const parseTree = new Function(
+      '$',
+      '$json',
+      node('Parse GitHub Tree').parameters?.jsCode ?? '',
+    );
+    const selectNode = (name: string) => ({
+      item: {
+        json: name === 'Parse GitHub Commit'
+          ? { commitSha, baseTreeSha: treeSha }
+          : {},
+      },
+    });
+
+    expect(parseTree(selectNode, { sha: treeSha })).toEqual({
+      json: { commitSha, treeSha, treeUnchanged: true },
+    });
+    expect(parseTree(selectNode, { sha: 'c'.repeat(40) })).toEqual({
+      json: {
+        commitSha,
+        treeSha: 'c'.repeat(40),
+        treeUnchanged: false,
+      },
+    });
+
+    expect(
+      node('Is GitHub Tree Unchanged')
+        .parameters?.conditions?.conditions?.[0]?.leftValue,
+    ).toBe('={{ $json.treeUnchanged }}');
+    expect(workflow.connections['Parse GitHub Tree']?.main[0]).toEqual([
+      { node: 'Is GitHub Tree Unchanged', type: 'main', index: 0 },
+    ]);
+    expect(workflow.connections['Is GitHub Tree Unchanged']?.main[0]).toEqual([
+      { node: 'Merge GitHub Commit', type: 'main', index: 0 },
+    ]);
+    expect(workflow.connections['Is GitHub Tree Unchanged']?.main[1]).toEqual([
+      { node: 'Create GitHub Commit', type: 'main', index: 0 },
+    ]);
+    expect(workflow.connections['Verify GitHub Ref']?.main[0]).toEqual([
+      { node: 'Merge GitHub Commit', type: 'main', index: 1 },
+    ]);
+    expect(workflow.connections['Merge GitHub Commit']?.main[0]).toEqual([
+      { node: 'Prepare Finalization', type: 'main', index: 0 },
+    ]);
+    expect(node('Publish Complete').parameters?.jsCode).toContain(
+      "$('Merge GitHub Commit').first().json.commitSha",
+    );
+  });
+
+  it('retries transient Supabase failures with idempotent PDF writes', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-document-publish.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{
+        name: string;
+        retryOnFail?: boolean;
+        maxTries?: number;
+        parameters?: {
+          url?: string;
+          headerParameters?: {
+            parameters?: Array<{ name?: string; value?: string }>;
+          };
+          options?: {
+            response?: { response?: { neverError?: boolean } };
+          };
+        };
+      }>;
+    };
+    const node = (name: string) => {
+      const match = workflow.nodes.find((candidate) => candidate.name === name);
+      expect(match, name).toBeDefined();
+      return match!;
+    };
+
+    const createJobs = node('Create PDF Jobs');
+    expect(createJobs.parameters?.url).toContain('on_conflict=id');
+    expect(
+      createJobs.parameters?.headerParameters?.parameters?.find(
+        (header) => header.name === 'Prefer',
+      )?.value,
+    ).toBe('resolution=merge-duplicates,return=representation');
+
+    for (const name of [
+      'Create PDF Jobs',
+      'Upload PDF Markdown',
+      'Advance PDF Jobs Uploaded',
+      'Advance PDF Jobs Queued',
+      'Get PDF Batch Status',
+    ]) {
+      const request = node(name);
+      expect(request.retryOnFail, name).toBe(true);
+      expect(request.maxTries, name).toBe(3);
+      expect(
+        request.parameters?.options?.response?.response?.neverError,
+        name,
+      ).not.toBe(true);
+    }
+
+    expect(
+      node('Upload PDF Markdown').parameters?.headerParameters?.parameters?.find(
+        (header) => header.name === 'x-upsert',
+      )?.value,
+    ).toBe('true');
+  });
+
+  it('auto-detects GitHub JSON write responses when n8n streams raw request bodies', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-document-publish.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{
+        name: string;
+        parameters?: {
+          contentType?: string;
+          options?: {
+            response?: { response?: { responseFormat?: string } };
+          };
+        };
+      }>;
+    };
+
+    for (const name of [
+      'Create GitHub Blobs',
+      'Create GitHub Tree',
+      'Create GitHub Commit',
+      'Update GitHub Ref',
+    ]) {
+      const request = workflow.nodes.find((node) => node.name === name);
+      expect(request, name).toBeDefined();
+      expect(request?.parameters?.contentType, name).toBe('raw');
+      expect(
+        request?.parameters?.options?.response?.response?.responseFormat,
+        name,
+      ).toBe('autodetect');
+    }
+  });
+
+  it('keeps PocketBase finalization batches within the 50-request server limit', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-document-publish.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{ name: string; parameters?: { jsCode?: string } }>;
+    };
+    const code = workflow.nodes.find((node) => node.name === 'Prepare Finalization')
+      ?.parameters?.jsCode;
+    expect(code).toBeTypeOf('string');
+
+    const documents = Array.from({ length: 25 }, (_, index) => ({
+      documentRecordId: `document${String(index).padStart(6, '0')}`,
+    }));
+    const artifacts = Array.from({ length: 28 }, (_, index) => ({
+      id: `artifact${String(index).padStart(7, '0')}`,
+    }));
+    const selectNode = (name: string) => ({
+      first: () => ({
+        json: name === 'Verify Documents'
+          ? { documentRecords: documents }
+          : { artifactRecords: artifacts },
+      }),
+    });
+    const runCode = new Function('$', '$env', code ?? '');
+    const result = runCode(selectNode, { POCKETBASE_URL: 'https://pb.example.test' }) as Array<{
+      json: { batchBody: { requests: unknown[] } };
+    }>;
+
+    expect(result).toHaveLength(2);
+    expect(result.flatMap((item) => item.json.batchBody.requests)).toHaveLength(53);
+    expect(
+      Math.max(...result.map((item) => item.json.batchBody.requests.length)),
+    ).toBeLessThanOrEqual(50);
+  });
+
+  it('ignores preflight workflow errors and bounds document failure batches', () => {
+    const workflow = JSON.parse(
+      readFileSync(
+        new URL('../n8n/task-publish-error.workflow.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      nodes: Array<{
+        name: string;
+        parameters?: { jsCode?: string; url?: string };
+      }>;
+    };
+    const node = (name: string) => {
+      const match = workflow.nodes.find((candidate) => candidate.name === name);
+      expect(match, name).toBeDefined();
+      return match!;
+    };
+    const code = (name: string) => {
+      const jsCode = node(name).parameters?.jsCode;
+      expect(jsCode, name).toBeTypeOf('string');
+      return jsCode ?? '';
+    };
+    const extract = new Function('$json', code('Extract Failure Context'));
+
+    expect(extract({
+      workflow: { name: 'AnyWorkflow Task Document Publish' },
+      execution: {
+        lastNodeExecuted: 'Validate Event',
+        error: { message: 'Task publish webhook authentication failed.' },
+      },
+    }).json).toMatchObject({
+      markTask: false,
+      markJob: false,
+      shouldHandleFailure: false,
+    });
+    expect(extract({
+      workflow: { name: 'AnyWorkflow Task Metadata Enrichment' },
+      execution: {
+        lastNodeExecuted: 'New API Message Metadata',
+        error: { message: 'metadata failed' },
+      },
+    }).json).toMatchObject({
+      markTask: true,
+      markJob: false,
+      shouldHandleFailure: true,
+    });
+    expect(extract({
+      workflow: { name: 'AnyWorkflow Task Document Publish' },
+      execution: {
+        lastNodeExecuted: 'Create GitHub Tree',
+        error: { message: 'publish failed' },
+      },
+    }).json).toMatchObject({
+      markTask: false,
+      markJob: true,
+      shouldHandleFailure: true,
+    });
+
+    expect(node('Find Stuck Task').parameters?.url).toContain('perPage=2');
+    expect(node('Find Stuck Publish Job').parameters?.url).toContain('perPage=2');
+    const resolveTask = new Function('$json', code('Resolve Stuck Task'));
+    const resolveJob = new Function('$json', code('Resolve Stuck Job'));
+    expect(resolveTask({ items: [{ id: 'task12345678901' }] })).toEqual({
+      json: { taskRecordId: 'task12345678901' },
+    });
+    expect(resolveTask({
+      items: [{ id: 'task12345678901' }, { id: 'task23456789012' }],
+    })).toEqual({ json: { taskRecordId: '' } });
+    expect(resolveJob({
+      items: [{ id: 'job123456789012', task: 'task12345678901' }],
+    })).toEqual({
+      json: {
+        publishJobId: 'job123456789012',
+        taskRecordId: 'task12345678901',
+      },
+    });
+    expect(resolveJob({
+      items: [
+        { id: 'job123456789012', task: 'task12345678901' },
+        { id: 'job234567890123', task: 'task23456789012' },
+      ],
+    })).toEqual({ json: { publishJobId: '', taskRecordId: '' } });
+
+    const records = Array.from({ length: 51 }, (_, index) => ({
+      id: `record${String(index).padStart(9, '0')}`,
+    }));
+    const selectNode = (name: string) => ({
+      first: () => ({
+        json: name === 'Resolve Stuck Job'
+          ? { publishJobId: 'job123456789012' }
+          : { lastError: 'publish failed' },
+      }),
+    });
+    const prepareFailures = new Function(
+      '$',
+      '$env',
+      '$json',
+      code('Prepare Document Failures'),
+    );
+    const batches = prepareFailures(
+      selectNode,
+      { POCKETBASE_URL: 'https://pb.example.test' },
+      { items: records },
+    ) as Array<{ json: { batchBody: { requests: unknown[] } } }>;
+
+    expect(batches).toHaveLength(2);
+    expect(batches.flatMap((item) => item.json.batchBody.requests)).toHaveLength(51);
+    expect(
+      Math.max(...batches.map((item) => item.json.batchBody.requests.length)),
+    ).toBeLessThanOrEqual(50);
+  });
+
   it('places Node.js Blob handlers in EdgeOne cloud-functions routes', () => {
     const cloudFunctionsDir = new URL('../edgeone/cloud-functions/', import.meta.url);
     const legacyFunctionsDir = new URL('../edgeone/functions/', import.meta.url);
