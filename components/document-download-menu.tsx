@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react';
 
 interface DocumentDownloadMenuProps {
-  readonly documentId: string;
+  readonly taskRecordId: string;
+  readonly messageRecordId: string;
   readonly version: number;
 }
 
 export function DocumentDownloadMenu({
-  documentId,
+  taskRecordId,
+  messageRecordId,
   version,
 }: DocumentDownloadMenuProps): ReactNode {
-  const basePath = `/download/${encodeURIComponent(documentId)}/${version}`;
+  const basePath = `/download/tasks/${taskRecordId}/${version}/${messageRecordId}`;
 
   return (
     <details className="relative">

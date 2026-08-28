@@ -9,8 +9,14 @@ import {
   buildDownloadGatewayUrl,
   parseArtifactReference,
 } from '../lib/document-publishing/contracts';
-import { parseAnyWorkflowPublishTrigger } from '../lib/document-publishing/ingest';
+import {
+  buildN8nTaskEnrichEvent,
+  parseAnyWorkflowTaskPublishTrigger,
+} from '../lib/document-publishing/ingest';
 import { normalizeUploadSignerResponse } from '../lib/document-publishing/signer';
+
+const TASK_ID = 'task12345678901';
+const MESSAGE_ID = 'msg123456789012';
 
 describe('document publishing contracts', () => {
   it('bypasses EdgeOne fetch proxy failures when downloading through the Blob gateway', async () => {
@@ -21,7 +27,9 @@ describe('document publishing contracts', () => {
     const responses = [
       {
         statusCode: 302,
-        headers: { location: 'https://blob.example.test/download/edgeone-probe/1/md' },
+        headers: {
+          location: `https://blob.example.test/download/tasks/${TASK_ID}/1/${MESSAGE_ID}/md`,
+        },
       },
       { statusCode: 404, headers: {} as Record<string, string> },
     ];
@@ -71,13 +79,16 @@ describe('document publishing contracts', () => {
     );
 
     try {
-      const { GET } = await import('../app/download/[documentId]/[version]/[format]/route');
+      const { GET } = await import(
+        '../app/download/tasks/[taskRecordId]/[version]/[messageRecordId]/[format]/route'
+      );
       const response = await GET(
-        new Request('https://fumadocs.example.test/download/edgeone-probe/1/md'),
+        new Request(`https://fumadocs.example.test/download/tasks/${TASK_ID}/1/${MESSAGE_ID}/md`),
         {
           params: Promise.resolve({
-            documentId: 'edgeone-probe',
+            taskRecordId: TASK_ID,
             version: '1',
+            messageRecordId: MESSAGE_ID,
             format: 'md',
           }),
         },
@@ -114,13 +125,16 @@ describe('document publishing contracts', () => {
 
     const { onRequestGet } = await import(
       // @ts-expect-error EdgeOne function route has no local declaration file.
-      '../edgeone/cloud-functions/download/[documentId]/[version]/[format].js'
+      '../edgeone/cloud-functions/download/tasks/[taskRecordId]/[version]/[messageRecordId]/[format].js'
     );
     const response = await onRequestGet({
-      request: new Request('https://fumadocs-upload.any1.tech/download/edgeone-probe/1/md', {
-        headers: { 'X-Internal-Key': 'a'.repeat(32) },
-      }),
-      params: { documentId: 'edgeone-probe', version: '1', format: 'md' },
+      request: new Request(
+        `https://fumadocs-upload.any1.tech/download/tasks/${TASK_ID}/1/${MESSAGE_ID}/md`,
+        {
+          headers: { 'X-Internal-Key': 'a'.repeat(32) },
+        },
+      ),
+      params: { taskRecordId: TASK_ID, version: '1', messageRecordId: MESSAGE_ID, format: 'md' },
       env: { DOWNLOAD_GATEWAY_SECRET: 'a'.repeat(32) },
     });
 
@@ -130,58 +144,89 @@ describe('document publishing contracts', () => {
     vi.resetModules();
   });
 
-  it('creates a versioned Blob key and gateway URL from a safe reference', () => {
+  it('creates a versioned task-scoped Blob key and gateway URL from a safe reference', () => {
     const reference = parseArtifactReference({
-      documentId: 'message-abc_123',
+      taskRecordId: TASK_ID,
+      messageRecordId: MESSAGE_ID,
       version: 3,
       format: 'pdf',
     });
 
     expect(artifactKey(reference)).toBe(
-      'documents/message-abc_123/v3/document.pdf',
+      `documents/tasks/${TASK_ID}/v3/messages/${MESSAGE_ID}/document.pdf`,
     );
     expect(buildDownloadGatewayUrl('https://blob.example.test/download', reference)).toBe(
-      'https://blob.example.test/download/message-abc_123/3/pdf',
+      `https://blob.example.test/download/tasks/${TASK_ID}/3/${MESSAGE_ID}/pdf`,
     );
   });
 
   it('rejects traversal and invalid artifact formats at the contract boundary', () => {
     expect(() =>
-      parseArtifactReference({ documentId: '../private', version: 1, format: 'pdf' }),
-    ).toThrow('Invalid document reference');
+      parseArtifactReference({ taskRecordId: '../private', messageRecordId: MESSAGE_ID, version: 1, format: 'pdf' }),
+    ).toThrow('Invalid artifact reference');
     expect(() =>
-      parseArtifactReference({ documentId: 'message-1', version: 0, format: 'pdf' }),
-    ).toThrow('Invalid document reference');
+      parseArtifactReference({ taskRecordId: TASK_ID, messageRecordId: 'msg-1', version: 1, format: 'pdf' }),
+    ).toThrow('Invalid artifact reference');
     expect(() =>
-      parseArtifactReference({ documentId: 'message-1', version: 1, format: 'html' }),
-    ).toThrow('Invalid document reference');
+      parseArtifactReference({ taskRecordId: TASK_ID, messageRecordId: MESSAGE_ID, version: 0, format: 'pdf' }),
+    ).toThrow('Invalid artifact reference');
+    expect(() =>
+      parseArtifactReference({ taskRecordId: TASK_ID, messageRecordId: MESSAGE_ID, version: 1, format: 'html' }),
+    ).toThrow('Invalid artifact reference');
   });
 
-  it('accepts the Unicode and slash characters used by AnyWorkflow history keys', () => {
-    const entryKey = 'message:安装-A:e8e0c97d-5b24-40b3-b0ca-cb105929e8da:会话/42:2';
-    expect(
-      parseAnyWorkflowPublishTrigger({
-        schemaVersion: 1,
-        kind: 'message',
-        messageRecordId: 'abc123456789012',
-        entryKey,
-        checksum: 'a'.repeat(64),
-      }).entryKey,
-    ).toBe(entryKey);
+  it('parses task publish triggers and defaults build flags to true', () => {
+    const trigger = parseAnyWorkflowTaskPublishTrigger({
+      schemaVersion: 2,
+      kind: 'task',
+      taskRecordId: TASK_ID,
+      checksum: 'a'.repeat(64),
+    });
+    expect(trigger).toMatchObject({ buildMd: true, buildPdf: true });
+
     expect(() =>
-      parseAnyWorkflowPublishTrigger({
+      parseAnyWorkflowTaskPublishTrigger({
         schemaVersion: 1,
         kind: 'message',
-        messageRecordId: 'abc123456789012',
-        entryKey: 'message:task\nwith-control-character',
+        taskRecordId: TASK_ID,
         checksum: 'a'.repeat(64),
       }),
-    ).toThrow('Invalid document publish trigger');
+    ).toThrow('Invalid task publish trigger');
+    expect(() =>
+      parseAnyWorkflowTaskPublishTrigger({
+        schemaVersion: 2,
+        kind: 'task',
+        taskRecordId: 'TASK-1',
+        checksum: 'a'.repeat(64),
+      }),
+    ).toThrow('Invalid task publish trigger');
+  });
+
+  it('derives a deterministic task enrichment event id per owner and task', () => {
+    const trigger = parseAnyWorkflowTaskPublishTrigger({
+      schemaVersion: 2,
+      kind: 'task',
+      taskRecordId: TASK_ID,
+      checksum: 'a'.repeat(64),
+      buildMd: true,
+      buildPdf: false,
+    });
+    const event = buildN8nTaskEnrichEvent(trigger, 'client123456789');
+    const again = buildN8nTaskEnrichEvent(trigger, 'client123456789');
+
+    expect(event.eventId).toBe(again.eventId);
+    expect(event.eventId).toMatch(/^[a-f0-9]{64}$/u);
+    expect(event).toMatchObject({
+      ownerId: 'client123456789',
+      source: 'anyworkflow',
+      buildPdf: false,
+    });
   });
 
   it('accepts only a signer response for the exact requested key and MIME type', () => {
     const reference = parseArtifactReference({
-      documentId: 'message-abc_123',
+      taskRecordId: TASK_ID,
+      messageRecordId: MESSAGE_ID,
       version: 3,
       format: 'md',
     });
@@ -201,7 +246,7 @@ describe('document publishing contracts', () => {
     expect(() =>
       normalizeUploadSignerResponse(
         {
-          key: 'documents/other/v3/document.md',
+          key: `documents/tasks/${TASK_ID}/v3/messages/othermsg12345/document.md`,
           uploadUrl: 'https://blob.example.test/upload/signed',
           contentType: 'text/markdown',
         },
@@ -210,73 +255,111 @@ describe('document publishing contracts', () => {
     ).toThrow('Invalid Blob signer response');
   });
 
-  it('keeps the checked-in n8n workflow importable and secret-free', () => {
-    const workflow = JSON.parse(
-      readFileSync(new URL('../n8n/document-publish.workflow.json', import.meta.url), 'utf8'),
-    ) as {
-      id?: string;
-      nodes: Array<{ name: string; parameters?: { jsCode?: string } }>;
-      connections: object;
-      settings?: { errorWorkflow?: string };
-    };
-    expect(workflow.id).toBe('document-publish-main-v1');
-    expect(workflow.settings?.errorWorkflow).toBe('document-publish-error-v1');
-    const names = new Set(workflow.nodes.map((node) => node.name));
+  it('keeps the checked-in n8n workflows importable, secret-free, and cross-linked', () => {
+    const readWorkflow = (file: string) =>
+      JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8')) as {
+        id?: string;
+        name?: string;
+        nodes: Array<{
+          name: string;
+          type: string;
+          parameters?: { jsCode?: string; path?: string };
+        }>;
+        connections: Record<string, { main: Array<Array<{ node: string }>> }>;
+        settings?: { errorWorkflow?: string };
+      };
 
-    expect([...names]).toEqual(
+    const metadata = readWorkflow('../n8n/task-metadata.workflow.json');
+    const publish = readWorkflow('../n8n/task-document-publish.workflow.json');
+    const error = readWorkflow('../n8n/task-publish-error.workflow.json');
+
+    expect(metadata.id).toBe('task-metadata-enrichment-v1');
+    expect(metadata.name).toBe('AnyWorkflow Task Metadata Enrichment');
+    expect(metadata.settings?.errorWorkflow).toBe('task-publish-error-v1');
+    expect(publish.id).toBe('task-document-publish-v1');
+    expect(publish.name).toBe('AnyWorkflow Task Document Publish');
+    expect(publish.settings?.errorWorkflow).toBe('task-publish-error-v1');
+    expect(error.id).toBe('task-publish-error-v1');
+    expect(error.name).toBe('AnyWorkflow Task Publish Error');
+
+    const metadataNames = new Set(metadata.nodes.map((node) => node.name));
+    expect([...metadataNames]).toEqual(
       expect.arrayContaining([
         'Webhook',
-        'Get PocketBase Message',
-        'New API Metadata',
-        'Prepare Document Write',
-        'Write Document',
-        'Merge Document Response',
-        'Create mdTOpdf Job',
-        'Upload mdTOpdf Markdown',
-        'Mark mdTOpdf Uploaded',
-        'Queue mdTOpdf Job',
-        'Dispatch mdTOpdf Action',
-        'Wait mdTOpdf Action',
-        'Get mdTOpdf Job',
-        'Download mdTOpdf PDF',
-        'Select mdTOpdf PDF',
-        'Sign Artifact Upload',
-        'Put GitHub File',
-        'Prepare GitHub Sidebar Lookup',
-        'Get GitHub Sidebar',
-        'Parse GitHub Sidebar',
-        'Build GitHub Sidebar Request',
-        'Put GitHub Sidebar',
-        'Finalize PocketBase',
+        'Validate Event',
+        'Get PocketBase Task',
+        'Evaluate Job State',
+        'Is Duplicate',
+        'Lock Metadata',
+        'Build Tree',
+        'New API Message Metadata',
+        'New API Act Metadata',
+        'New API Event Metadata',
+        'New API Task Metadata',
+        'Write Metadata',
+        'Create Publish Job',
+        'Trigger Task Publish',
       ]),
     );
-    expect(names).not.toContain('Render PDF');
-    expect(names).not.toContain('Get mdTOpdf Input File');
-    expect(names).not.toContain('Put mdTOpdf Markdown');
-    expect(names).not.toContain('Decompress mdTOpdf Artifact');
-    const workflowText = JSON.stringify(workflow);
-    const dispatchCode = workflow.nodes.find((node) => node.name === 'Prepare mdTOpdf Dispatch')
-      ?.parameters?.jsCode ?? '';
-    expect(dispatchCode).toContain('job_id');
-    const pollCode = workflow.nodes.find((node) => node.name === 'Parse mdTOpdf Job Status')
-      ?.parameters?.jsCode ?? '';
-    expect(workflowText).toContain('build-pdf-api.yml');
-    expect(workflowText).toContain('workflow_dispatch');
-    expect(workflowText).toContain('/rest/v1/pdf_jobs');
-    expect(workflowText).toContain('content/docs/meta.json');
-    expect(pollCode).toContain('mdToPdfReady');
-    expect(pollCode).toContain('mdToPdfPollCount');
-    const connections = workflow.connections as Record<string, { main: Array<Array<{ node: string }>> }>;
-    expect(connections['Build Document']?.main?.[0]?.[0]?.node).toBe('Prepare Document Write');
-    expect(connections['Merge Document Response']?.main?.[0]?.[0]?.node).toBe('Prepare mdTOpdf Input');
-    expect(connections['Is mdTOpdf Ready']?.main?.[0]?.[0]?.node).toBe('Download mdTOpdf PDF');
-    expect(connections['Is mdTOpdf Ready']?.main?.[1]?.[0]?.node).toBe('Wait mdTOpdf Action');
-    expect(connections['Put GitHub File']?.main?.[0]?.[0]?.node).toBe('Prepare GitHub Sidebar Lookup');
-    expect(connections['Put GitHub Sidebar']?.main?.[0]?.[0]?.node).toBe('Prepare Finalization Items');
-    expect(JSON.stringify(workflow)).not.toMatch(/(?:eyJ|sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}/u);
-    for (const node of workflow.nodes) {
-      const jsCode = node.parameters?.jsCode;
-      if (jsCode) expect(() => new Function(jsCode)).not.toThrow();
+
+    const publishNames = new Set(publish.nodes.map((node) => node.name));
+    expect([...publishNames]).toEqual(
+      expect.arrayContaining([
+        'Webhook',
+        'Validate Event',
+        'Get Publish Job',
+        'Lock Publish Job',
+        'Build Snapshot',
+        'Write Documents',
+        'Mark Job Building',
+        'Create PDF Jobs',
+        'Upload PDF Markdown',
+        'Dispatch PDF Batch',
+        'Get PDF Batch Status',
+        'Is PDF Batch Ready',
+        'Download PDFs',
+        'Sign Artifact Uploads',
+        'Upload Markdown Artifacts',
+        'Upload PDF Artifacts',
+        'Create GitHub Tree',
+        'Create GitHub Commit',
+        'Update GitHub Ref',
+        'Write Finalization',
+        'Mark Job Published',
+      ]),
+    );
+
+    const errorNames = new Set(error.nodes.map((node) => node.name));
+    expect([...errorNames]).toEqual(
+      expect.arrayContaining([
+        'Error Trigger',
+        'Extract Failure Context',
+        'Mark Task Metadata Failed',
+        'Mark Publish Job Failed',
+        'Write Document Failures',
+      ]),
+    );
+
+    const metadataWebhook = metadata.nodes.find((node) => node.type === 'n8n-nodes-base.webhook');
+    const publishWebhook = publish.nodes.find((node) => node.type === 'n8n-nodes-base.webhook');
+    expect(metadataWebhook?.parameters?.path).toBe('anyworkflow-task-enrich');
+    expect(publishWebhook?.parameters?.path).toBe('anyworkflow-task-publish');
+
+    const publishText = JSON.stringify(publish);
+    expect(publishText).toContain('build-pdf-api.yml/dispatches');
+    expect(publishText).toContain('/rest/v1/pdf_jobs');
+    expect(publishText).toContain('/git/trees');
+    expect(publishText).toContain('content/docs/tasks/');
+    expect(publishText).toContain('publishKey');
+
+    for (const workflow of [metadata, publish, error]) {
+      expect(JSON.stringify(workflow)).not.toMatch(
+        /(?:eyJ|(?<![A-Za-z])sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}/u,
+      );
+      for (const node of workflow.nodes) {
+        const jsCode = node.parameters?.jsCode;
+        if (jsCode) expect(() => new Function(jsCode)).not.toThrow();
+      }
     }
   });
 
@@ -301,8 +384,9 @@ describe('document publishing contracts', () => {
 
   it('keeps per-item Code nodes compatible with n8n execution mode', () => {
     const workflowFiles = [
-      '../n8n/document-publish.workflow.json',
-      '../n8n/document-publish-error.workflow.json',
+      '../n8n/task-metadata.workflow.json',
+      '../n8n/task-document-publish.workflow.json',
+      '../n8n/task-publish-error.workflow.json',
     ];
 
     for (const workflowFile of workflowFiles) {
@@ -329,7 +413,11 @@ describe('document publishing contracts', () => {
 
     expect(existsSync(cloudFunctionsDir)).toBe(true);
     expect(existsSync(new URL('api/blob/upload-url.js', cloudFunctionsDir))).toBe(true);
-    expect(existsSync(new URL('download/[documentId]/[version]/[format].js', cloudFunctionsDir))).toBe(true);
+    expect(
+      existsSync(
+        new URL('download/tasks/[taskRecordId]/[version]/[messageRecordId]/[format].js', cloudFunctionsDir),
+      ),
+    ).toBe(true);
     expect(existsSync(legacyFunctionsDir)).toBe(false);
   });
 

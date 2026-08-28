@@ -15,8 +15,9 @@ export const dynamic = 'force-dynamic';
 
 type RouteContext = {
   params: Promise<{
-    documentId: string;
+    taskRecordId: string;
     version: string;
+    messageRecordId: string;
     format: string;
   }>;
 };
@@ -26,7 +27,8 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   try {
     const params = await context.params;
     reference = parseArtifactReference({
-      documentId: params.documentId,
+      taskRecordId: params.taskRecordId,
+      messageRecordId: params.messageRecordId,
       version: Number(params.version),
       format: params.format,
     });
@@ -69,7 +71,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       status: 200,
       headers: {
         'Cache-Control': 'public, max-age=31536000, immutable',
-        'Content-Disposition': `attachment; filename="document-${reference.documentId}-v${reference.version}.${extension}"`,
+        'Content-Disposition': `attachment; filename="document-${reference.messageRecordId}-v${reference.version}.${extension}"`,
         'Content-Type': expectedContentType,
         'X-Content-Type-Options': 'nosniff',
       },

@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
 
-export interface AnyWorkflowPublishTrigger {
-  readonly schemaVersion: 1;
-  readonly kind: 'message';
-  readonly messageRecordId: string;
-  readonly entryKey: string;
+export interface AnyWorkflowTaskPublishTrigger {
+  readonly schemaVersion: 2;
+  readonly kind: 'task';
+  readonly taskRecordId: string;
   readonly checksum: string;
+  readonly buildMd: boolean;
+  readonly buildPdf: boolean;
 }
 
-export interface N8nPublishEvent extends AnyWorkflowPublishTrigger {
+export interface N8nTaskEnrichEvent extends AnyWorkflowTaskPublishTrigger {
   readonly eventId: string;
   readonly ownerId: string;
   readonly source: 'anyworkflow';
@@ -16,40 +17,34 @@ export interface N8nPublishEvent extends AnyWorkflowPublishTrigger {
 
 const RECORD_ID_PATTERN = /^[a-z0-9]{15}$/u;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/u;
-const ENTRY_KEY_CONTROL_PATTERN = /[\u0000-\u001F\u007F-\u009F]/u;
 
-function isValidEntryKey(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= 1 &&
-    value.length <= 512 &&
-    !ENTRY_KEY_CONTROL_PATTERN.test(value)
-  );
-}
-
-export function parseAnyWorkflowPublishTrigger(value: unknown): AnyWorkflowPublishTrigger {
+export function parseAnyWorkflowTaskPublishTrigger(
+  value: unknown,
+): AnyWorkflowTaskPublishTrigger {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid document publish trigger.');
+    throw new Error('Invalid task publish trigger.');
   }
   const input = value as Record<string, unknown>;
   if (
-    input.schemaVersion !== 1 ||
-    input.kind !== 'message' ||
-    typeof input.messageRecordId !== 'string' ||
-    !RECORD_ID_PATTERN.test(input.messageRecordId) ||
-    !isValidEntryKey(input.entryKey) ||
+    input.schemaVersion !== 2 ||
+    input.kind !== 'task' ||
+    typeof input.taskRecordId !== 'string' ||
+    !RECORD_ID_PATTERN.test(input.taskRecordId) ||
     typeof input.checksum !== 'string' ||
     !CHECKSUM_PATTERN.test(input.checksum)
   ) {
-    throw new Error('Invalid document publish trigger.');
+    throw new Error('Invalid task publish trigger.');
   }
+  const buildMd = input.buildMd === undefined ? true : input.buildMd === true;
+  const buildPdf = input.buildPdf === undefined ? true : input.buildPdf === true;
 
   return Object.freeze({
-    schemaVersion: 1,
-    kind: 'message',
-    messageRecordId: input.messageRecordId,
-    entryKey: input.entryKey,
+    schemaVersion: 2,
+    kind: 'task',
+    taskRecordId: input.taskRecordId,
     checksum: input.checksum,
+    buildMd,
+    buildPdf,
   });
 }
 
@@ -60,12 +55,12 @@ export function parseBearerToken(value: string | null): string | undefined {
   return match[1];
 }
 
-export function buildN8nPublishEvent(
-  trigger: AnyWorkflowPublishTrigger,
+export function buildN8nTaskEnrichEvent(
+  trigger: AnyWorkflowTaskPublishTrigger,
   ownerId: string,
-): N8nPublishEvent {
+): N8nTaskEnrichEvent {
   const eventId = createHash('sha256')
-    .update(`${ownerId}\u0000${trigger.messageRecordId}\u0000${trigger.checksum}`)
+    .update(`${ownerId}\u0000${trigger.taskRecordId}\u0000${trigger.checksum}`)
     .digest('hex');
   return Object.freeze({
     ...trigger,

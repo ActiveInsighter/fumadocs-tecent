@@ -8,7 +8,7 @@ import {
   parseArtifactParams,
   requireInternalKey,
   safeFilename,
-} from '../../../_shared/artifact.js';
+} from '../../../../../_shared/artifact.js';
 
 export async function onRequestGet(context) {
   if (!requireInternalKey(context.request, context.env.DOWNLOAD_GATEWAY_SECRET)) {

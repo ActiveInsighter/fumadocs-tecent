@@ -1,21 +1,25 @@
 export type DocumentFormat = 'md' | 'pdf';
 
 export interface ArtifactReference {
-  readonly documentId: string;
+  readonly taskRecordId: string;
+  readonly messageRecordId: string;
   readonly version: number;
   readonly format: DocumentFormat;
 }
 
-const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const RECORD_ID_PATTERN = /^[a-z0-9]{15}$/u;
 const MAX_VERSION = 999_999_999;
 
 export function parseArtifactReference(value: unknown): ArtifactReference {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid document reference.');
+    throw new Error('Invalid artifact reference.');
   }
 
   const input = value as Record<string, unknown>;
-  const documentId = typeof input.documentId === 'string' ? input.documentId.trim() : '';
+  const taskRecordId =
+    typeof input.taskRecordId === 'string' ? input.taskRecordId.trim() : '';
+  const messageRecordId =
+    typeof input.messageRecordId === 'string' ? input.messageRecordId.trim() : '';
   const version =
     typeof input.version === 'number' && Number.isSafeInteger(input.version)
       ? input.version
@@ -23,24 +27,26 @@ export function parseArtifactReference(value: unknown): ArtifactReference {
   const format = input.format;
 
   if (
-    !DOCUMENT_ID_PATTERN.test(documentId) ||
+    !RECORD_ID_PATTERN.test(taskRecordId) ||
+    !RECORD_ID_PATTERN.test(messageRecordId) ||
     !Number.isInteger(version) ||
     version < 1 ||
     version > MAX_VERSION ||
     (format !== 'md' && format !== 'pdf')
   ) {
-    throw new Error('Invalid document reference.');
+    throw new Error('Invalid artifact reference.');
   }
 
   return Object.freeze({
-    documentId,
+    taskRecordId,
+    messageRecordId,
     version,
     format,
   });
 }
 
 export function artifactKey(reference: ArtifactReference): string {
-  return `documents/${reference.documentId}/v${reference.version}/document.${reference.format}`;
+  return `documents/tasks/${reference.taskRecordId}/v${reference.version}/messages/${reference.messageRecordId}/document.${reference.format}`;
 }
 
 export function contentTypeForFormat(format: DocumentFormat): string {
@@ -60,13 +66,13 @@ export function buildDownloadGatewayUrl(
   }
 
   const basePath = url.pathname.replace(/\/+$/u, '');
-  url.pathname = `${basePath}/${encodeURIComponent(reference.documentId)}/${reference.version}/${reference.format}`;
+  url.pathname = `${basePath}/tasks/${reference.taskRecordId}/${reference.version}/${reference.messageRecordId}/${reference.format}`;
   return url.toString();
 }
 
 export function isLoopbackHost(hostname: string, protocol: string): boolean {
   return (
-    protocol === 'http:' &&
+    protocol === 'http' &&
     (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]')
   );
 }

@@ -39,9 +39,10 @@ export default async function Page({ params }: PageParameters) {
           markdownUrl={markdownUrl}
           githubUrl={`https://github.com/ActiveInsighter/fumadocs-vercel/blob/main/content/docs/${page.path}`}
         />
-        {page.data.documentId && page.data.documentVersion ? (
+        {page.data.taskRecordId && page.data.messageRecordId && page.data.documentVersion ? (
           <DocumentDownloadMenu
-            documentId={page.data.documentId}
+            taskRecordId={page.data.taskRecordId}
+            messageRecordId={page.data.messageRecordId}
             version={page.data.documentVersion}
           />
         ) : null}

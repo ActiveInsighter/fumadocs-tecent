@@ -2,15 +2,18 @@ import { timingSafeEqual } from 'node:crypto';
 
 export const ARTIFACT_STORE_NAME = 'document-artifacts';
 
-const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const RECORD_ID_PATTERN = /^[a-z0-9]{15}$/u;
 const MAX_VERSION = 999_999_999;
 
 export function parseArtifactParams(value) {
-  const documentId = typeof value?.documentId === 'string' ? value.documentId.trim() : '';
+  const taskRecordId = typeof value?.taskRecordId === 'string' ? value.taskRecordId.trim() : '';
+  const messageRecordId =
+    typeof value?.messageRecordId === 'string' ? value.messageRecordId.trim() : '';
   const version = Number(value?.version);
   const format = value?.format;
   if (
-    !DOCUMENT_ID_PATTERN.test(documentId) ||
+    !RECORD_ID_PATTERN.test(taskRecordId) ||
+    !RECORD_ID_PATTERN.test(messageRecordId) ||
     !Number.isSafeInteger(version) ||
     version < 1 ||
     version > MAX_VERSION ||
@@ -18,11 +21,11 @@ export function parseArtifactParams(value) {
   ) {
     throw new Error('Invalid artifact reference.');
   }
-  return { documentId, version, format };
+  return { taskRecordId, messageRecordId, version, format };
 }
 
-export function artifactKey({ documentId, version, format }) {
-  return `documents/${documentId}/v${version}/document.${format}`;
+export function artifactKey({ taskRecordId, messageRecordId, version, format }) {
+  return `documents/tasks/${taskRecordId}/v${version}/messages/${messageRecordId}/document.${format}`;
 }
 
 export function artifactContentType(format) {
@@ -40,7 +43,7 @@ export function requireInternalKey(request, expected) {
 
 export function safeFilename(reference) {
   const extension = reference.format === 'pdf' ? 'pdf' : 'md';
-  return `document-${reference.documentId}-v${reference.version}.${extension}`;
+  return `document-${reference.messageRecordId}-v${reference.version}.${extension}`;
 }
 
 export function jsonError(status, code, message) {

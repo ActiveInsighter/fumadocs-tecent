@@ -1,0 +1,1268 @@
+{
+  "id": "task-metadata-enrichment-v1",
+  "name": "AnyWorkflow Task Metadata Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "anyworkflow-task-enrich",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "task-metadata-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "anyworkflow-task-enrich-v1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst input = $json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\nconst headers = input.headers && typeof input.headers === 'object' ? input.headers : {};\nconst receivedSecret = headers['x-internal-key'] || headers['X-Internal-Key'];\nconst expectedSecret = $env.N8N_DOCUMENT_PUBLISH_SECRET;\nif (typeof expectedSecret !== 'string' || expectedSecret.length < 16 || receivedSecret !== expectedSecret) {\n  throw new Error('Task metadata webhook authentication failed.');\n}\nif (\n  body.schemaVersion !== 2 ||\n  body.kind !== 'task' ||\n  typeof body.eventId !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.eventId) ||\n  typeof body.ownerId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.ownerId) ||\n  typeof body.taskRecordId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.taskRecordId) ||\n  typeof body.checksum !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.checksum)\n) {\n  throw new Error('Task metadata webhook payload is invalid.');\n}\nreturn {\n  json: {\n    eventId: body.eventId,\n    ownerId: body.ownerId,\n    taskRecordId: body.taskRecordId,\n    checksum: body.checksum,\n    buildMd: body.buildMd === undefined ? true : body.buildMd === true,\n    buildPdf: body.buildPdf === undefined ? true : body.buildPdf === true,\n    source: 'anyworkflow',\n  },\n};"
+      },
+      "id": "task-metadata-2",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records/' + $json.taskRecordId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-3",
+      "name": "Get PocketBase Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Validate Event').item.json;\nconst task = $json;\nif (task.id !== base.taskRecordId || task.owner !== base.ownerId) {\n  throw new Error('PocketBase returned an invalid or cross-owner task.');\n}\nif (task.status !== 'succeeded') {\n  throw new Error('Task metadata enrichment requires a completed task (status=succeeded).');\n}\nreturn {\n  json: {\n    ...base,\n    task,\n    metadataReady: task.metadataStatus === 'ready',\n  },\n};"
+      },
+      "id": "task-metadata-4",
+      "name": "Merge Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records?perPage=1&sort=-version&filter=' + encodeURIComponent('task = \"' + $json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-5",
+      "name": "Get Latest Publish Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Merge Task').item.json;\nconst result = $json;\nconst jobs = Array.isArray(result.items) ? result.items : [];\nif (jobs.length > 1) throw new Error('PocketBase returned duplicate publish job versions.');\nconst latest = jobs[0] || null;\nconst latestStatus = typeof latest?.status === 'string' ? latest.status : '';\nconst duplicate = Boolean(\n  latest &&\n  latestStatus === 'published' &&\n  latest.sourceChecksum === base.checksum\n);\nconst inProgress = Boolean(\n  latest &&\n  ['queued', 'snapshotting', 'building', 'uploading', 'committing'].includes(latestStatus)\n);\nreturn {\n  json: {\n    ...base,\n    latestPublishJob: latest || null,\n    duplicate,\n    inProgress,\n    nextVersion: Math.max(0, Number(latest?.version) || 0) + 1,\n  },\n};"
+      },
+      "id": "task-metadata-6",
+      "name": "Evaluate Job State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-metadata-condition-7",
+              "leftValue": "={{ $json.duplicate || $json.inProgress }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-metadata-7",
+      "name": "Is Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { accepted: true, duplicate: Boolean($json.duplicate), inProgress: Boolean($json.inProgress), eventId: $json.eventId, taskRecordId: $json.taskRecordId } };"
+      },
+      "id": "task-metadata-8",
+      "name": "Duplicate Ignored",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-metadata-condition-9",
+              "leftValue": "={{ $json.metadataReady }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-metadata-9",
+      "name": "Needs Enrichment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records/' + $json.taskRecordId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ metadataStatus: 'processing', metadataError: '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-10",
+      "name": "Lock Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_events/records?perPage=500&sort=eventIndex&filter=' + encodeURIComponent('task = \"' + $('Evaluate Job State').first().json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-11",
+      "name": "Get Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_acts/records?perPage=500&sort=actIndex&filter=' + encodeURIComponent('event.task = \"' + $('Evaluate Job State').first().json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-12",
+      "name": "Get Acts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_messages/records?perPage=500&filter=' + encodeURIComponent('act.event.task = \"' + $('Evaluate Job State').first().json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-13",
+      "name": "Get Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Evaluate Job State').first().json;\nconst eventsResp = $('Get Events').first().json;\nconst actsResp = $('Get Acts').first().json;\nconst messagesResp = $('Get Messages').first().json;\nconst events = Array.isArray(eventsResp.items) ? eventsResp.items : [];\nconst acts = Array.isArray(actsResp.items) ? actsResp.items : [];\nconst messages = Array.isArray(messagesResp.items) ? messagesResp.items : [];\nif (\n  (eventsResp.totalItems || 0) > 500 ||\n  (actsResp.totalItems || 0) > 500 ||\n  (messagesResp.totalItems || 0) > 500\n) {\n  throw new Error('The task exceeds the 500-per-level publish batch limit.');\n}\nconst contentMessages = messages.filter(\n  (message) => typeof message.assistantMarkdown === 'string' && message.assistantMarkdown.trim().length > 0,\n);\nif (contentMessages.length === 0) {\n  throw new Error('The task has no messages with assistant content.');\n}\nconst messagesByAct = new Map();\nfor (const message of contentMessages) {\n  const list = messagesByAct.get(message.act) || [];\n  list.push(message);\n  messagesByAct.set(message.act, list);\n}\nfor (const list of messagesByAct.values()) {\n  list.sort((a, b) => (Number(a.nodeIndex) || 0) - (Number(b.nodeIndex) || 0) || a.id.localeCompare(b.id));\n}\nconst contentActIds = new Set(messagesByAct.keys());\nconst actsByEvent = new Map();\nfor (const act of acts) {\n  if (!contentActIds.has(act.id)) continue;\n  const list = actsByEvent.get(act.event) || [];\n  list.push(act);\n  actsByEvent.set(act.event, list);\n}\nfor (const list of actsByEvent.values()) {\n  list.sort((a, b) => (Number(a.actIndex) || 0) - (Number(b.actIndex) || 0) || a.id.localeCompare(b.id));\n}\nconst contentEventIds = new Set(actsByEvent.keys());\nconst orderedEvents = events\n  .filter((event) => contentEventIds.has(event.id))\n  .sort((a, b) => (Number(a.eventIndex) || 0) - (Number(b.eventIndex) || 0) || a.id.localeCompare(b.id));\nconst tree = {\n  task: base.task,\n  events: orderedEvents.map((event) => ({\n    event,\n    acts: (actsByEvent.get(event.id) || []).map((act) => ({\n      act,\n      messages: messagesByAct.get(act.id) || [],\n    })),\n  })),\n};\nreturn {\n  json: {\n    ...base,\n    tree,\n    eventCount: orderedEvents.length,\n    actCount: actsByEvent.size,\n    messageCount: contentMessages.length,\n  },\n};"
+      },
+      "id": "task-metadata-14",
+      "name": "Build Tree",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Tree').first().json;\nconst system = 'You normalize an AI answer into document metadata. Return only JSON with title, slug, summary, and tags. title is a concise human title in the original language; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 300 Chinese characters; tags is an array of at most 8 short strings. Do not invent technical claims.';\nconst truncate = (value, max) => (value.length > max ? value.slice(0, max) : value);\nconst items = [];\nfor (const eventNode of base.tree.events) {\n  for (const actNode of eventNode.acts) {\n    for (const message of actNode.messages) {\n      const heading = String(message.assistantMarkdown || '').match(/^#\\s+(.+)$/mu)?.[1]?.trim();\n      items.push({\n        json: {\n          recordId: message.id,\n          existingPublishKey: typeof message.publishKey === 'string' ? message.publishKey : '',\n          fallbackTitle: (heading || 'AI Document').slice(0, 512),\n          newApiRequest: {\n            model: $env.NEW_API_MODEL,\n            temperature: 0.2,\n            stream: false,\n            response_format: { type: 'json_object' },\n            messages: [\n              { role: 'system', content: system },\n              {\n                role: 'user',\n                content: 'Original user request:\\n' + truncate(message.userMarkdown || '', 8000)\n                  + '\\n\\nAssistant answer:\\n' + truncate(message.assistantMarkdown || '', 16000),\n              },\n            ],\n          },\n        },\n      });\n    }\n  }\n}\nreturn items;"
+      },
+      "id": "task-metadata-15",
+      "name": "Prepare Message Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.NEW_API_BASE_URL || '').replace(/\\/+$/u, '') + '/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.NEW_API_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.newApiRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-metadata-16",
+      "name": "New API Message Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Prepare Message Requests').item.json;\nconst response = $json;\nconst responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nif (responseBody?.error && typeof responseBody.error.message === 'string') {\n  throw new Error('New API message metadata request failed: ' + responseBody.error.message.slice(0, 300));\n}\nlet raw = responseBody?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no message metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API message metadata was not valid JSON.');\n}\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : base.fallbackTitle;\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : 'document';\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nconst publishKey = base.existingPublishKey || (slug + '-' + base.recordId.slice(-6));\nreturn {\n  json: {\n    recordId: base.recordId,\n    eventId: base.eventId,\n    actId: base.actId,\n    metadata: { title, slug, summary, tags, publishKey },\n  },\n};"
+      },
+      "id": "task-metadata-17",
+      "name": "Parse Message Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Tree').first().json;\nconst messageMetas = $('Parse Message Metadata').all().map((item) => item.json);\nconst metaByMessage = new Map(messageMetas.map((meta) => [meta.recordId, meta]));\nconst system = 'You name one stage of an AI-assisted workflow based on its child message summaries. Return only JSON with title, slug, and summary. title is a concise human title in the original language; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 200 Chinese characters. Do not invent technical claims.';\nconst items = [];\nfor (const eventNode of base.tree.events) {\n  for (const actNode of eventNode.acts) {\n    const childLines = actNode.messages\n      .map((message) => {\n        const meta = metaByMessage.get(message.id);\n        return meta ? '- ' + meta.metadata.title + ': ' + meta.metadata.summary : '';\n      })\n      .filter(Boolean)\n      .join('\\n');\n    items.push({\n      json: {\n        recordId: actNode.act.id,\n        eventId: eventNode.event.id,\n        existingPublishKey: typeof actNode.act.publishKey === 'string' ? actNode.act.publishKey : '',\n        fallbackTitle: (actNode.act.title || 'Stage').slice(0, 512),\n        newApiRequest: {\n          model: $env.NEW_API_MODEL,\n          temperature: 0.2,\n          stream: false,\n          response_format: { type: 'json_object' },\n          messages: [\n            { role: 'system', content: system },\n            {\n              role: 'user',\n              content: 'Act raw title:\\n' + (actNode.act.title || '(none)') + '\\n\\nChild messages:\\n' + childLines,\n            },\n          ],\n        },\n      },\n    });\n  }\n}\nreturn items;"
+      },
+      "id": "task-metadata-18",
+      "name": "Aggregate Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.NEW_API_BASE_URL || '').replace(/\\/+$/u, '') + '/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.NEW_API_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.newApiRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-metadata-19",
+      "name": "New API Act Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Aggregate Messages').item.json;\nconst response = $json;\nconst responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nif (responseBody?.error && typeof responseBody.error.message === 'string') {\n  throw new Error('New API act metadata request failed: ' + responseBody.error.message.slice(0, 300));\n}\nlet raw = responseBody?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no act metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API act metadata was not valid JSON.');\n}\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : base.fallbackTitle;\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : 'document';\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nconst publishKey = base.existingPublishKey || (slug + '-' + base.recordId.slice(-6));\nreturn {\n  json: {\n    recordId: base.recordId,\n    eventId: base.eventId,\n    actId: base.actId,\n    metadata: { title, slug, summary, tags, publishKey },\n  },\n};"
+      },
+      "id": "task-metadata-20",
+      "name": "Parse Act Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Tree').first().json;\nconst actMetas = $('Parse Act Metadata').all().map((item) => item.json);\nconst metaByAct = new Map(actMetas.map((meta) => [meta.recordId, meta]));\nconst system = 'You name one phase of an AI-assisted workflow based on its stage summaries. Return only JSON with title, slug, and summary. title is a concise human title in the original language; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 200 Chinese characters. Do not invent technical claims.';\nconst items = [];\nfor (const eventNode of base.tree.events) {\n  const childLines = eventNode.acts\n    .map((actNode) => {\n      const meta = metaByAct.get(actNode.act.id);\n      return meta ? '- ' + meta.metadata.title + ': ' + meta.metadata.summary : '';\n    })\n    .filter(Boolean)\n    .join('\\n');\n  items.push({\n    json: {\n      recordId: eventNode.event.id,\n      existingPublishKey: typeof eventNode.event.publishKey === 'string' ? eventNode.event.publishKey : '',\n      fallbackTitle: (eventNode.event.title || 'Phase').slice(0, 512),\n      newApiRequest: {\n        model: $env.NEW_API_MODEL,\n        temperature: 0.2,\n        stream: false,\n        response_format: { type: 'json_object' },\n        messages: [\n          { role: 'system', content: system },\n          {\n            role: 'user',\n            content: 'Event raw title:\\n' + (eventNode.event.title || '(none)') + '\\n\\nChild acts:\\n' + childLines,\n          },\n        ],\n      },\n    },\n  });\n}\nreturn items;"
+      },
+      "id": "task-metadata-21",
+      "name": "Aggregate Acts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.NEW_API_BASE_URL || '').replace(/\\/+$/u, '') + '/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.NEW_API_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.newApiRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-metadata-22",
+      "name": "New API Event Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Aggregate Acts').item.json;\nconst response = $json;\nconst responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nif (responseBody?.error && typeof responseBody.error.message === 'string') {\n  throw new Error('New API event metadata request failed: ' + responseBody.error.message.slice(0, 300));\n}\nlet raw = responseBody?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no event metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API event metadata was not valid JSON.');\n}\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : base.fallbackTitle;\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : 'document';\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nconst publishKey = base.existingPublishKey || (slug + '-' + base.recordId.slice(-6));\nreturn {\n  json: {\n    recordId: base.recordId,\n    eventId: base.eventId,\n    actId: base.actId,\n    metadata: { title, slug, summary, tags, publishKey },\n  },\n};"
+      },
+      "id": "task-metadata-23",
+      "name": "Parse Event Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Tree').first().json;\nconst eventMetas = $('Parse Event Metadata').all().map((item) => item.json);\nconst childLines = eventMetas\n  .map((meta) => '- ' + meta.metadata.title + ': ' + meta.metadata.summary)\n  .join('\\n');\nconst system = 'You name an AI-assisted workflow task based on its phase summaries. Return only JSON with title, slug, summary, and tags. title is a concise human title in the original language; slug uses lowercase ASCII letters, numbers, and hyphens only; summary is at most 300 Chinese characters; tags is an array of at most 8 short strings. Do not invent technical claims.';\nreturn [{\n  json: {\n    recordId: base.taskRecordId,\n    existingPublishKey: typeof base.task.publishKey === 'string' ? base.task.publishKey : '',\n    fallbackTitle: (base.task.title || 'AI Task').slice(0, 512),\n    newApiRequest: {\n      model: $env.NEW_API_MODEL,\n      temperature: 0.2,\n      stream: false,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: system },\n        {\n          role: 'user',\n          content: 'Task raw title:\\n' + (base.task.title || '(none)') + '\\n\\nEvents:\\n' + childLines,\n        },\n      ],\n    },\n  },\n}];"
+      },
+      "id": "task-metadata-24",
+      "name": "Aggregate Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.NEW_API_BASE_URL || '').replace(/\\/+$/u, '') + '/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.NEW_API_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.newApiRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-metadata-25",
+      "name": "New API Task Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Aggregate Events').item.json;\nconst response = $json;\nconst responseBody = response?.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nif (responseBody?.error && typeof responseBody.error.message === 'string') {\n  throw new Error('New API task metadata request failed: ' + responseBody.error.message.slice(0, 300));\n}\nlet raw = responseBody?.choices?.[0]?.message?.content;\nif (raw && typeof raw === 'object') raw = JSON.stringify(raw);\nif (typeof raw !== 'string' || raw.trim().length === 0) throw new Error('New API returned no task metadata.');\nconst fence = String.fromCharCode(96).repeat(3);\nraw = raw.trim().replace(new RegExp('^' + fence + '(?:json)?\\\\s*', 'iu'), '').replace(new RegExp('\\\\s*' + fence + '$', 'u'), '');\nlet metadata;\ntry {\n  metadata = JSON.parse(raw);\n} catch {\n  throw new Error('New API task metadata was not valid JSON.');\n}\nconst title = typeof metadata.title === 'string' && metadata.title.trim().length > 0\n  ? metadata.title.trim().slice(0, 512)\n  : base.fallbackTitle;\nconst candidateSlug = typeof metadata.slug === 'string' ? metadata.slug.trim().toLowerCase() : '';\nconst slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidateSlug) && candidateSlug.length <= 96\n  ? candidateSlug\n  : 'document';\nconst summary = typeof metadata.summary === 'string' ? metadata.summary.trim().slice(0, 2000) : '';\nconst tags = Array.isArray(metadata.tags)\n  ? metadata.tags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8)\n  : [];\nconst publishKey = base.existingPublishKey || (slug + '-' + base.recordId.slice(-6));\nreturn {\n  json: {\n    recordId: base.recordId,\n    eventId: base.eventId,\n    actId: base.actId,\n    metadata: { title, slug, summary, tags, publishKey },\n  },\n};"
+      },
+      "id": "task-metadata-26",
+      "name": "Parse Task Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Evaluate Job State').first().json;\nconst taskMeta = $('Parse Task Metadata').first().json;\nconst messageMetas = $('Parse Message Metadata').all().map((item) => item.json);\nconst actMetas = $('Parse Act Metadata').all().map((item) => item.json);\nconst eventMetas = $('Parse Event Metadata').all().map((item) => item.json);\nconst requests = [];\nfor (const meta of messageMetas) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_messages/records/' + meta.recordId,\n    body: {\n      autoTitle: meta.metadata.title,\n      autoSlug: meta.metadata.slug,\n      autoSummary: meta.metadata.summary,\n      autoTags: meta.metadata.tags,\n      publishKey: meta.metadata.publishKey,\n    },\n  });\n}\nfor (const meta of actMetas) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_acts/records/' + meta.recordId,\n    body: {\n      autoTitle: meta.metadata.title,\n      autoSlug: meta.metadata.slug,\n      autoSummary: meta.metadata.summary,\n      publishKey: meta.metadata.publishKey,\n    },\n  });\n}\nfor (const meta of eventMetas) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_events/records/' + meta.recordId,\n    body: {\n      autoTitle: meta.metadata.title,\n      autoSlug: meta.metadata.slug,\n      autoSummary: meta.metadata.summary,\n      publishKey: meta.metadata.publishKey,\n    },\n  });\n}\nrequests.push({\n  method: 'PATCH',\n  url: '/api/collections/aw_tasks/records/' + base.taskRecordId,\n  body: {\n    autoTitle: taskMeta.metadata.title,\n    autoSlug: taskMeta.metadata.slug,\n    autoSummary: taskMeta.metadata.summary,\n    autoTags: taskMeta.metadata.tags,\n    publishKey: taskMeta.metadata.publishKey,\n    metadataStatus: 'ready',\n    metadataError: '',\n  },\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 400) {\n  chunks.push(requests.slice(index, index + 400));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+      },
+      "id": "task-metadata-27",
+      "name": "Build Metadata Writes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.batchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.batchBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-28",
+      "name": "Write Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst responses = $input.all();\nconst isEntryOk = (entry) => {\n  if (!entry || typeof entry !== 'object') return false;\n  if (entry.error) return false;\n  if (Number.isFinite(Number(entry.status))) {\n    return Number(entry.status) >= 200 && Number(entry.status) < 300;\n  }\n  if (entry.body && typeof entry.body === 'object') return !entry.body.error;\n  return typeof entry.id === 'string';\n};\nfor (const item of responses) {\n  const body = item.json;\n  const entries = Array.isArray(body) ? body : [body];\n  for (const entry of entries) {\n    if (!isEntryOk(entry)) {\n      throw new Error('PocketBase metadata batch write failed.');\n    }\n  }\n}\nconst base = $('Evaluate Job State').first().json;\nreturn {\n  json: {\n    ownerId: base.ownerId,\n    taskRecordId: base.taskRecordId,\n    checksum: base.checksum,\n    eventId: base.eventId,\n    buildMd: base.buildMd,\n    buildPdf: base.buildPdf,\n    nextVersion: base.nextVersion,\n    metadataWritten: true,\n  },\n};"
+      },
+      "id": "task-metadata-29",
+      "name": "Verify Metadata Writes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ owner: $json.ownerId, task: $json.taskRecordId, version: $json.nextVersion, buildMd: $json.buildMd, buildPdf: $json.buildPdf, sourceChecksum: $json.checksum, status: 'queued', totalDocuments: 0, completedDocuments: 0 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-metadata-30",
+      "name": "Create Publish Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6160,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Evaluate Job State').first().json;\nconst job = $json;\nif (\n  !job.id ||\n  job.owner !== base.ownerId ||\n  job.task !== base.taskRecordId ||\n  job.status !== 'queued' ||\n  Number(job.version) !== base.nextVersion\n) {\n  throw new Error('PocketBase returned an invalid publish job.');\n}\nconst bytes = new Uint8Array(32);\nif (typeof globalThis.crypto?.getRandomValues === 'function') {\n  globalThis.crypto.getRandomValues(bytes);\n} else {\n  for (let index = 0; index < bytes.length; index += 1) {\n    bytes[index] = Math.floor(Math.random() * 256);\n  }\n}\nconst publishEventId = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');\nreturn {\n  json: {\n    ownerId: base.ownerId,\n    taskRecordId: base.taskRecordId,\n    publishJobId: job.id,\n    publishJob: job,\n    publishEventId,\n    publishTriggerBody: {\n      schemaVersion: 2,\n      kind: 'taskPublish',\n      eventId: publishEventId,\n      ownerId: base.ownerId,\n      publishJobId: job.id,\n      taskRecordId: base.taskRecordId,\n    },\n  },\n};"
+      },
+      "id": "task-metadata-31",
+      "name": "Parse Publish Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6380,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.N8N_WEBHOOK_URL || $env.WEBHOOK_URL || '').replace(/\\/+$/u, '') + '/webhook/anyworkflow-task-publish' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Key",
+              "value": "={{ $env.N8N_DOCUMENT_PUBLISH_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.publishTriggerBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "task-metadata-32",
+      "name": "Trigger Task Publish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6600,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Parse Publish Job').first().json;\nreturn {\n  json: {\n    accepted: true,\n    publishJobId: base.publishJobId,\n    taskRecordId: base.taskRecordId,\n    version: base.publishJob.version,\n    triggeredAt: new Date().toISOString(),\n  },\n};"
+      },
+      "id": "task-metadata-33",
+      "name": "Publish Triggered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6820,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Event": {
+      "main": [
+        [
+          {
+            "node": "Get PocketBase Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get PocketBase Task": {
+      "main": [
+        [
+          {
+            "node": "Merge Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Task": {
+      "main": [
+        [
+          {
+            "node": "Get Latest Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Latest Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Job State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Job State": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Lock Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Metadata": {
+      "main": [
+        [
+          {
+            "node": "Get Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Events": {
+      "main": [
+        [
+          {
+            "node": "Get Acts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Acts": {
+      "main": [
+        [
+          {
+            "node": "Get Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Messages": {
+      "main": [
+        [
+          {
+            "node": "Build Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tree": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message Requests": {
+      "main": [
+        [
+          {
+            "node": "New API Message Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New API Message Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Message Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Message Metadata": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Messages": {
+      "main": [
+        [
+          {
+            "node": "New API Act Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New API Act Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Act Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Act Metadata": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Acts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Acts": {
+      "main": [
+        [
+          {
+            "node": "New API Event Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New API Event Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Event Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Event Metadata": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Events": {
+      "main": [
+        [
+          {
+            "node": "New API Task Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New API Task Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Task Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Task Metadata": {
+      "main": [
+        [
+          {
+            "node": "Build Metadata Writes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Metadata Writes": {
+      "main": [
+        [
+          {
+            "node": "Write Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Metadata": {
+      "main": [
+        [
+          {
+            "node": "Verify Metadata Writes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Metadata Writes": {
+      "main": [
+        [
+          {
+            "node": "Create Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Parse Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Trigger Task Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Task Publish": {
+      "main": [
+        [
+          {
+            "node": "Publish Triggered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "task-publish-error-v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 1800
+  },
+  "versionId": "task-metadata-workflow-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -116,7 +116,7 @@ jobs:
               ProjectId: $project_id,
               EnvVars: [
                 {Key: "POCKETBASE_URL", Value: "https://pb.any1.tech"},
-                {Key: "N8N_DOCUMENT_PUBLISH_URL", Value: "https://n8n.any1.tech/webhook/anyworkflow-document-publish"},
+                {Key: "N8N_DOCUMENT_PUBLISH_URL", Value: "https://n8n.any1.tech/webhook/anyworkflow-task-enrich"},
                 {Key: "N8N_DOCUMENT_PUBLISH_SECRET", Value: $n8n_secret},
                 {Key: "FUMADOCS_BLOB_UPLOAD_KEY", Value: $upload_key},
                 {Key: "BLOB_SIGNER_URL", Value: "https://fumadocs-upload.any1.tech/api/blob/upload-url"},

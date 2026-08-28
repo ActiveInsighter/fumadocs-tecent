@@ -1,6 +1,6 @@
 import {
-  buildN8nPublishEvent,
-  parseAnyWorkflowPublishTrigger,
+  buildN8nTaskEnrichEvent,
+  parseAnyWorkflowTaskPublishTrigger,
   parseBearerToken,
   parsePocketBaseOwner,
 } from '@/lib/document-publishing/ingest';
@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let trigger;
   try {
-    trigger = parseAnyWorkflowPublishTrigger(await readJsonBody(request));
+    trigger = parseAnyWorkflowTaskPublishTrigger(await readJsonBody(request));
   } catch (error) {
     if (error instanceof InvalidJsonBodyError) {
       return jsonError(413, 'REQUEST_TOO_LARGE', 'The publish request is invalid or too large.');
@@ -62,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const ownerId = parsePocketBaseOwner(await pocketBaseResponse.json());
-    const event = buildN8nPublishEvent(trigger, ownerId);
+    const event = buildN8nTaskEnrichEvent(trigger, ownerId);
     const n8nResponse = await fetchWithTimeout(required.n8nWebhookUrl, {
       method: 'POST',
       headers: {

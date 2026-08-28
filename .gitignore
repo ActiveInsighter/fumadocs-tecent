@@ -29,6 +29,9 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# deployment staging
+/.deploy-tmp
+
 # system files
 .DS_Store
 Thumbs.db

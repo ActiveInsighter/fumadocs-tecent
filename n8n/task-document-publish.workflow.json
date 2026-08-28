@@ -1,0 +1,3114 @@
+{
+  "id": "task-document-publish-v1",
+  "name": "AnyWorkflow Task Document Publish",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "anyworkflow-task-publish",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "task-publish-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "anyworkflow-task-publish-v1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst input = $json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\nconst headers = input.headers && typeof input.headers === 'object' ? input.headers : {};\nconst receivedSecret = headers['x-internal-key'] || headers['X-Internal-Key'];\nconst expectedSecret = $env.N8N_DOCUMENT_PUBLISH_SECRET;\nif (typeof expectedSecret !== 'string' || expectedSecret.length < 16 || receivedSecret !== expectedSecret) {\n  throw new Error('Task publish webhook authentication failed.');\n}\nif (\n  body.schemaVersion !== 2 ||\n  body.kind !== 'taskPublish' ||\n  typeof body.eventId !== 'string' ||\n  !/^[a-f0-9]{64}$/.test(body.eventId) ||\n  typeof body.ownerId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.ownerId) ||\n  typeof body.publishJobId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.publishJobId) ||\n  typeof body.taskRecordId !== 'string' ||\n  !/^[a-z0-9]{15}$/.test(body.taskRecordId)\n) {\n  throw new Error('Task publish webhook payload is invalid.');\n}\nreturn {\n  json: {\n    eventId: body.eventId,\n    ownerId: body.ownerId,\n    publishJobId: body.publishJobId,\n    taskRecordId: body.taskRecordId,\n    source: 'anyworkflow',\n  },\n};"
+      },
+      "id": "task-publish-2",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + $json.publishJobId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-3",
+      "name": "Get Publish Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Validate Event').item.json;\nconst job = $json;\nif (\n  !job.id ||\n  job.id !== base.publishJobId ||\n  job.owner !== base.ownerId ||\n  job.task !== base.taskRecordId\n) {\n  throw new Error('PocketBase returned an invalid or cross-owner publish job.');\n}\nconst version = Number(job.version);\nif (!Number.isInteger(version) || version < 1) {\n  throw new Error('The publish job has an invalid version.');\n}\nconst status = typeof job.status === 'string' ? job.status : '';\nconst rerunnable = status === 'queued' || status === 'failed';\nreturn {\n  json: {\n    ...base,\n    publishJobId: job.id,\n    version,\n    buildMd: job.buildMd === true,\n    buildPdf: job.buildPdf === true,\n    sourceChecksum: typeof job.sourceChecksum === 'string' ? job.sourceChecksum : '',\n    jobStatus: status,\n    exit: !rerunnable,\n    exitReason: rerunnable ? '' : status,\n  },\n};"
+      },
+      "id": "task-publish-4",
+      "name": "Merge Publish Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-5",
+              "leftValue": "={{ $json.exit }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-5",
+      "name": "Is Job Finished",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nreturn {\n  json: {\n    accepted: true,\n    skipped: true,\n    reason: $json.exitReason || 'finished',\n    publishJobId: $json.publishJobId,\n    taskRecordId: $json.taskRecordId,\n    version: $json.version,\n  },\n};"
+      },
+      "id": "task-publish-6",
+      "name": "Publish Already Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_tasks/records/' + $('Merge Publish Job').item.json.taskRecordId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-7",
+      "name": "Get Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Merge Publish Job').item.json;\nconst task = $json;\nif (task.id !== base.taskRecordId || task.owner !== base.ownerId) {\n  throw new Error('PocketBase returned an invalid or cross-owner task.');\n}\nif (task.status !== 'succeeded') {\n  throw new Error('Task publishing requires a completed task (status=succeeded).');\n}\nif (task.metadataStatus !== 'ready') {\n  throw new Error('Task publishing requires enriched metadata (metadataStatus=ready).');\n}\nconst publishKey = typeof task.publishKey === 'string' ? task.publishKey : '';\nif (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(publishKey)) {\n  throw new Error('The task has no valid publish key.');\n}\nreturn {\n  json: {\n    ...base,\n    task,\n  },\n};"
+      },
+      "id": "task-publish-8",
+      "name": "Merge Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + $json.publishJobId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'snapshotting', startedAt: new Date().toISOString(), lastError: '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-9",
+      "name": "Lock Publish Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_events/records?perPage=500&sort=eventIndex&filter=' + encodeURIComponent('task = \"' + $('Merge Task').item.json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-10",
+      "name": "Get Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_acts/records?perPage=500&sort=actIndex&filter=' + encodeURIComponent('event.task = \"' + $('Merge Task').item.json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-11",
+      "name": "Get Acts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_messages/records?perPage=500&filter=' + encodeURIComponent('act.event.task = \"' + $('Merge Task').item.json.taskRecordId + '\"') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-12",
+      "name": "Get Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Task').first().json;\nconst eventsResp = $('Get Events').first().json;\nconst actsResp = $('Get Acts').first().json;\nconst messagesResp = $('Get Messages').first().json;\nconst events = Array.isArray(eventsResp.items) ? eventsResp.items : [];\nconst acts = Array.isArray(actsResp.items) ? actsResp.items : [];\nconst messages = Array.isArray(messagesResp.items) ? messagesResp.items : [];\nconst documentIds = [\n  base.taskRecordId,\n  ...events.map((event) => event.id),\n  ...acts.map((act) => act.id),\n  ...messages.map((message) => message.id),\n].map((recordId) => recordId + '-v' + base.version);\nconst chunks = [];\nfor (let index = 0; index < documentIds.length; index += 40) {\n  chunks.push(documentIds.slice(index, index + 40));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    lookupUrl: $env.POCKETBASE_URL + '/api/collections/aw_documents/records?perPage=500&filter='\n      + encodeURIComponent(chunk.map((documentId) => 'documentId = \"' + documentId + '\"').join(' || ')),\n  },\n}));"
+      },
+      "id": "task-publish-13",
+      "name": "Prepare Document Lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.lookupUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-14",
+      "name": "Get Existing Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Task').first().json;\nconst existing = [];\nfor (const item of $input.all()) {\n  const records = Array.isArray(item.json.items) ? item.json.items : [];\n  for (const record of records) {\n    if (record.id && record.documentId) existing.push(record);\n  }\n}\nreturn {\n  json: {\n    ...base,\n    existingDocuments: existing,\n  },\n};"
+      },
+      "id": "task-publish-15",
+      "name": "Merge Document Lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Task').first().json;\nconst eventsResp = $('Get Events').first().json;\nconst actsResp = $('Get Acts').first().json;\nconst messagesResp = $('Get Messages').first().json;\nconst events = Array.isArray(eventsResp.items) ? eventsResp.items : [];\nconst acts = Array.isArray(actsResp.items) ? actsResp.items : [];\nconst messages = Array.isArray(messagesResp.items) ? messagesResp.items : [];\nconst PUBLISH_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;\nconst MAX_DOCUMENTS = 500;\nconst MAX_MARKDOWN_BYTES = 1048576;\n\nfunction sha256Hex(input) {\n  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;\n  const K = [\n    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,\n    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,\n    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,\n    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,\n    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,\n    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,\n    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,\n    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,\n  ];\n  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const rotr = (value, bits) => ((value >>> bits) | (value << (32 - bits))) >>> 0;\n  const l = bytes.length;\n  const padded = new Uint8Array((((l + 9) >> 6) + 1) << 6);\n  padded.set(bytes);\n  padded[l] = 0x80;\n  const view = new DataView(padded.buffer);\n  view.setUint32(padded.length - 8, Math.floor((l * 8) / 4294967296));\n  view.setUint32(padded.length - 4, (l * 8) >>> 0);\n  const w = new Uint32Array(64);\n  for (let offset = 0; offset < padded.length; offset += 64) {\n    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);\n    for (let i = 16; i < 64; i += 1) {\n      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);\n      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = H[0];\n    let b = H[1];\n    let c = H[2];\n    let d = H[3];\n    let e = H[4];\n    let f = H[5];\n    let g = H[6];\n    let h = H[7];\n    for (let i = 0; i < 64; i += 1) {\n      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;\n      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      h = g;\n      g = f;\n      f = e;\n      e = (d + t1) >>> 0;\n      d = c;\n      c = b;\n      b = a;\n      a = (t1 + t2) >>> 0;\n    }\n    H[0] = (H[0] + a) >>> 0;\n    H[1] = (H[1] + b) >>> 0;\n    H[2] = (H[2] + c) >>> 0;\n    H[3] = (H[3] + d) >>> 0;\n    H[4] = (H[4] + e) >>> 0;\n    H[5] = (H[5] + f) >>> 0;\n    H[6] = (H[6] + g) >>> 0;\n    H[7] = (H[7] + h) >>> 0;\n  }\n  let hex = '';\n  for (const part of H) hex += part.toString(16).padStart(8, '0');\n  return hex;\n}\nfunction cleanMarkdown(input, title) {\n  const lines = input.replace(/^\\uFEFF/u, '').replace(/\\r\\n?/gu, '\\n').split('\\n');\n  let fenced = false;\n  const cleaned = lines.map((line) => {\n    if (/^\\s*~~~/.test(line) || line.trimStart().startsWith(String.fromCharCode(96).repeat(3))) {\n      fenced = !fenced;\n      return line;\n    }\n    if (fenced) return line;\n    if (/^\\s*(?:import|export)\\s+/u.test(line)) return '';\n    return line\n      .replace(/<\\/?(?:script|iframe|object|embed|style|link|meta)\\b[^>]*>/giu, '')\n      .replace(/<\\/?[A-Za-z][^>]*>/gu, (tag) => tag.replace('<', '&lt;').replace('>', '&gt;'))\n      .replace(/\\]\\(\\s*javascript:[^)]+\\)/giu, '](#)');\n  }).join('\\n').replace(/^---\\s*\\n[\\s\\S]*?\\n---\\s*\\n/u, '').trim();\n  const withTitle = /^#\\s+/mu.test(cleaned) ? cleaned : '# ' + title + '\\n\\n' + cleaned;\n  if (new TextEncoder().encode(withTitle).byteLength > MAX_MARKDOWN_BYTES) {\n    throw new Error('A cleaned Markdown document exceeds the 1 MiB publish limit.');\n  }\n  return withTitle + '\\n';\n}\nfunction displayTitle(record, fallback) {\n  if (typeof record.manualTitle === 'string' && record.manualTitle.trim().length > 0) {\n    return record.manualTitle.trim().slice(0, 512);\n  }\n  if (typeof record.autoTitle === 'string' && record.autoTitle.trim().length > 0) {\n    return record.autoTitle.trim().slice(0, 512);\n  }\n  return fallback.slice(0, 512);\n}\nfunction displaySummary(record) {\n  if (typeof record.manualSummary === 'string' && record.manualSummary.trim().length > 0) {\n    return record.manualSummary.trim().slice(0, 2000);\n  }\n  return typeof record.autoSummary === 'string' ? record.autoSummary.trim().slice(0, 2000) : '';\n}\nfunction displayTags(record) {\n  if (!Array.isArray(record.autoTags)) return [];\n  return record.autoTags\n    .filter((tag) => typeof tag === 'string')\n    .map((tag) => tag.trim().slice(0, 64))\n    .filter(Boolean)\n    .slice(0, 8);\n}\nfunction requirePublishKey(record, label) {\n  const publishKey = typeof record.publishKey === 'string' ? record.publishKey : '';\n  if (!PUBLISH_KEY_PATTERN.test(publishKey)) {\n    throw new Error('The ' + label + ' has no valid publish key.');\n  }\n  return publishKey;\n}\nfunction buildIndexMdx(title, summary, childHeading, childLines) {\n  const frontmatter = '---\\n'\n    + 'title: ' + JSON.stringify(title) + '\\n'\n    + 'description: ' + JSON.stringify(summary || title) + '\\n'\n    + '---\\n\\n';\n  let body = '# ' + title + '\\n\\n';\n  if (summary) body += summary + '\\n\\n';\n  if (childLines.length > 0) {\n    body += '## ' + childHeading + '\\n\\n' + childLines.map((line) => '- ' + line).join('\\n') + '\\n';\n  }\n  return frontmatter + body;\n}\nfunction metaJson(value) {\n  return JSON.stringify(value, null, 2) + '\\n';\n}\nconst contentMessages = messages.filter(\n  (message) => typeof message.assistantMarkdown === 'string' && message.assistantMarkdown.trim().length > 0,\n);\nif (contentMessages.length === 0) {\n  throw new Error('The task has no messages with assistant content.');\n}\nconst messagesByAct = new Map();\nfor (const message of contentMessages) {\n  const list = messagesByAct.get(message.act) || [];\n  list.push(message);\n  messagesByAct.set(message.act, list);\n}\nfor (const list of messagesByAct.values()) {\n  list.sort((a, b) => (Number(a.nodeIndex) || 0) - (Number(b.nodeIndex) || 0) || a.id.localeCompare(b.id));\n}\nconst contentActIds = new Set(messagesByAct.keys());\nconst actsByEvent = new Map();\nfor (const act of acts) {\n  if (!contentActIds.has(act.id)) continue;\n  const list = actsByEvent.get(act.event) || [];\n  list.push(act);\n  actsByEvent.set(act.event, list);\n}\nfor (const list of actsByEvent.values()) {\n  list.sort((a, b) => (Number(a.actIndex) || 0) - (Number(b.actIndex) || 0) || a.id.localeCompare(b.id));\n}\nconst contentEventIds = new Set(actsByEvent.keys());\nconst orderedEvents = events\n  .filter((event) => contentEventIds.has(event.id))\n  .sort((a, b) => (Number(a.eventIndex) || 0) - (Number(b.eventIndex) || 0) || a.id.localeCompare(b.id));\nif (orderedEvents.length + actsByEvent.size + contentMessages.length + 1 > MAX_DOCUMENTS) {\n  throw new Error('The task exceeds the 500-document publish limit.');\n}\nconst documents = [];\nconst files = [];\nconst addFile = (path, content) => {\n  if (path.length > 1024) throw new Error('A generated Fumadocs path exceeds the limit.');\n  files.push({ path, content });\n};\nconst taskPublishKey = requirePublishKey(base.task, 'task');\nconst taskTitle = displayTitle(base.task, base.task.title || 'AI Task');\nconst taskSummary = displaySummary(base.task);\nconst taskTags = displayTags(base.task);\nconst taskPath = 'content/docs/tasks/' + taskPublishKey;\nconst eventSummaries = [];\ndocuments.push({\n  kind: 'task',\n  recordId: base.task.id,\n  sourceMessageRecordId: '',\n  eventRecordId: '',\n  actRecordId: '',\n  title: taskTitle,\n  summary: taskSummary,\n  tags: taskTags,\n  publishKey: taskPublishKey,\n  fumadocsPath: taskPath + '/index.mdx',\n  markdown: '',\n});\nconst eventKeys = [];\nfor (const event of orderedEvents) {\n  const eventKey = requirePublishKey(event, 'event');\n  eventKeys.push(eventKey);\n  const actNodes = actsByEvent.get(event.id) || [];\n  const eventTitle = displayTitle(event, event.title || 'Phase');\n  const eventSummary = displaySummary(event);\n  const eventPath = taskPath + '/events/' + eventKey;\n  const actTitles = actNodes.map((act) => displayTitle(act, act.title || 'Stage'));\n  const actKeys = [];\n  for (const act of actNodes) {\n    const actKey = requirePublishKey(act, 'act');\n    actKeys.push(actKey);\n    const actTitle = displayTitle(act, act.title || 'Stage');\n    const actSummary = displaySummary(act);\n    const actPath = eventPath + '/acts/' + actKey;\n    const actMessages = messagesByAct.get(act.id) || [];\n    const messageTitles = actMessages.map((message) => {\n      const heading = String(message.assistantMarkdown || '').match(/^#\\s+(.+)$/mu)?.[1]?.trim();\n      return displayTitle(message, heading || 'AI Document');\n    });\n    const messageKeys = [];\n    for (const message of actMessages) {\n      const messageKey = requirePublishKey(message, 'message');\n      messageKeys.push(messageKey);\n      const messageTitle = displayTitle(message, String(message.assistantMarkdown || '').match(/^#\\s+(.+)$/mu)?.[1]?.trim() || 'AI Document');\n      const messageSummary = displaySummary(message);\n      const messageTags = displayTags(message);\n      const markdown = cleanMarkdown(message.assistantMarkdown, messageTitle);\n      const messagePath = actPath + '/messages/' + messageKey + '.mdx';\n      addFile(messagePath, '---\\n'\n        + 'title: ' + JSON.stringify(messageTitle) + '\\n'\n        + 'description: ' + JSON.stringify(messageSummary || messageTitle) + '\\n'\n        + '---\\n\\n' + markdown);\n      documents.push({\n        kind: 'message',\n        recordId: message.id,\n        sourceMessageRecordId: message.id,\n        eventRecordId: event.id,\n        actRecordId: act.id,\n        title: messageTitle,\n        summary: messageSummary,\n        tags: messageTags,\n        publishKey: messageKey,\n        fumadocsPath: messagePath,\n        markdown,\n      });\n    }\n    addFile(actPath + '/index.mdx', buildIndexMdx(actTitle, actSummary, 'Messages', messageTitles));\n    addFile(actPath + '/meta.json', metaJson({ title: actTitle, pages: ['index', 'messages'] }));\n    addFile(actPath + '/messages/meta.json', metaJson({ pages: messageKeys }));\n    documents.push({\n      kind: 'act',\n      recordId: act.id,\n      sourceMessageRecordId: '',\n      eventRecordId: event.id,\n      actRecordId: '',\n      title: actTitle,\n      summary: actSummary,\n      tags: [],\n      publishKey: actKey,\n      fumadocsPath: actPath + '/index.mdx',\n      markdown: '',\n    });\n  }\n  addFile(eventPath + '/index.mdx', buildIndexMdx(eventTitle, eventSummary, 'Acts', actTitles));\n  addFile(eventPath + '/meta.json', metaJson({ title: eventTitle, pages: ['index', 'acts'] }));\n  addFile(eventPath + '/acts/meta.json', metaJson({ pages: actKeys }));\n  documents.push({\n    kind: 'event',\n    recordId: event.id,\n    sourceMessageRecordId: '',\n    eventRecordId: '',\n    actRecordId: '',\n    title: eventTitle,\n    summary: eventSummary,\n    tags: [],\n    publishKey: eventKey,\n    fumadocsPath: eventPath + '/index.mdx',\n    markdown: '',\n  });\n  eventSummaries.push({ key: eventKey, title: eventTitle });\n}\naddFile(taskPath + '/index.mdx', buildIndexMdx(taskTitle, taskSummary, 'Events', eventSummaries.map((entry) => entry.title)));\naddFile(taskPath + '/meta.json', metaJson({ title: taskTitle, pages: ['index', 'events'] }));\naddFile(taskPath + '/events/meta.json', metaJson({ pages: eventKeys }));\nreturn {\n  json: {\n    eventId: base.eventId,\n    ownerId: base.ownerId,\n    taskRecordId: base.taskRecordId,\n    publishJobId: base.publishJobId,\n    version: base.version,\n    buildMd: base.buildMd,\n    buildPdf: base.buildPdf,\n    sourceChecksum: base.sourceChecksum,\n    taskPublishKey,\n    taskTitle,\n    documents: documents.map((document) => ({\n      ...document,\n      documentId: document.recordId + '-v' + base.version,\n      version: base.version,\n      sourceChecksum: sha256Hex(\n        files.find((file) => file.path === document.fumadocsPath)?.content || '',\n      ),\n    })),\n    files,\n    eventCount: orderedEvents.length,\n    actCount: actsByEvent.size,\n    messageCount: contentMessages.length,\n    documentCount: documents.length,\n  },\n};"
+      },
+      "id": "task-publish-16",
+      "name": "Build Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Snapshot').first().json;\nconst existingByDocumentId = new Map();\nfor (const record of $('Merge Document Lookups').first().json.existingDocuments || []) {\n  existingByDocumentId.set(record.documentId, record);\n}\nconst requests = base.documents.map((document) => {\n  const body = {\n    kind: document.kind,\n    publishJob: base.publishJobId,\n    task: base.taskRecordId,\n    event: document.eventRecordId || '',\n    act: document.actRecordId || '',\n    sourceMessage: document.sourceMessageRecordId || '',\n    publishKey: document.publishKey,\n    slug: document.publishKey,\n    title: document.title,\n    summary: document.summary,\n    tags: document.tags || [],\n    status: 'processing',\n    version: base.version,\n    sourceChecksum: document.sourceChecksum,\n    fumadocsPath: document.fumadocsPath,\n    lastError: '',\n  };\n  const existing = existingByDocumentId.get(document.documentId);\n  if (existing) {\n    return {\n      method: 'PATCH',\n      url: '/api/collections/aw_documents/records/' + existing.id,\n      body,\n    };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_documents/records',\n    body: { ...body, owner: base.ownerId, documentId: document.documentId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+      },
+      "id": "task-publish-17",
+      "name": "Prepare Document Writes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.batchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.batchBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-18",
+      "name": "Write Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Build Snapshot').first().json;\nconst isEntryOk = (entry) => {\n  if (!entry || typeof entry !== 'object') return false;\n  if (entry.error) return false;\n  if (Number.isFinite(Number(entry.status))) {\n    return Number(entry.status) >= 200 && Number(entry.status) < 300;\n  }\n  if (entry.body && typeof entry.body === 'object') return !entry.body.error;\n  return typeof entry.id === 'string';\n};\nconst recordIds = [];\nfor (const item of $input.all()) {\n  const body = item.json;\n  const entries = Array.isArray(body) ? body : [body];\n  for (const entry of entries) {\n    if (!isEntryOk(entry)) throw new Error('PocketBase document batch write failed.');\n    const recordId = entry?.body?.id || entry.id;\n    if (typeof recordId !== 'string' || recordId.length === 0) {\n      throw new Error('PocketBase document batch write returned no record id.');\n    }\n    recordIds.push(recordId);\n  }\n}\nif (recordIds.length !== base.documents.length) {\n  throw new Error('PocketBase document batch write count mismatch.');\n}\nreturn {\n  json: {\n    ...base,\n    documentRecords: base.documents.map((document, index) => ({\n      kind: document.kind,\n      recordId: document.recordId,\n      documentRecordId: recordIds[index],\n      sourceMessageRecordId: document.sourceMessageRecordId,\n      publishKey: document.publishKey,\n      title: document.title,\n      summary: document.summary,\n      tags: document.tags || [],\n      fumadocsPath: document.fumadocsPath,\n      markdown: document.markdown,\n    })),\n    documentCount: recordIds.length,\n  },\n};"
+      },
+      "id": "task-publish-19",
+      "name": "Verify Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + $json.publishJobId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'building', totalDocuments: $json.documentCount, completedDocuments: 0 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-20",
+      "name": "Mark Job Building",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-21",
+              "leftValue": "={{ $('Verify Documents').first().json.buildPdf }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-21",
+      "name": "Build PDF",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4180,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst messageDocuments = base.documentRecords.filter(\n  (document) => document.kind === 'message' && typeof document.markdown === 'string' && document.markdown.length > 0,\n);\nif (messageDocuments.length === 0) {\n  throw new Error('No message documents are available for PDF generation.');\n}\nif (messageDocuments.length > 200) {\n  throw new Error('The task exceeds the 200-message PDF batch limit. Disable buildPdf or split the task.');\n}\nconst supabaseUrl = typeof $env.MDTO_PDF_SUPABASE_URL === 'string'\n  ? $env.MDTO_PDF_SUPABASE_URL.trim().replace(/\\/+$/u, '')\n  : '';\nconst serviceKey = typeof $env.MDTO_PDF_SUPABASE_SERVICE_KEY === 'string'\n  ? $env.MDTO_PDF_SUPABASE_SERVICE_KEY.trim()\n  : '';\nconst userId = typeof $env.MDTO_PDF_SUPABASE_USER_ID === 'string'\n  ? $env.MDTO_PDF_SUPABASE_USER_ID.trim()\n  : '';\nconst bucket = (typeof $env.MDTO_PDF_SUPABASE_BUCKET === 'string' && $env.MDTO_PDF_SUPABASE_BUCKET.trim())\n  ? $env.MDTO_PDF_SUPABASE_BUCKET.trim()\n  : 'pdf-jobs';\nconst theme = (typeof $env.MDTO_PDF_THEME === 'string' && $env.MDTO_PDF_THEME.trim())\n  ? $env.MDTO_PDF_THEME.trim()\n  : 'chatgpt-light';\nconst supabaseUrlIsValid = /^https:\\/\\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/iu.test(supabaseUrl);\nif (\n  !supabaseUrlIsValid\n  || !serviceKey\n  || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(userId)\n  || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u.test(bucket)\n  || !new Set(['chatgpt-light', 'academic', 'github']).has(theme)\n) {\n  throw new Error('mdTOpdf Supabase integration configuration is invalid.');\n}\nconst repoBase = 'https://api.github.com/repos/ActiveInsighter/md-to-pdf';\nconst encodePath = (value) => value.split('/').map((part) => encodeURIComponent(part)).join('/');\nreturn messageDocuments.map((document) => {\n  const sourceFilename = document.publishKey + '.md';\n  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,170}\\.md$/u.test(sourceFilename)) {\n    throw new Error('The PDF source filename is invalid: ' + sourceFilename);\n  }\n  const documentName = document.publishKey;\n  const bytes = new Uint8Array(16);\n  if (typeof globalThis.crypto?.getRandomValues === 'function') {\n    globalThis.crypto.getRandomValues(bytes);\n  } else {\n    for (let index = 0; index < bytes.length; index += 1) {\n      bytes[index] = Math.floor(Math.random() * 256);\n    }\n  }\n  bytes[6] = (bytes[6] & 0x0f) | 0x40;\n  bytes[8] = (bytes[8] & 0x3f) | 0x80;\n  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');\n  const pdfJobId = hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);\n  const inputPath = 'jobs/' + pdfJobId + '/input.md';\n  const outputPath = 'jobs/' + pdfJobId + '/output.pdf';\n  return {\n    json: {\n      taskRecordId: base.taskRecordId,\n      publishJobId: base.publishJobId,\n      version: base.version,\n      messageRecordId: document.recordId,\n      documentRecordId: document.documentRecordId,\n      markdown: document.markdown,\n      pdfJobId,\n      inputPath,\n      outputPath,\n      sourceFilename,\n      jobInsertUrl: supabaseUrl + '/rest/v1/pdf_jobs',\n      uploadUrl: supabaseUrl + '/storage/v1/object/' + encodeURIComponent(bucket) + '/' + encodePath(inputPath),\n      markUploadedUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + pdfJobId + '&status=eq.created',\n      queueUrl: supabaseUrl + '/rest/v1/pdf_jobs?id=eq.' + pdfJobId + '&status=eq.uploaded',\n      downloadUrl: supabaseUrl + '/storage/v1/object/authenticated/' + encodeURIComponent(bucket) + '/' + encodePath(outputPath),\n      dispatchUrl: repoBase + '/actions/workflows/build-pdf-api.yml/dispatches',\n      pdfJobBody: {\n        id: pdfJobId,\n        user_id: userId,\n        status: 'created',\n        input_path: inputPath,\n        assets_path: null,\n        output_path: null,\n        has_assets: false,\n        theme,\n        options: { breaks: true, toc: true },\n        source_filename: sourceFilename,\n        source_name: sourceFilename,\n        document_name: documentName,\n        output_filename: documentName + '.pdf',\n        is_favorite: false,\n      },\n      dispatchPayload: {\n        ref: 'main',\n        inputs: { job_id: pdfJobId },\n      },\n    },\n  };\n});"
+      },
+      "id": "task-publish-22",
+      "name": "Prepare PDF Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.jobInsertUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.pdfJobBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-23",
+      "name": "Create PDF Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4620,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Prepare PDF Jobs').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf job creation failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst job = rows[0];\nif (!job || job.id !== base.pdfJobId || job.status !== 'created' || job.input_path !== base.inputPath) {\n  throw new Error('mdTOpdf returned an invalid created job.');\n}\nreturn { json: base };"
+      },
+      "id": "task-publish-24",
+      "name": "Parse PDF Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/markdown; charset=utf-8"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "cache-control",
+              "value": "3600"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/markdown",
+        "body": "={{ $json.markdown }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-25",
+      "name": "Upload PDF Markdown",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse PDF Jobs').item.json;\nconst response = $json;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf Markdown upload failed with status ' + statusCode + '.');\n}\nreturn { json: base };"
+      },
+      "id": "task-publish-26",
+      "name": "Parse PDF Uploads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.markUploadedUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'uploaded' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-27",
+      "name": "Advance PDF Jobs Uploaded",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5500,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Parse PDF Uploads').item.json.queueUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'queued' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-28",
+      "name": "Advance PDF Jobs Queued",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse PDF Uploads').item.json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 201) {\n  throw new Error('mdTOpdf queue update failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nif (rows.length > 0 && rows[0].status !== 'queued') {\n  throw new Error('mdTOpdf did not enter the queued state.');\n}\nreturn { json: base };"
+      },
+      "id": "task-publish-29",
+      "name": "Parse PDF Queued",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.dispatchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.dispatchPayload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-30",
+      "name": "Dispatch PDF Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6160,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst responses = $input.all();\nfor (const item of responses) {\n  const statusCode = Number(item.json?.statusCode);\n  if (statusCode !== 204) {\n    throw new Error('A PDF workflow dispatch failed with status ' + (statusCode || 'unknown') + '.');\n  }\n}\nconst queuedItems = $('Parse PDF Queued').all().map((item) => item.json);\nconst jobIds = queuedItems.map((item) => item.pdfJobId);\nif (new Set(jobIds).size !== jobIds.length) {\n  throw new Error('Duplicate PDF job IDs were generated.');\n}\nconst base = $('Verify Documents').first().json;\nconst supabaseUrl = String($env.MDTO_PDF_SUPABASE_URL || '').trim().replace(/\\/+$/u, '');\nconst batchFilter = 'in.(' + jobIds.map((jobId) => '\"' + jobId + '\"').join(',') + ')';\nconst batchStatusUrl = supabaseUrl + '/rest/v1/pdf_jobs?select=id,status,output_path,error_message&id='\n  + encodeURIComponent(batchFilter);\nreturn {\n  json: {\n    taskRecordId: base.taskRecordId,\n    publishJobId: base.publishJobId,\n    version: base.version,\n    ownerId: base.ownerId,\n    pdfJobs: queuedItems.map((item) => ({\n      pdfJobId: item.pdfJobId,\n      messageRecordId: item.messageRecordId,\n      documentRecordId: item.documentRecordId,\n      outputPath: item.outputPath,\n      downloadUrl: item.downloadUrl,\n    })),\n    batchStatusUrl,\n    pollCount: 0,\n    pollDeadline: Date.now() + 30 * 60 * 1000,\n    pdfBatchReady: false,\n  },\n};"
+      },
+      "id": "task-publish-31",
+      "name": "Prepare PDF Batch Poll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6380,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "task-publish-32",
+      "name": "Wait PDF Batch",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6600,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.batchStatusUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "task-publish-33",
+      "name": "Get PDF Batch Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6820,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst state = $('Wait PDF Batch').first().json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' ? response.body : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && (statusCode < 200 || statusCode >= 300)) {\n  throw new Error('The PDF batch status lookup failed with status ' + statusCode + '.');\n}\nconst rows = Array.isArray(body) ? body : [body];\nconst byId = new Map();\nfor (const row of rows) {\n  if (row?.id) byId.set(row.id, row);\n}\nconst jobs = (state.pdfJobs || []).map((job) => {\n  const row = byId.get(job.pdfJobId);\n  if (!row || typeof row.status !== 'string') {\n    throw new Error('The PDF batch status response is missing a job.');\n  }\n  if (row.status === 'completed' && row.output_path !== job.outputPath) {\n    throw new Error('A PDF job completed without the expected output path.');\n  }\n  return { ...job, status: row.status, errorMessage: row.error_message || '' };\n});\nconst pollCount = Number(state.pollCount || 0) + 1;\nif (pollCount > 90 || Date.now() > Number(state.pollDeadline || 0)) {\n  throw new Error('Timed out waiting for the PDF batch.');\n}\nconst failed = jobs.find((job) => job.status === 'failed');\nif (failed) {\n  throw new Error('A PDF build failed: ' + String(failed.errorMessage || failed.pdfJobId).slice(0, 500));\n}\nfor (const job of jobs) {\n  if (!new Set(['queued', 'building', 'uploading', 'completed']).has(job.status)) {\n    throw new Error('The PDF batch returned an unexpected status: ' + job.status);\n  }\n}\nreturn {\n  json: {\n    ...state,\n    pdfJobs: jobs,\n    pollCount,\n    pdfBatchReady: jobs.every((job) => job.status === 'completed'),\n  },\n};"
+      },
+      "id": "task-publish-34",
+      "name": "Parse PDF Batch Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6820,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-35",
+              "leftValue": "={{ $json.pdfBatchReady }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-35",
+      "name": "Is PDF Batch Ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7260,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst state = $input.first().json;\nif (!state.pdfBatchReady) throw new Error('The PDF batch is not ready for download.');\nreturn state.pdfJobs.map((job) => ({ json: job }));"
+      },
+      "id": "task-publish-36",
+      "name": "Prepare PDF Downloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7480,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.downloadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MDTO_PDF_SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? '' : 'Bearer ' + $env.MDTO_PDF_SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "responseFormat": "file",
+        "outputPropertyName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 3,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "task-publish-37",
+      "name": "Download PDFs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7700,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst downloads = $('Prepare PDF Downloads').all();\nconst responses = $input.all();\nif (downloads.length !== responses.length) {\n  throw new Error('A PDF download did not complete.');\n}\nconst state = $('Prepare PDF Batch Poll').first().json;\n\nfunction sha256Hex(input) {\n  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;\n  const K = [\n    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,\n    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,\n    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,\n    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,\n    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,\n    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,\n    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,\n    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,\n  ];\n  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const rotr = (value, bits) => ((value >>> bits) | (value << (32 - bits))) >>> 0;\n  const l = bytes.length;\n  const padded = new Uint8Array((((l + 9) >> 6) + 1) << 6);\n  padded.set(bytes);\n  padded[l] = 0x80;\n  const view = new DataView(padded.buffer);\n  view.setUint32(padded.length - 8, Math.floor((l * 8) / 4294967296));\n  view.setUint32(padded.length - 4, (l * 8) >>> 0);\n  const w = new Uint32Array(64);\n  for (let offset = 0; offset < padded.length; offset += 64) {\n    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);\n    for (let i = 16; i < 64; i += 1) {\n      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);\n      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = H[0];\n    let b = H[1];\n    let c = H[2];\n    let d = H[3];\n    let e = H[4];\n    let f = H[5];\n    let g = H[6];\n    let h = H[7];\n    for (let i = 0; i < 64; i += 1) {\n      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;\n      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      h = g;\n      g = f;\n      f = e;\n      e = (d + t1) >>> 0;\n      d = c;\n      c = b;\n      b = a;\n      a = (t1 + t2) >>> 0;\n    }\n    H[0] = (H[0] + a) >>> 0;\n    H[1] = (H[1] + b) >>> 0;\n    H[2] = (H[2] + c) >>> 0;\n    H[3] = (H[3] + d) >>> 0;\n    H[4] = (H[4] + e) >>> 0;\n    H[5] = (H[5] + f) >>> 0;\n    H[6] = (H[6] + g) >>> 0;\n    H[7] = (H[7] + h) >>> 0;\n  }\n  let hex = '';\n  for (const part of H) hex += part.toString(16).padStart(8, '0');\n  return hex;\n}\nconst items = [];\nfor (let index = 0; index < responses.length; index += 1) {\n  const job = downloads[index].json;\n  const pdf = responses[index].binary?.data;\n  if (!pdf) throw new Error('A PDF download returned no binary for job ' + job.pdfJobId + '.');\n  const looksLikePdf = pdf.mimeType === 'application/pdf'\n    || pdf.fileExtension?.toLowerCase() === 'pdf'\n    || pdf.fileName?.toLowerCase().endsWith('.pdf');\n  if (!looksLikePdf && !pdf.data) {\n    throw new Error('A PDF download returned an invalid binary for job ' + job.pdfJobId + '.');\n  }\n  const byteSize = Number.isSafeInteger(Number(pdf.fileSize)) && Number(pdf.fileSize) > 0\n    ? Number(pdf.fileSize)\n    : Buffer.from(pdf.data || '', 'base64').byteLength;\n  if (byteSize < 1) throw new Error('A PDF download has no measurable content.');\n  items.push({\n    json: {\n      taskRecordId: state.taskRecordId,\n      version: state.version,\n      messageRecordId: job.messageRecordId,\n      documentRecordId: job.documentRecordId,\n      byteSize,\n      checksum: sha256Hex(String(pdf.data || '')),\n    },\n    binary: {\n      data: {\n        ...pdf,\n        mimeType: 'application/pdf',\n        fileExtension: 'pdf',\n      },\n    },\n  });\n}\nreturn items;"
+      },
+      "id": "task-publish-38",
+      "name": "Collect PDFs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7920,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nreturn { json: { pdfSkipped: true } };"
+      },
+      "id": "task-publish-39",
+      "name": "Skip PDFs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "task-publish-40",
+      "name": "Merge PDF Branch",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        7920,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-41",
+              "leftValue": "={{ $('Verify Documents').first().json.buildMd || $('Verify Documents').first().json.buildPdf }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-41",
+      "name": "Build Artifacts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst pdfItems = [];\nfor (const item of $input.all()) {\n  if (item.binary?.data) pdfItems.push(item);\n}\n\nfunction sha256Hex(input) {\n  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;\n  const K = [\n    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,\n    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,\n    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,\n    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,\n    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,\n    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,\n    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,\n    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,\n  ];\n  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const rotr = (value, bits) => ((value >>> bits) | (value << (32 - bits))) >>> 0;\n  const l = bytes.length;\n  const padded = new Uint8Array((((l + 9) >> 6) + 1) << 6);\n  padded.set(bytes);\n  padded[l] = 0x80;\n  const view = new DataView(padded.buffer);\n  view.setUint32(padded.length - 8, Math.floor((l * 8) / 4294967296));\n  view.setUint32(padded.length - 4, (l * 8) >>> 0);\n  const w = new Uint32Array(64);\n  for (let offset = 0; offset < padded.length; offset += 64) {\n    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);\n    for (let i = 16; i < 64; i += 1) {\n      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);\n      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = H[0];\n    let b = H[1];\n    let c = H[2];\n    let d = H[3];\n    let e = H[4];\n    let f = H[5];\n    let g = H[6];\n    let h = H[7];\n    for (let i = 0; i < 64; i += 1) {\n      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;\n      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      h = g;\n      g = f;\n      f = e;\n      e = (d + t1) >>> 0;\n      d = c;\n      c = b;\n      b = a;\n      a = (t1 + t2) >>> 0;\n    }\n    H[0] = (H[0] + a) >>> 0;\n    H[1] = (H[1] + b) >>> 0;\n    H[2] = (H[2] + c) >>> 0;\n    H[3] = (H[3] + d) >>> 0;\n    H[4] = (H[4] + e) >>> 0;\n    H[5] = (H[5] + f) >>> 0;\n    H[6] = (H[6] + g) >>> 0;\n    H[7] = (H[7] + h) >>> 0;\n  }\n  let hex = '';\n  for (const part of H) hex += part.toString(16).padStart(8, '0');\n  return hex;\n}\nconst messageDocuments = base.documentRecords.filter((document) => document.kind === 'message');\nconst items = [];\nif (base.buildMd) {\n  for (const document of messageDocuments) {\n    items.push({\n      json: {\n        format: 'md',\n        contentType: 'text/markdown',\n        taskRecordId: base.taskRecordId,\n        messageRecordId: document.recordId,\n        documentRecordId: document.documentRecordId,\n        version: base.version,\n        body: document.markdown,\n        byteSize: new TextEncoder().encode(document.markdown).byteLength,\n        checksum: sha256Hex(document.markdown),\n        downloadPath: '/download/tasks/' + base.taskRecordId + '/' + base.version + '/' + document.recordId + '/md',\n      },\n    });\n  }\n}\nif (base.buildPdf) {\n  const pdfByMessage = new Map(pdfItems.map((item) => [item.json.messageRecordId, item]));\n  for (const document of messageDocuments) {\n    const pdfItem = pdfByMessage.get(document.recordId);\n    if (!pdfItem) {\n      throw new Error('The PDF artifact for message ' + document.recordId + ' is missing.');\n    }\n    items.push({\n      json: {\n        format: 'pdf',\n        contentType: 'application/pdf',\n        taskRecordId: base.taskRecordId,\n        messageRecordId: document.recordId,\n        documentRecordId: document.documentRecordId,\n        version: base.version,\n        byteSize: pdfItem.json.byteSize,\n        checksum: pdfItem.json.checksum,\n        downloadPath: '/download/tasks/' + base.taskRecordId + '/' + base.version + '/' + document.recordId + '/pdf',\n      },\n      binary: pdfItem.binary,\n    });\n  }\n}\nif (items.length === 0) throw new Error('No artifacts were prepared.');\nreturn items;"
+      },
+      "id": "task-publish-42",
+      "name": "Prepare Artifact Uploads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8360,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.FUMADOCS_BASE_URL || '').replace(/\\/+$/u, '') + '/api/blob/upload-url' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Key",
+              "value": "={{ $env.FUMADOCS_BLOB_UPLOAD_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ taskRecordId: $json.taskRecordId, messageRecordId: $json.messageRecordId, version: $json.version, format: $json.format }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-43",
+      "name": "Sign Artifact Uploads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8580,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Prepare Artifact Uploads').item.json;\nconst signer = $json;\nconst expectedKey = 'documents/tasks/' + base.taskRecordId + '/v' + base.version\n  + '/messages/' + base.messageRecordId + '/document.' + base.format;\nif (\n  signer.key !== expectedKey\n  || typeof signer.uploadUrl !== 'string'\n  || signer.contentType !== base.contentType\n) {\n  throw new Error('Fumadocs returned an invalid Blob upload signer response.');\n}\nreturn {\n  json: { ...base, signer },\n  binary: $('Prepare Artifact Uploads').item.binary,\n};"
+      },
+      "id": "task-publish-44",
+      "name": "Verify Signer Responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8800,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "task-publish-condition-45",
+              "leftValue": "={{ $json.format }}",
+              "rightValue": "md",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "task-publish-45",
+      "name": "Is Markdown Artifact",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        9020,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.signer.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/markdown"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/markdown",
+        "body": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "task-publish-46",
+      "name": "Upload Markdown Artifacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9240,
+        20
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.signer.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 3,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "task-publish-47",
+      "name": "Upload PDF Artifacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9240,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "task-publish-48",
+      "name": "Merge Uploads",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        9460,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst artifacts = $('Verify Signer Responses').all().map((item) => item.json);\nconst uploads = $input.all();\nif (uploads.length !== artifacts.length) {\n  throw new Error('An artifact upload did not complete.');\n}\nreturn {\n  json: {\n    artifactItems: artifacts,\n    artifactUploadCount: artifacts.length,\n  },\n};"
+      },
+      "id": "task-publish-49",
+      "name": "Collect Uploads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9680,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst artifactItems = $('Collect Uploads').first().json.artifactItems;\nconst documentIds = Array.from(new Set(artifactItems.map((artifact) => artifact.documentRecordId)));\nconst chunks = [];\nfor (let index = 0; index < documentIds.length; index += 40) {\n  chunks.push(documentIds.slice(index, index + 40));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    lookupUrl: $env.POCKETBASE_URL + '/api/collections/aw_document_artifacts/records?perPage=500&filter='\n      + encodeURIComponent(\n        'version = ' + base.version + ' && ('\n          + chunk.map((documentId) => 'document = \"' + documentId + '\"').join(' || ')\n          + ')',\n      ),\n  },\n}));"
+      },
+      "id": "task-publish-50",
+      "name": "Prepare Artifact Lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9900,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.lookupUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "task-publish-51",
+      "name": "Get Existing Artifacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        10120,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst existing = [];\nfor (const item of $input.all()) {\n  const records = Array.isArray(item.json.items) ? item.json.items : [];\n  for (const record of records) {\n    if (record.id && record.document) existing.push(record);\n  }\n}\nreturn { json: { existingArtifacts: existing } };"
+      },
+      "id": "task-publish-52",
+      "name": "Merge Artifact Lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10340,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst artifactItems = $('Collect Uploads').first().json.artifactItems;\nconst existingByKey = new Map();\nfor (const record of $('Merge Artifact Lookups').first().json.existingArtifacts || []) {\n  existingByKey.set(record.document + ':' + record.format, record);\n}\nconst requests = artifactItems.map((artifact) => {\n  const body = {\n    publishJob: base.publishJobId,\n    document: artifact.documentRecordId,\n    version: artifact.version,\n    format: artifact.format,\n    blobKey: artifact.signer.key,\n    contentType: artifact.contentType,\n    byteSize: artifact.byteSize,\n    checksum: artifact.checksum,\n    status: 'uploaded',\n    downloadPath: artifact.downloadPath,\n  };\n  const existing = existingByKey.get(artifact.documentRecordId + ':' + artifact.format);\n  if (existing) {\n    return { method: 'PATCH', url: '/api/collections/aw_document_artifacts/records/' + existing.id, body };\n  }\n  return {\n    method: 'POST',\n    url: '/api/collections/aw_document_artifacts/records',\n    body: { ...body, owner: base.ownerId },\n  };\n});\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+      },
+      "id": "task-publish-53",
+      "name": "Prepare Artifact Writes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10560,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.batchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.batchBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-54",
+      "name": "Write Artifact Records",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        10780,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst isEntryOk = (entry) => {\n  if (!entry || typeof entry !== 'object') return false;\n  if (entry.error) return false;\n  if (Number.isFinite(Number(entry.status))) {\n    return Number(entry.status) >= 200 && Number(entry.status) < 300;\n  }\n  if (entry.body && typeof entry.body === 'object') return !entry.body.error;\n  return typeof entry.id === 'string';\n};\nconst artifactItems = $('Collect Uploads').first().json.artifactItems;\nconst responses = $input.all();\nconst recordIds = [];\nfor (const item of responses) {\n  const body = item.json;\n  const entries = Array.isArray(body) ? body : [body];\n  for (const entry of entries) {\n    if (!isEntryOk(entry)) throw new Error('PocketBase artifact batch write failed.');\n    const recordId = entry?.body?.id || entry.id;\n    if (typeof recordId !== 'string' || recordId.length === 0) {\n      throw new Error('PocketBase artifact batch write returned no record id.');\n    }\n    recordIds.push(recordId);\n  }\n}\nif (recordIds.length !== artifactItems.length) {\n  throw new Error('PocketBase artifact batch write count mismatch.');\n}\nreturn {\n  json: {\n    artifactRecords: artifactItems.map((artifact, index) => ({\n      id: recordIds[index],\n      documentRecordId: artifact.documentRecordId,\n      format: artifact.format,\n    })),\n    artifactCount: recordIds.length,\n  },\n};"
+      },
+      "id": "task-publish-55",
+      "name": "Verify Artifact Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11000,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nreturn { json: { artifactsSkipped: true } };"
+      },
+      "id": "task-publish-56",
+      "name": "Skip Artifacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8360,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "task-publish-57",
+      "name": "Merge Artifact Branch",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        11220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/content/docs/meta.json' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "task-publish-58",
+      "name": "Get GitHub Root Sidebar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        11440,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {\n  throw new Error('GitHub sidebar lookup failed with status ' + statusCode + '.');\n}\nlet sidebar = { pages: [] };\nif (statusCode === 200) {\n  if (typeof body.content !== 'string' || body.encoding !== 'base64') {\n    throw new Error('GitHub sidebar lookup returned an invalid meta.json.');\n  }\n  try {\n    sidebar = JSON.parse(Buffer.from(body.content.replace(/\\s/gu, ''), 'base64').toString('utf8'));\n  } catch {\n    throw new Error('GitHub sidebar meta.json was not valid JSON.');\n  }\n}\nif (!sidebar || typeof sidebar !== 'object' || !Array.isArray(sidebar.pages)) {\n  throw new Error('GitHub sidebar meta.json has no pages array.');\n}\nif (sidebar.pages.some((page) => typeof page !== 'string')) {\n  throw new Error('GitHub sidebar meta.json contains an invalid page entry.');\n}\nif (!sidebar.pages.includes('tasks')) sidebar.pages.push('tasks');\nreturn {\n  json: {\n    rootSidebarContent: JSON.stringify(sidebar, null, 2) + '\\n',\n  },\n};"
+      },
+      "id": "task-publish-59",
+      "name": "Parse GitHub Root Sidebar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/contents/content/docs/tasks/meta.json' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "task-publish-60",
+      "name": "Get GitHub Tasks Index",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        11880,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst response = $json;\nconst body = response.body && typeof response.body === 'object' && !Array.isArray(response.body)\n  ? response.body\n  : response;\nconst statusCode = Number(response.statusCode);\nif (Number.isFinite(statusCode) && statusCode !== 200 && statusCode !== 404) {\n  throw new Error('GitHub tasks index lookup failed with status ' + statusCode + '.');\n}\nlet tasksIndex = { title: 'Tasks', pages: [] };\nif (statusCode === 200) {\n  if (typeof body.content !== 'string' || body.encoding !== 'base64') {\n    throw new Error('GitHub tasks index lookup returned an invalid meta.json.');\n  }\n  try {\n    tasksIndex = JSON.parse(Buffer.from(body.content.replace(/\\s/gu, ''), 'base64').toString('utf8'));\n  } catch {\n    throw new Error('GitHub tasks index meta.json was not valid JSON.');\n  }\n}\nif (!tasksIndex || typeof tasksIndex !== 'object' || !Array.isArray(tasksIndex.pages)) {\n  throw new Error('GitHub tasks index meta.json has no pages array.');\n}\nif (tasksIndex.pages.some((page) => typeof page !== 'string')) {\n  throw new Error('GitHub tasks index meta.json contains an invalid page entry.');\n}\nif (!tasksIndex.pages.includes(base.taskPublishKey)) tasksIndex.pages.push(base.taskPublishKey);\nreturn {\n  json: {\n    tasksIndexContent: JSON.stringify(tasksIndex, null, 2) + '\\n',\n  },\n};"
+      },
+      "id": "task-publish-61",
+      "name": "Parse GitHub Tasks Index",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst rootSidebar = $('Parse GitHub Root Sidebar').first().json.rootSidebarContent;\nconst tasksIndex = $('Parse GitHub Tasks Index').first().json.tasksIndexContent;\nconst files = [\n  ...base.files,\n  { path: 'content/docs/meta.json', content: rootSidebar },\n  { path: 'content/docs/tasks/meta.json', content: tasksIndex },\n];\nif (files.length === 0) throw new Error('The task snapshot contains no files.');\nreturn files.map((file) => ({\n  json: {\n    path: file.path,\n    blobBody: { content: file.content, encoding: 'utf-8' },\n  },\n}));"
+      },
+      "id": "task-publish-62",
+      "name": "Prepare GitHub Blobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/blobs' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.blobBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "task-publish-63",
+      "name": "Create GitHub Blobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        12540,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst requests = $('Create GitHub Blobs').all();\nconst responses = $input.all();\nif (requests.length !== responses.length) {\n  throw new Error('A GitHub blob creation did not complete.');\n}\nconst entries = requests.map((request, index) => {\n  const sha = responses[index].json?.sha;\n  if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/u.test(sha)) {\n    throw new Error('GitHub blob creation returned no valid SHA for ' + request.json.path + '.');\n  }\n  return { path: request.json.path, mode: '100644', type: 'blob', sha };\n});\nreturn {\n  json: {\n    treeEntries: entries,\n    fileCount: entries.length,\n  },\n};"
+      },
+      "id": "task-publish-64",
+      "name": "Collect GitHub Blobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/ref/heads/' + ($env.GITHUB_BRANCH || 'main') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-65",
+      "name": "Get GitHub Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        12980,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst ref = $json;\nconst commitSha = ref?.object?.sha;\nif (typeof commitSha !== 'string' || !/^[0-9a-f]{40}$/u.test(commitSha)) {\n  throw new Error('GitHub returned no valid branch commit SHA.');\n}\nreturn { json: { commitSha } };"
+      },
+      "id": "task-publish-66",
+      "name": "Parse GitHub Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/commits/' + $json.commitSha }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-67",
+      "name": "Get GitHub Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        13420,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse GitHub Ref').item.json;\nconst commit = $json;\nconst baseTreeSha = commit?.tree?.sha;\nif (typeof baseTreeSha !== 'string' || !/^[0-9a-f]{40}$/u.test(baseTreeSha)) {\n  throw new Error('GitHub returned no valid base tree SHA.');\n}\nreturn { json: { commitSha: base.commitSha, baseTreeSha } };"
+      },
+      "id": "task-publish-68",
+      "name": "Parse GitHub Commit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/trees' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ base_tree: $json.baseTreeSha, tree: $('Collect GitHub Blobs').first().json.treeEntries }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-69",
+      "name": "Create GitHub Tree",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        13860,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse GitHub Commit').item.json;\nconst tree = $json;\nconst treeSha = tree?.sha;\nif (typeof treeSha !== 'string' || !/^[0-9a-f]{40}$/u.test(treeSha)) {\n  throw new Error('GitHub tree creation returned no valid SHA.');\n}\nreturn { json: { commitSha: base.commitSha, treeSha } };"
+      },
+      "id": "task-publish-70",
+      "name": "Parse GitHub Tree",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14080,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/commits' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ message: 'docs: publish task ' + $('Verify Documents').first().json.taskPublishKey + ' (v' + $('Verify Documents').first().json.version + ')', tree: $json.treeSha, parents: [$json.commitSha] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-71",
+      "name": "Create GitHub Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14300,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Parse GitHub Tree').item.json;\nconst commit = $json;\nconst newCommitSha = commit?.sha;\nif (typeof newCommitSha !== 'string' || !/^[0-9a-f]{40}$/u.test(newCommitSha)) {\n  throw new Error('GitHub commit creation returned no valid SHA.');\n}\nreturn { json: { newCommitSha } };"
+      },
+      "id": "task-publish-72",
+      "name": "Parse GitHub Commit Created",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.github.com/repos/' + $env.GITHUB_OWNER + '/' + $env.GITHUB_REPO + '/git/refs/heads/' + ($env.GITHUB_BRANCH || 'main') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ sha: $json.newCommitSha }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "task-publish-73",
+      "name": "Update GitHub Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14740,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst expected = $('Parse GitHub Commit Created').item.json.newCommitSha;\nconst ref = $json;\nif (ref?.object?.sha !== expected) {\n  throw new Error('GitHub did not advance the branch to the new commit.');\n}\nreturn { json: { commitSha: expected } };"
+      },
+      "id": "task-publish-74",
+      "name": "Verify GitHub Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst publishedAt = new Date().toISOString();\nlet artifactRecords = [];\ntry {\n  artifactRecords = $('Verify Artifact Records').first().json.artifactRecords || [];\n} catch {\n  artifactRecords = [];\n}\nconst requests = base.documentRecords.map((document) => ({\n  method: 'PATCH',\n  url: '/api/collections/aw_documents/records/' + document.documentRecordId,\n  body: { status: 'published', publishedAt, lastError: '' },\n}));\nfor (const artifact of artifactRecords) {\n  requests.push({\n    method: 'PATCH',\n    url: '/api/collections/aw_document_artifacts/records/' + artifact.id,\n    body: { status: 'published' },\n  });\n}\nconst chunks = [];\nfor (let index = 0; index < requests.length; index += 200) {\n  chunks.push(requests.slice(index, index + 200));\n}\nreturn chunks.map((chunk) => ({\n  json: {\n    batchUrl: $env.POCKETBASE_URL + '/api/batch',\n    batchBody: { requests: chunk },\n  },\n}));"
+      },
+      "id": "task-publish-75",
+      "name": "Prepare Finalization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15180,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.batchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.batchBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-76",
+      "name": "Write Finalization",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15400,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst isEntryOk = (entry) => {\n  if (!entry || typeof entry !== 'object') return false;\n  if (entry.error) return false;\n  if (Number.isFinite(Number(entry.status))) {\n    return Number(entry.status) >= 200 && Number(entry.status) < 300;\n  }\n  if (entry.body && typeof entry.body === 'object') return !entry.body.error;\n  return typeof entry.id === 'string';\n};\nlet artifactCount = 0;\ntry {\n  artifactCount = Number($('Verify Artifact Records').first().json.artifactCount || 0);\n} catch {\n  artifactCount = 0;\n}\nfor (const item of $input.all()) {\n  const body = item.json;\n  const entries = Array.isArray(body) ? body : [body];\n  for (const entry of entries) {\n    if (!isEntryOk(entry)) throw new Error('PocketBase finalization batch write failed.');\n  }\n}\nreturn {\n  json: {\n    finalized: true,\n    documentCount: base.documentRecords.length,\n    artifactCount,\n    publishedAt: new Date().toISOString(),\n  },\n};"
+      },
+      "id": "task-publish-77",
+      "name": "Verify Finalization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15620,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.POCKETBASE_URL + '/api/collections/aw_publish_jobs/records/' + $('Verify Documents').first().json.publishJobId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POCKETBASE_SERVER_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'published', completedDocuments: $('Verify Finalization').first().json.documentCount, publishedAt: $('Verify Finalization').first().json.publishedAt, lastError: '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "task-publish-78",
+      "name": "Mark Job Published",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15840,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst base = $('Verify Documents').first().json;\nconst finalization = $('Verify Finalization').first().json;\nconst commitSha = $('Verify GitHub Ref').first().json.commitSha;\nreturn {\n  json: {\n    accepted: true,\n    published: true,\n    publishJobId: base.publishJobId,\n    taskRecordId: base.taskRecordId,\n    taskPublishKey: base.taskPublishKey,\n    version: base.version,\n    documentCount: finalization.documentCount,\n    artifactCount: finalization.artifactCount,\n    commitSha,\n    publishedAt: finalization.publishedAt,\n  },\n};"
+      },
+      "id": "task-publish-79",
+      "name": "Publish Complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16060,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Event": {
+      "main": [
+        [
+          {
+            "node": "Get Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Merge Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Is Job Finished",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Job Finished": {
+      "main": [
+        [
+          {
+            "node": "Publish Already Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Task": {
+      "main": [
+        [
+          {
+            "node": "Merge Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Task": {
+      "main": [
+        [
+          {
+            "node": "Lock Publish Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Publish Job": {
+      "main": [
+        [
+          {
+            "node": "Get Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Events": {
+      "main": [
+        [
+          {
+            "node": "Get Acts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Acts": {
+      "main": [
+        [
+          {
+            "node": "Get Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Messages": {
+      "main": [
+        [
+          {
+            "node": "Prepare Document Lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Document Lookups": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge Document Lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Document Lookups": {
+      "main": [
+        [
+          {
+            "node": "Build Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Prepare Document Writes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Document Writes": {
+      "main": [
+        [
+          {
+            "node": "Write Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Documents": {
+      "main": [
+        [
+          {
+            "node": "Verify Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Documents": {
+      "main": [
+        [
+          {
+            "node": "Mark Job Building",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Job Building": {
+      "main": [
+        [
+          {
+            "node": "Build PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build PDF": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF Jobs": {
+      "main": [
+        [
+          {
+            "node": "Create PDF Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create PDF Jobs": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Jobs": {
+      "main": [
+        [
+          {
+            "node": "Upload PDF Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload PDF Markdown": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Uploads": {
+      "main": [
+        [
+          {
+            "node": "Advance PDF Jobs Uploaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advance PDF Jobs Uploaded": {
+      "main": [
+        [
+          {
+            "node": "Advance PDF Jobs Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advance PDF Jobs Queued": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Queued": {
+      "main": [
+        [
+          {
+            "node": "Dispatch PDF Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch PDF Batch": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF Batch Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF Batch Poll": {
+      "main": [
+        [
+          {
+            "node": "Wait PDF Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait PDF Batch": {
+      "main": [
+        [
+          {
+            "node": "Get PDF Batch Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get PDF Batch Status": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Batch Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Batch Status": {
+      "main": [
+        [
+          {
+            "node": "Is PDF Batch Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is PDF Batch Ready": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait PDF Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF Downloads": {
+      "main": [
+        [
+          {
+            "node": "Download PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDFs": {
+      "main": [
+        [
+          {
+            "node": "Collect PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect PDFs": {
+      "main": [
+        [
+          {
+            "node": "Merge PDF Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip PDFs": {
+      "main": [
+        [
+          {
+            "node": "Merge PDF Branch",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge PDF Branch": {
+      "main": [
+        [
+          {
+            "node": "Build Artifacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Artifacts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Artifact Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Artifacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Artifact Uploads": {
+      "main": [
+        [
+          {
+            "node": "Sign Artifact Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Artifact Uploads": {
+      "main": [
+        [
+          {
+            "node": "Verify Signer Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signer Responses": {
+      "main": [
+        [
+          {
+            "node": "Is Markdown Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Markdown Artifact": {
+      "main": [
+        [
+          {
+            "node": "Upload Markdown Artifacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload PDF Artifacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Markdown Artifacts": {
+      "main": [
+        [
+          {
+            "node": "Merge Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload PDF Artifacts": {
+      "main": [
+        [
+          {
+            "node": "Merge Uploads",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Uploads": {
+      "main": [
+        [
+          {
+            "node": "Collect Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Uploads": {
+      "main": [
+        [
+          {
+            "node": "Prepare Artifact Lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Artifact Lookups": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Artifacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Artifacts": {
+      "main": [
+        [
+          {
+            "node": "Merge Artifact Lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Artifact Lookups": {
+      "main": [
+        [
+          {
+            "node": "Prepare Artifact Writes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Artifact Writes": {
+      "main": [
+        [
+          {
+            "node": "Write Artifact Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Artifact Records": {
+      "main": [
+        [
+          {
+            "node": "Verify Artifact Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Artifact Records": {
+      "main": [
+        [
+          {
+            "node": "Merge Artifact Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Artifacts": {
+      "main": [
+        [
+          {
+            "node": "Merge Artifact Branch",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Artifact Branch": {
+      "main": [
+        [
+          {
+            "node": "Get GitHub Root Sidebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GitHub Root Sidebar": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Root Sidebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Root Sidebar": {
+      "main": [
+        [
+          {
+            "node": "Get GitHub Tasks Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GitHub Tasks Index": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Tasks Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Tasks Index": {
+      "main": [
+        [
+          {
+            "node": "Prepare GitHub Blobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GitHub Blobs": {
+      "main": [
+        [
+          {
+            "node": "Create GitHub Blobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GitHub Blobs": {
+      "main": [
+        [
+          {
+            "node": "Collect GitHub Blobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect GitHub Blobs": {
+      "main": [
+        [
+          {
+            "node": "Get GitHub Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GitHub Ref": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Ref": {
+      "main": [
+        [
+          {
+            "node": "Get GitHub Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GitHub Commit": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Commit": {
+      "main": [
+        [
+          {
+            "node": "Create GitHub Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GitHub Tree": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Tree": {
+      "main": [
+        [
+          {
+            "node": "Create GitHub Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GitHub Commit": {
+      "main": [
+        [
+          {
+            "node": "Parse GitHub Commit Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GitHub Commit Created": {
+      "main": [
+        [
+          {
+            "node": "Update GitHub Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GitHub Ref": {
+      "main": [
+        [
+          {
+            "node": "Verify GitHub Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify GitHub Ref": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Finalization": {
+      "main": [
+        [
+          {
+            "node": "Write Finalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Finalization": {
+      "main": [
+        [
+          {
+            "node": "Verify Finalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Finalization": {
+      "main": [
+        [
+          {
+            "node": "Mark Job Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Job Published": {
+      "main": [
+        [
+          {
+            "node": "Publish Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "task-publish-error-v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 3600
+  },
+  "versionId": "task-document-publish-workflow-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
