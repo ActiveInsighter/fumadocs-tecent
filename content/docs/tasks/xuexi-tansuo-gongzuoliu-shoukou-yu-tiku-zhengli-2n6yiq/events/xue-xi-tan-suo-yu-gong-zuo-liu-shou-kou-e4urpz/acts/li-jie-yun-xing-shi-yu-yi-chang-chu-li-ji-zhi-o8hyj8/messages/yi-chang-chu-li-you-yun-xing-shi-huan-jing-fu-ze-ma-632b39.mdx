@@ -1,0 +1,478 @@
+---
+title: "异常处理由运行时环境负责吗？"
+description: "异常处理通常由编译器与运行时共同完成：编译器生成异常表、清理代码等信息，运行时负责抛出异常、查找处理器、类型匹配、栈展开及执行析构或 finally。不同语言的运行时支持程度不同，底层还可能涉及操作系统和 CPU 的硬件异常。"
+---
+
+# 异常处理由运行时环境负责吗？
+
+对，**大多数现代语言里的“异常处理”确实依赖运行时支持**，但不能简单理解成“全都是运行时环境自己处理”。更准确地说：
+
+> **编译器负责提前布置异常处理所需的信息，运行时系统负责程序执行时真正完成异常抛出、查找处理器、栈展开等工作。**
+
+可以把它拆成两部分。
+
+比如：
+
+```java
+try {
+    foo();
+} catch (Exception e) {
+    handle(e);
+}
+```
+
+编译时，编译器已经知道：
+
+```text
+这里是 try 范围
+发生异常后
+哪些异常可以跳到哪个 catch
+```
+
+但是 `foo()` 到底会不会异常，只有程序真正运行时才知道。
+
+所以大致是：
+
+```text
+源码
+  ↓
+编译器
+  │
+  ├─ 生成正常执行代码
+  ├─ 生成异常处理信息
+  └─ 记录 catch / finally 等位置
+  ↓
+程序运行
+  ↓
+发生异常
+  ↓
+Runtime 开始处理
+  ↓
+寻找匹配的 catch
+  ↓
+必要时展开调用栈
+  ↓
+跳转到异常处理代码
+```
+
+### Java 是最典型的
+
+例如：
+
+```java
+void a() {
+    b();
+}
+
+void b() {
+    c();
+}
+
+void c() {
+    throw new RuntimeException();
+}
+```
+
+调用栈：
+
+```text
+main()
+ ↓
+a()
+ ↓
+b()
+ ↓
+c()
+```
+
+假如 `c()` 抛异常，而 `c()` 和 `b()` 都没有 `catch`，但是 `a()` 有：
+
+```java
+void a() {
+    try {
+        b();
+    } catch (RuntimeException e) {
+        System.out.println("caught");
+    }
+}
+```
+
+那么 JVM Runtime 会做：
+
+```text
+c() 抛异常
+   ↓
+检查 c() 有没有处理器
+   ↓ 没有
+退出 c() 的栈帧
+   ↓
+检查 b()
+   ↓ 没有
+退出 b() 的栈帧
+   ↓
+检查 a()
+   ↓
+发现 catch(RuntimeException)
+   ↓
+跳到 catch
+```
+
+这个过程叫：
+
+> **Stack Unwinding，栈展开**
+
+所以 Java 中：
+
+```text
+编译器 + JVM Runtime
+```
+
+共同完成异常机制。
+
+---
+
+但 **C++ 也有异常处理**：
+
+```cpp
+try {
+    foo();
+} catch (const std::exception& e) {
+}
+```
+
+C++ 最后明明是：
+
+```text
+C++
+ ↓
+机器码
+ ↓
+CPU
+```
+
+为什么还可以处理异常？
+
+因为：
+
+> **编译成机器码不等于没有 Runtime。**
+
+C++ 编译器通常会在可执行文件里生成大量异常相关的元数据，例如：
+
+```text
+哪段代码可能抛异常
+哪个地址对应哪个 catch
+栈帧应该怎样销毁
+哪些局部对象析构函数需要调用
+```
+
+运行时发生：
+
+```cpp
+throw MyException();
+```
+
+之后，会调用类似 C++ 异常运行时系统：
+
+```text
+throw
+ ↓
+C++ exception runtime
+ ↓
+查异常表
+ ↓
+沿调用栈寻找 catch
+ ↓
+stack unwinding
+ ↓
+调用途中对象析构函数
+ ↓
+进入 catch
+```
+
+所以 C++ 也是：
+
+```text
+编译器
++
+少量 Runtime Library
+```
+
+共同实现。
+
+不需要 JVM 那么大的运行环境，但仍然有 runtime support。
+
+---
+
+### Python 就更加明显
+
+```python
+try:
+    x = 1 / 0
+except ZeroDivisionError:
+    print("error")
+```
+
+这里 Python Interpreter 本身就是 Runtime：
+
+```text
+Python 源码
+ ↓
+Python Runtime
+ ↓
+执行 1 / 0
+ ↓
+发现除零
+ ↓
+创建 ZeroDivisionError 对象
+ ↓
+沿 Python 调用栈寻找 except
+ ↓
+执行 except
+```
+
+所以异常系统基本直接存在于 Python 解释器里面。
+
+---
+
+## 还有更底层的一层：硬件异常
+
+这里特别容易和“编程语言异常”混在一起。
+
+例如：
+
+```c
+int a = 1 / 0;
+```
+
+CPU 在执行机器指令时可能发现：
+
+```text
+除数 = 0
+```
+
+这时候首先发生的并不一定是：
+
+```text
+Java Exception
+C++ Exception
+```
+
+而是 **CPU 硬件异常**。
+
+例如 x86 CPU 有：
+
+```text
+Divide Error
+Page Fault
+General Protection Fault
+```
+
+流程可能是：
+
+```text
+你的程序
+ ↓
+CPU 执行 DIV 指令
+ ↓
+CPU 发现除零
+ ↓
+硬件异常
+ ↓
+进入操作系统内核
+ ↓
+操作系统处理
+```
+
+然后根据语言和环境不同，再转换。
+
+例如 Java：
+
+```text
+CPU / JVM 发现错误
+        ↓
+JVM
+        ↓
+ArithmeticException
+```
+
+Linux 下 C 程序可能：
+
+```text
+CPU Divide Error
+      ↓
+Linux kernel
+      ↓
+SIGFPE
+      ↓
+程序终止 / signal handler
+```
+
+所以这里其实有三个层次：
+
+```text
+┌──────────────────────────────┐
+│ 编程语言异常                  │
+│ Exception / throw / catch    │
+└───────────────┬──────────────┘
+                │
+          Language Runtime
+                │
+┌───────────────▼──────────────┐
+│ 操作系统异常 / Signal         │
+│ SIGSEGV / SIGFPE 等          │
+└───────────────┬──────────────┘
+                │
+             OS Kernel
+                │
+┌───────────────▼──────────────┐
+│ CPU 硬件异常                  │
+│ Page Fault / Divide Error    │
+└──────────────────────────────┘
+```
+
+不过要注意：
+
+> **编程语言异常并不一定来自 CPU 异常。**
+
+例如：
+
+```java
+if (age < 0) {
+    throw new IllegalArgumentException();
+}
+```
+
+CPU 什么错误都没发生。
+
+只是你的程序主动执行了：
+
+```text
+throw
+```
+
+然后 JVM Runtime 开始异常处理。
+
+---
+
+## 那 `throw` 到底是什么？
+
+例如：
+
+```cpp
+throw Error();
+```
+
+或者：
+
+```java
+throw new Exception();
+```
+
+从程序员视角：
+
+```text
+throw 异常
+```
+
+从运行时视角则更接近：
+
+```text
+创建异常对象
+ ↓
+停止正常控制流
+ ↓
+进入异常处理机制
+ ↓
+寻找 handler
+ ↓
+栈展开
+ ↓
+进入 catch
+```
+
+所以异常本质上可以看作一种：
+
+> **特殊的非局部控制流转移。**
+
+普通函数：
+
+```text
+A
+ ↓
+B
+ ↓
+C
+ ↓
+return
+ ↓
+B
+ ↓
+return
+ ↓
+A
+```
+
+异常：
+
+```text
+A try/catch
+ ↓
+B
+ ↓
+C
+ ↓
+throw !!!
+ └──────────────→ A catch
+```
+
+直接跨越多个函数调用层级。
+
+这就是为什么异常处理比简单的：
+
+```c
+goto
+```
+
+复杂得多。
+
+---
+
+## 所以最终可以这样记
+
+异常机制通常分工为：
+
+```text
+编译器
+负责：
+- 识别 try/catch/finally
+- 生成异常表
+- 生成清理代码
+- 保存相关元数据
+
+           ↓
+
+Runtime
+负责：
+- 创建/抛出异常
+- 查找 handler
+- 类型匹配
+- 栈展开
+- 调用析构/finally
+- 转移控制流
+
+           ↓
+
+操作系统 / CPU
+可能负责：
+- Page Fault
+- 除零
+- 非法指令
+- 内存访问错误
+等更底层硬件事件
+```
+
+最值得记住的一句话：
+
+> **语言级异常通常是“编译器预先布局 + Runtime 在运行时执行”的共同结果。**
+
+而且这也能解释为什么 **C++ 已经编译成机器码了，却依然可以有 `throw/catch`**：因为异常所需的运行时支持可以作为库和元数据一起被编译、链接进最终程序，并不要求存在 JVM 这种大型虚拟机。

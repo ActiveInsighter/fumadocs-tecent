@@ -1,0 +1,1101 @@
+---
+title: "自动记录手动捕获分支评审"
+description: "分支当前已接近合并前收尾阶段。跨标签页并发、检查点持久化、清理失败恢复及 Runtime 消息边界均有明显改进，测试与 CI 全部通过。主要遗留问题包括 engine.ts 和 AutoRecordController 过大、完成待清理状态未持久化、存储状态校验及扩展性不足。建议优先补充 completed-pending-clear 状态，再渐进拆分大文件。"
+---
+
+我重新看了当前 `origin/codex/auto-record-manual-capture`，这次确实又前进了一截。当前 HEAD 是 **`c8af5ae` — `Harden manual history grouping persistence`**，而且这次改动正好把之前最值得担心的两个 correctness 问题处理掉了。
+
+## 现在的总体评价
+
+我现在会把这个分支评价为：
+
+| 维度      |                 当前状态 |
+| ------- | -------------------: |
+| 整体架构    |      **很好，8.5～9/10** |
+| 分层清晰度   |           **8.5/10** |
+| 并发安全    |      **明显提升，8.5/10** |
+| 恢复/断点设计 |           **8.5/10** |
+| 测试质量    |             **9/10** |
+| 长期可维护性  |         **7.5～8/10** |
+| 当前可合并程度 | **已经接近 merge 前收尾阶段** |
+
+现在已经不是“架构是不是走错了”的问题了。
+
+现在主要是：
+
+> **正确性的大坑基本填上了，接下来应该减少大文件和收敛状态机，而不是继续重新设计底层。**
+
+---
+
+# 1. 最大的进步：跨标签页并发问题基本修对了
+
+上次最重要的问题之一是：
+
+```text
+Tab A ─┐
+       ├→ chrome.storage.local
+Tab B ─┘
+```
+
+两个 content script 各自有自己的 Promise queue，因此可能同时：
+
+```text
+read S
+modify
+write
+```
+
+导致 lost update。
+
+现在你改成了：
+
+```text
+Content Script A ─┐
+Content Script B ─┼─ runtime message
+Content Script C ─┘
+          ↓
+Service Worker
+          ↓
+ManualHistoryGroupingHandler
+          ↓
+ManualHistoryGroupingStore
+          ↓
+chrome.storage.local
+```
+
+这是正确解法。
+
+`AutoRecordController` 已经不再直接：
+
+```ts
+createManualHistoryGroupingStore()
+```
+
+而是：
+
+```ts
+createManualHistoryGroupingClient()
+```
+
+然后发：
+
+```text
+AW_MANUAL_HISTORY_GROUPING_ALLOCATE
+```
+
+到 background。
+
+而 service worker 只创建一个：
+
+```ts
+const manualHistoryGroupingHandler =
+  createManualHistoryGroupingRuntimeHandler({
+    ...
+    store: createManualHistoryGroupingStore(),
+  });
+```
+
+这样模块级：
+
+```ts
+let storageQueue: Promise<void>
+```
+
+现在运行在 **service worker 单写者上下文** 中，因此它终于真的能承担全局串行化作用了。
+
+这个改法比试图在 content script 间自己造锁要干净得多。
+
+---
+
+# 2. 而且你不是只改代码，还补了真正有意义的并发测试
+
+新增测试直接：
+
+```ts
+await Promise.all([
+  client.allocate(A),
+  client.allocate(B),
+]);
+```
+
+然后验证：
+
+```text
+nodeIndex = 0
+nodeIndex = 1
+```
+
+并且最终持久化里 A、B 都存在。
+
+这是非常好的测试。
+
+因为它测试的不是：
+
+```text
+allocateManualHistoryGrouping()
+```
+
+这个纯函数是否正确，
+
+而是在测：
+
+```text
+client
+↓
+runtime message
+↓
+background handler
+↓
+shared store
+↓
+storage
+```
+
+也就是实际出问题的边界。
+
+这类测试比单纯 unit test 有价值很多。
+
+---
+
+# 3. 第二个大问题：Checkpoint durability 这次也修得比较完整
+
+上次有一个危险逻辑：
+
+```text
+checkpoint.save 失败
+↓
+只记日志
+↓
+继续 capture / collect
+```
+
+现在已经改成：
+
+```ts
+try {
+  await this.persistCheckpoint(checkpoint);
+} catch {
+  ...
+  return;
+}
+```
+
+也就是：
+
+```text
+无法建立 durable checkpoint
+        ↓
+不允许进入后续执行
+```
+
+这个语义现在就对了。
+
+并且你还显式维护：
+
+```ts
+checkpointDurable
+checkpointClearPending
+```
+
+`persistCheckpoint()`：
+
+```text
+pendingCheckpoint = checkpoint
+checkpointDurable = false
+↓
+storage.save
+↓
+成功
+↓
+checkpointDurable = true
+```
+
+保存失败则抛出，而不是吞掉。
+
+这个变化很重要。
+
+---
+
+# 4. `clear checkpoint` 失败的行为现在也合理多了
+
+之前危险的情况是：
+
+```text
+history 已保存
+↓
+checkpointStore.clear() 失败
+↓
+内存 pendingCheckpoint 却直接 null
+```
+
+下一次 reload 就会看到旧 checkpoint。
+
+现在：
+
+```ts
+if clear failed:
+    pendingCheckpoint = checkpoint
+    checkpointDurable = true
+    checkpointClearPending = true
+```
+
+并且：
+
+```ts
+refresh()
+```
+
+会优先：
+
+```ts
+retryClearPending()
+```
+
+而不会重新执行整个任务。
+
+同时你加了测试：
+
+```text
+clear 第一次失败
+↓
+checkpoint 仍存在
+↓
+storage 恢复
+↓
+refresh
+↓
+只重新 clear
+↓
+collect 仍然只执行一次
+```
+
+这点做得很好。
+
+---
+
+# 5. Runtime message 的边界也更加正规了
+
+这次不是随便：
+
+```ts
+chrome.runtime.sendMessage({
+  type: "...",
+  anything: ...
+});
+```
+
+而是已经纳入统一 schema：
+
+```ts
+AW_MANUAL_HISTORY_GROUPING_ALLOCATE
+```
+
+payload 使用：
+
+```ts
+manualHistoryGroupingInputSchema
+```
+
+客户端：
+
+```text
+validate input
+↓
+send
+↓
+validate RuntimeResponse
+↓
+检查 requestId
+↓
+validate grouping output
+```
+
+服务端：
+
+```text
+validate runtime request
+↓
+derive caller identity
+↓
+check caller permission
+↓
+allocate
+↓
+validate result
+↓
+response
+```
+
+这个数据边界很完整。
+
+尤其这里加 Zod 是值得的，因为：
+
+```text
+content script
+↔
+service worker
+```
+
+本来就是一个 IPC 边界。
+
+这里应该进行 runtime validation。
+
+---
+
+# 6. Caller 身份抽离也比之前干净
+
+之前 caller 验证直接塞在：
+
+```text
+cloud-runtime-handler.ts
+```
+
+这次抽成：
+
+```text
+runtime-caller.ts
+```
+
+因此：
+
+```text
+CloudRuntimeHandler
+ManualHistoryGroupingHandler
+```
+
+都可以复用：
+
+```ts
+deriveRuntimeCallerContext()
+```
+
+从 Chrome sender metadata 推导：
+
+```text
+content
+options
+popup
+```
+
+而不是相信消息 payload 自己说：
+
+> 我来自 content。
+
+这属于比较好的安全边界设计。最新提交也专门做了这项拆分。
+
+---
+
+# 7. 当前 CI 状态也很好
+
+当前 `c8af5ae` 的最新 GitHub Actions：
+
+```text
+Type check       success
+Lint             success
+Test             success
+Build extension  success
+Package          success
+Artifacts        success
+```
+
+全部通过。
+
+所以现在至少可以确定：
+
+> 这次不是为了修 architecture 把原来功能弄坏了。
+
+---
+
+# 8. 但是最大的架构债务依然没动：`engine.ts`
+
+这个问题还是原样存在。
+
+当前：
+
+```text
+src/content/engine.ts
+80,841 bytes
+```
+
+而且这次 commit 没碰它。
+
+所以现在项目形成了一种很明显的结构：
+
+```text
+          ┌──────────────┐
+          │ QueueRunner  │
+          │  engine.ts   │
+          │   80 KB      │
+          └──────┬───────┘
+                 │
+      ┌──────────┼──────────┐
+      ▼          ▼          ▼
+   Actions    Recovery   History
+      ↓
+   Runtime
+      ↓
+   Drivers
+```
+
+底下：
+
+```text
+actions
+runtime
+drivers
+```
+
+已经比较漂亮。
+
+但最上面的应用编排层还是一个 giant coordinator。
+
+所以我仍然认为：
+
+> **下一阶段最值得做的是拆 `engine.ts`，而不是继续改 Runtime。**
+
+---
+
+# 9. `AutoRecordController` 现在也已经长到 22.9KB
+
+当前：
+
+```text
+auto-record-controller.ts
+22,924 bytes
+```
+
+它现在负责：
+
+```text
+ManualSendObserver
+Gate
+Checkpoint
+Checkpoint durability
+Resume
+Conversation identity
+Capture Action
+Collect Action
+Manual grouping IPC
+Transcript
+History
+Logging
+```
+
+这已经有一点：
+
+> “第二个小 engine.ts”
+
+的苗头了。
+
+目前还能读。
+
+但是如果下一步加：
+
+```text
+编辑消息
+重新生成
+多回复
+branch
+附件
+图片
+Deep Research
+```
+
+这个类马上就可能到 40KB。
+
+---
+
+# 10. 我现在会建议提前把 AutoRecord 拆一层
+
+不是大重构。
+
+只拆职责：
+
+```text
+auto-record/
+
+├── auto-record-controller.ts
+├── auto-record-session.ts
+├── auto-record-checkpoint.ts
+├── manual-history-grouping-client.ts
+└── auto-record-history.ts
+```
+
+### Controller
+
+只管：
+
+```text
+Observer
+↓
+Gate
+↓
+Session
+```
+
+### Session
+
+负责：
+
+```text
+capture-user
+↓
+persist checkpoint
+↓
+collect reply
+↓
+resume
+```
+
+### History
+
+负责：
+
+```text
+grouping
+↓
+transcript
+↓
+TerminalHistoryCoordinator
+```
+
+这样 `AutoRecordController` 最终应该缩到几 KB。
+
+---
+
+# 11. 现在还剩一个我认为值得修的恢复边界问题
+
+这是这次修完后，我现在最想继续挑出来的 correctness 问题。
+
+持久化 checkpoint phase 仍然只有：
+
+```ts
+type AutoRecordCheckpointPhase =
+  | 'capturing-user'
+  | 'awaiting-reply';
+```
+
+但是内存现在实际上已经存在第三种状态：
+
+```text
+history 已写成功
+checkpoint 尚未 clear
+```
+
+也就是：
+
+```ts
+checkpointClearPending = true
+```
+
+问题是：
+
+> `checkpointClearPending` 只存在内存。
+
+假设：
+
+```text
+assistant 回复已捕获
+↓
+transcript 保存成功
+↓
+history 保存成功
+↓
+clear checkpoint 失败
+↓
+checkpointClearPending = true
+↓
+浏览器立刻刷新 / content script 被销毁
+```
+
+新的 JS context 重新读取 storage 时只看到：
+
+```text
+phase = awaiting-reply
+```
+
+它不知道：
+
+```text
+history 已经成功写过了
+```
+
+因此可能重新：
+
+```text
+collect reply
+↓
+persist transcript
+↓
+emit history
+↓
+clear
+```
+
+你现在大部分后续操作本身有幂等保护，所以**大概率不会产生严重重复数据**。
+
+但从状态机设计上说，这仍然不够完整。
+
+---
+
+# 12. 我建议加真正的第三阶段
+
+例如：
+
+```ts
+type AutoRecordCheckpointPhase =
+  | 'capturing-user'
+  | 'awaiting-reply'
+  | 'completed-pending-clear';
+```
+
+流程：
+
+```text
+capturing-user
+      ↓
+awaiting-reply
+      ↓
+persist transcript/history
+      ↓
+completed-pending-clear
+      ↓
+clear checkpoint
+```
+
+那么刷新以后：
+
+```text
+completed-pending-clear
+```
+
+直接：
+
+```text
+retry clear
+```
+
+而不会重新 collect。
+
+这是我现在认为**最值得补的一个小型正确性改进**。
+
+---
+
+# 13. Manual History 虽然并发问题修了，但存储扩展性问题还在
+
+现在 `manual-history-grouping.ts` 仍然保存：
+
+```ts
+{
+  tasks: {...},
+  allocations: {...}
+}
+```
+
+然后每条消息：
+
+```text
+storage.get(整个对象)
+↓
+cloneState(整个对象)
+↓
+修改一个节点
+↓
+storage.set(整个对象)
+```
+
+而 `allocations`：
+
+```text
+runId1
+runId2
+runId3
+...
+```
+
+还没有 GC。
+
+所以现在是：
+
+> **并发 correctness 修好了，scalability 还没有解决。**
+
+小规模完全没问题。
+
+如果以后自动记录成千上万条：
+
+```text
+N = 100
+没感觉
+
+N = 5,000
+开始明显
+
+N = 50,000
+就不应该再用一个巨大 JSON
+```
+
+---
+
+# 14. 后面建议改成分 key
+
+比如：
+
+```text
+manual-history/task/2026-08
+
+manual-history/event/2026-08-27
+
+manual-history/act/<conversation-id>
+
+manual-history/allocation/<run-id>
+```
+
+那么每次只更新：
+
+```text
+1 个 task
+1 个 event
+1 个 act
+1 个 allocation
+```
+
+而不是 clone 整棵历史树。
+
+或者以后直接：
+
+```text
+IndexedDB
+```
+
+但这个我认为不是现在必须修。
+
+可以列到中期优化。
+
+---
+
+# 15. `readStoredState()` 还有一点防御性不足
+
+现在：
+
+```ts
+if (
+  !isRecord(candidate.tasks) ||
+  !isRecord(candidate.allocations)
+) {
+  return empty
+}
+
+return cloneState(candidate as ManualHistoryGroupingState)
+```
+
+也就是说只检查了：
+
+```text
+tasks 是对象
+allocations 是对象
+```
+
+内部：
+
+```text
+task.events
+event.acts
+grouping fields
+```
+
+并没有完整 schema 验证。
+
+虽然 `cloneState()` 出错会被 catch，然后：
+
+```text
+return createManualHistoryGroupingState()
+```
+
+但这意味着：
+
+> 一小块存储损坏可能让整个 grouping state 被当成空状态。
+
+之后可能重新从：
+
+```text
+nodeIndex = 0
+```
+
+开始分配。
+
+最好加：
+
+```ts
+manualHistoryGroupingStateSchema
+```
+
+完整校验 persisted state。
+
+不要 silently：
+
+```text
+corrupt
+→ empty
+```
+
+更合理是：
+
+```text
+corrupt
+↓
+quarantine / log
+↓
+repair or refuse allocation
+```
+
+这属于中优先级的数据完整性改进。
+
+---
+
+# 16. Runtime messaging 现在有一点“local/cloud 混在一起”
+
+现在：
+
+```ts
+runtimeOperationSchema
+```
+
+里面同时有：
+
+```text
+AW_CLOUD_AUTH_STATUS
+AW_CLOUD_AUTH_SIGN_IN
+AW_CLOUD_AUTH_SIGN_OUT
+
+AW_HISTORY_ENTRY_ENQUEUE
+
+AW_MANUAL_HISTORY_GROUPING_ALLOCATE
+
+AW_LOG_DELIVERY_STATUS
+```
+
+然后 service worker：
+
+```text
+如果 manual grouping
+    → local handler
+
+否则如果 runtime operation
+    → cloud runtime
+```
+
+甚至 `cloud-runtime-handler` 为了 union exhaustive，还要知道：
+
+```text
+AW_MANUAL_HISTORY_GROUPING_ALLOCATE
+```
+
+并返回：
+
+```text
+OPERATION_UNAVAILABLE
+Manual history grouping is handled by the local runtime.
+```
+
+这不算 bug。
+
+但是架构语义上略别扭。
+
+以后可以变成：
+
+```text
+BackgroundRuntimeRouter
+
+├─ LocalRuntimeHandler
+│    └ manual history grouping
+│
+└─ CloudRuntimeHandler
+     ├ auth
+     ├ logs
+     └ delivery
+```
+
+这样：
+
+```text
+CloudRuntimeHandler
+```
+
+完全不需要知道：
+
+```text
+manual history grouping
+```
+
+---
+
+# 17. Runtime 的 `unknown register` 问题依然存在
+
+这一块目前没变化。
+
+比如：
+
+```ts
+state.registers[
+  CAPTURE_USER_MESSAGE_RESULT_REGISTER
+]
+```
+
+出来以后还是：
+
+```ts
+unknown
+```
+
+然后：
+
+```ts
+asCapturedUserMessage(...)
+```
+
+同样 reply：
+
+```ts
+asReplyCollectionResult(...)
+```
+
+所以现在是：
+
+```text
+Instruction typed
+↓
+Register untyped
+↓
+Application 手动 decode
+```
+
+这个不是急事。
+
+我仍建议最终做到：
+
+```text
+Runtime 内部
+Record<string, unknown>
+
+Action 对外
+typed result
+```
+
+不要把 Runtime 本身泛型化得很复杂。
+
+---
+
+# 18. 当前架构我会这样理解
+
+现在已经越来越清晰：
+
+```text
+┌─────────────────────────────┐
+│ UI                          │
+│ Popup / Options / Panel     │
+└─────────────┬───────────────┘
+              ↓
+┌─────────────────────────────┐
+│ Application orchestration   │
+│                             │
+│ QueueRunner                 │
+│ AutoRecordController        │
+│ Recovery                    │
+│ History                     │
+└─────────────┬───────────────┘
+              ↓
+┌─────────────────────────────┐
+│ Workflow / Actions          │
+│                             │
+│ SendMessage                 │
+│ CaptureUserMessage          │
+│ CollectReply                │
+│ Navigate                    │
+└─────────────┬───────────────┘
+              ↓
+┌─────────────────────────────┐
+│ WorkflowRuntime             │
+│                             │
+│ PC / Registers             │
+│ MachineState               │
+│ Suspend / Resume           │
+│ Side-effect commit         │
+└─────────────┬───────────────┘
+              ↓
+┌─────────────────────────────┐
+│ Drivers / Ports             │
+│ ChatGPT DOM / Browser       │
+└─────────────────────────────┘
+
+         IPC
+Content ─────────→ Service Worker
+                       ↓
+               local state owner
+                       ↓
+                 cloud logging
+```
+
+现在这个整体架构已经比较成熟了。
+
+---
+
+# 19. 我现在给你的优化顺序会变成这样
+
+上一次最紧急的是并发和 checkpoint。
+
+**现在这两个已经基本解决。**
+
+因此新的顺序是：
+
+| 优先级       | 当前建议                                            |
+| --------- | ----------------------------------------------- |
+| **P0/P1** | 给 AutoRecord 增加 `completed-pending-clear` 持久化阶段 |
+| **P1**    | 开始渐进拆 `engine.ts` 80KB                          |
+| **P1**    | 防止 `AutoRecordController` 继续成长为第二个 engine       |
+| **P1/P2** | persisted ManualHistory state 做完整 schema 校验     |
+| **P2**    | ManualHistory 从巨大单 JSON 改成分 key / IndexedDB     |
+| **P2**    | local runtime / cloud runtime message router 分开 |
+| **P2/P3** | Action 对外增加 typed results                       |
+| **P3**    | 继续减少 `queueActive` 与 Gate 双 authority           |
+
+---
+
+# 最后的判断
+
+如果你问我：
+
+> **“这个分支现在还乱不乱？”**
+
+我的答案是：**已经不乱了。**
+
+尤其这次：
+
+```text
+Content Script
+      ↓
+IPC
+      ↓
+Service Worker single writer
+```
+
+和：
+
+```text
+checkpoint save failure
+      ↓
+STOP
+```
+
+这两个改动说明现在已经不只是追求“代码分层好看”，而是在真正处理：
+
+```text
+并发
+持久化
+幂等
+恢复
+IPC 信任边界
+```
+
+这些工程问题。
+
+**我认为这个分支已经可以进入“合并前收尾”阶段，而不是再进行一次大型架构重构。** 我会优先补 `completed-pending-clear`，然后就可以把“手动消息自动记录”这项功能视为比较完整；之后另开重构任务，专门渐进拆掉 `engine.ts`，不要把 engine 重构和这个功能分支继续绑在一起。
