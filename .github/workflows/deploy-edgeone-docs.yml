@@ -125,7 +125,8 @@ jobs:
                 {Key: "BLOB_DOWNLOAD_GATEWAY_SECRET", Value: $gateway_secret}
               ]
             }' \
-            | curl --silent --show-error --fail-with-body --max-time 30 \
+            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
+                --silent --show-error --fail-with-body --max-time 30 \
                 -H 'Content-Type: application/json' \
                 -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
                 --data-binary @- \
@@ -149,7 +150,8 @@ jobs:
           jq -cn \
             --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
             '{Action: "DescribePagesProjectEnvs", ProjectId: $project_id}' \
-            | curl --silent --show-error --fail-with-body --max-time 30 \
+            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
+                --silent --show-error --fail-with-body --max-time 30 \
                 -H 'Content-Type: application/json' \
                 -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
                 --data-binary @- \
