@@ -1,13 +1,11 @@
 {
-  "title": "Framework",
-  "description": "A minimal selection from the official Fumadocs framework docs",
+  "title": "考研政治知识点",
+  "description": "按课程与教材章节组织的考研政治知识点系统讲义。",
   "pages": [
     "index",
-    "computer-organization",
-    "what-is-fumadocs",
-    "comparisons",
-    "test",
-    "mdx-syntax-example",
-    "tasks"
+    "marxism-principles",
+    "mao-zedong-thought",
+    "modern-chinese-history",
+    "xi-jinping-thought"
   ]
 }

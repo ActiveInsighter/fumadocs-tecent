@@ -37,7 +37,7 @@ export default async function Page({ params }: PageParameters) {
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover
           markdownUrl={markdownUrl}
-          githubUrl={`https://github.com/ActiveInsighter/fumadocs-vercel/blob/main/content/docs/${page.path}`}
+          githubUrl={`https://github.com/ActiveInsighter/fumadocs-tecent/blob/main/content/docs/${page.path}`}
         />
         {page.data.taskRecordId && page.data.messageRecordId && page.data.documentVersion ? (
           <DocumentDownloadMenu

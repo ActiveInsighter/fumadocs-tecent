@@ -6,16 +6,16 @@ import type {
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: 'Fumadocs Vercel',
+      title: '考研政治知识点',
     },
-    githubUrl: 'https://github.com/ActiveInsighter/fumadocs-vercel',
+    githubUrl: 'https://github.com/ActiveInsighter/fumadocs-tecent',
   };
 }
 
 export const linkItems: LinkItemType[] = [
   {
     type: 'main',
-    text: 'Documentation',
+    text: '知识点',
     url: '/docs',
   },
   {

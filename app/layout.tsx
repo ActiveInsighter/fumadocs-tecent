@@ -20,10 +20,10 @@ const sourceSerif4 = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Fumadocs Vercel',
-    template: '%s | Fumadocs Vercel',
+    default: '考研政治知识点',
+    template: '%s | 考研政治知识点',
   },
-  description: 'A Next.js documentation site powered by Fumadocs.',
+  description: '面向考研复习的政治知识点系统讲义，按课程和章节整理。',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
