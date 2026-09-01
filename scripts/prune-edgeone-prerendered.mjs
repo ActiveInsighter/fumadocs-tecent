@@ -1,4 +1,4 @@
-import { access, readdir, stat, unlink } from 'node:fs/promises';
+import { access, readdir, rm, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,16 +16,23 @@ async function exists(filePath) {
 async function walk(directory) {
   if (!(await exists(directory))) return [];
 
+  const files = await walkFiles(directory);
+  return files.filter(
+    (filePath) =>
+      prerenderedExtensions.has(path.extname(filePath)) ||
+      path.basename(filePath).endsWith('.prefetch.rsc'),
+  );
+}
+
+async function walkFiles(directory) {
+  if (!(await exists(directory))) return [];
+
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const filePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await walk(filePath)));
-    } else if (
-      entry.isFile() &&
-      (prerenderedExtensions.has(path.extname(entry.name)) ||
-        entry.name.endsWith('.prefetch.rsc'))
-    ) {
+      files.push(...(await walkFiles(filePath)));
+    } else if (entry.isFile()) {
       files.push(filePath);
     }
   }
@@ -57,6 +64,44 @@ export async function prunePrerenderedFiles({ assetsDir, serverAppDir }) {
   return { removedCount, removedBytes };
 }
 
+/**
+ * Next includes the optional sharp packages in the standalone server even
+ * when image optimization is disabled. This app does not use next/image, so
+ * those packages are not needed by the deployed SSR function.
+ */
+export async function pruneUnusedImageOptimizerPackages({ serverRoot }) {
+  const imagePackagesRoot = path.join(serverRoot, 'node_modules', '@img');
+  const candidates = [
+    path.join(serverRoot, 'node_modules', 'sharp'),
+    path.join(imagePackagesRoot, 'colour'),
+  ];
+
+  if (await exists(imagePackagesRoot)) {
+    for (const entry of await readdir(imagePackagesRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith('sharp-')) {
+        candidates.push(path.join(imagePackagesRoot, entry.name));
+      }
+    }
+  }
+
+  let removedCount = 0;
+  let removedBytes = 0;
+
+  for (const packagePath of candidates) {
+    if (!(await exists(packagePath))) continue;
+
+    const files = await walkFiles(packagePath);
+    removedBytes += (await Promise.all(files.map((filePath) => stat(filePath)))).reduce(
+      (total, file) => total + file.size,
+      0,
+    );
+    await rm(packagePath, { recursive: true, force: true });
+    removedCount += 1;
+  }
+
+  return { removedCount, removedBytes };
+}
+
 async function main() {
   const projectRoot = process.cwd();
   const assetsDir = path.join(projectRoot, '.edgeone', 'assets');
@@ -69,11 +114,22 @@ async function main() {
     'server',
     'app',
   );
+  const serverRoot = path.join(
+    projectRoot,
+    '.edgeone',
+    'cloud-functions',
+    'ssr-node',
+  );
 
   const result = await prunePrerenderedFiles({ assetsDir, serverAppDir });
+  const imageResult = await pruneUnusedImageOptimizerPackages({ serverRoot });
   const megabytes = (result.removedBytes / 1024 / 1024).toFixed(2);
+  const imageMegabytes = (imageResult.removedBytes / 1024 / 1024).toFixed(2);
   console.log(
     `[EdgeOne] Removed ${result.removedCount} duplicated prerendered files (${megabytes} MiB) from the SSR bundle.`,
+  );
+  console.log(
+    `[EdgeOne] Removed ${imageResult.removedCount} unused image optimizer packages (${imageMegabytes} MiB) from the SSR bundle.`,
   );
 }
 

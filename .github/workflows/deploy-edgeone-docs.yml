@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  EDGEONE_CLI_VERSION: 1.6.19
+  EDGEONE_CLI_VERSION: 1.6.31-3
   EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
   EDGEONE_DOCS_PROJECT_ID: makers-nycxgnmbk5ft
   EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
@@ -62,9 +62,38 @@ jobs:
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-build.log
 
-      - name: Remove duplicated prerendered files from SSR bundle
+      - name: Reduce the EdgeOne SSR bundle footprint
         shell: bash
         run: node scripts/prune-edgeone-prerendered.mjs
+
+      - name: Check EdgeOne upload footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          function_bytes="$(du -sb .edgeone/cloud-functions | awk '{print $1}')"
+          asset_bytes="$(du -sb .edgeone/assets | awk '{print $1}')"
+          largest_file="$({ find .edgeone -type f -printf '%s %p\n' | sort -nr | head -n 1; } || true)"
+
+          echo "cloud_functions_bytes=${function_bytes}"
+          echo "assets_bytes=${asset_bytes}"
+          echo "largest_file=${largest_file}"
+          {
+            echo "- Cloud Functions: ${function_bytes} bytes"
+            echo "- Static assets: ${asset_bytes} bytes"
+            echo "- Largest upload file: ${largest_file}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if (( function_bytes >= 128000000 )); then
+            echo "::error::Cloud Functions output is at or above EdgeOne's 128 MB limit."
+            exit 1
+          fi
+
+          largest_bytes="${largest_file%% *}"
+          if (( largest_bytes >= 25000000 )); then
+            echo '::error::An EdgeOne upload file is at or above the 25 MB limit.'
+            exit 1
+          fi
 
       - name: Deploy the prebuilt Fumadocs application
         id: deploy
@@ -323,6 +352,52 @@ jobs:
           [[ "${homepage_status}" == "200" ]]
           [[ "${signer_status}" == "401" ]]
           [[ "${download_status}" == "404" ]]
+
+      - name: Verify static HTML compression and CDN cache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${probe_dir}"' EXIT
+          headers_file="${probe_dir}/headers.txt"
+
+          curl --http1.1 --compressed \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --silent --show-error --max-time 30 \
+            -H 'Accept-Encoding: br, gzip' \
+            -D "${headers_file}" \
+            -o /dev/null \
+            -w 'static_docs_status=%{http_code}\nstatic_docs_ttfb=%{time_starttransfer}\nstatic_docs_total=%{time_total}\nstatic_docs_bytes=%{size_download}\n' \
+            'https://fumadocs.any1.tech/docs/408'
+
+          header_value() {
+            local key="$1"
+            awk -F': *' -v key="${key}" '
+              tolower($1) == tolower(key) {
+                sub(/\r$/, "", $2)
+                value = $2
+              }
+              END { print value }
+            ' "${headers_file}"
+          }
+
+          status="$(awk '$1 ~ /^HTTP\// { code = $2 } END { print code }' "${headers_file}")"
+          content_type="$(header_value 'Content-Type')"
+          content_encoding="$(header_value 'Content-Encoding')"
+          cache_control="$(header_value 'Cache-Control')"
+          edge_cache_status="$(header_value 'EO-Cache-Status')"
+
+          echo "static_docs_content_type=${content_type}"
+          echo "static_docs_content_encoding=${content_encoding}"
+          echo "static_docs_cache_control=${cache_control}"
+          echo "static_docs_edge_cache_status=${edge_cache_status}"
+
+          [[ "${status}" == "200" ]]
+          [[ "${content_type}" == text/html* ]]
+          [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]
+          [[ "${cache_control}" != *private* && "${cache_control}" != *no-store* ]]
+          [[ "${edge_cache_status}" == 'Cache Hit' || "${edge_cache_status}" == 'Cache Miss' ]]
 
       - name: Write deployment summary
         if: always()
