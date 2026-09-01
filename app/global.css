@@ -65,6 +65,21 @@
   --docs-code-block-background: #f3f3f3;
   --docs-inline-code-background: #ececec;
   --docs-table-rule: #e5e5e5;
+  --docs-action-background: color-mix(
+    in oklch,
+    var(--foreground) 4%,
+    var(--background)
+  );
+  --docs-action-hover: color-mix(
+    in oklch,
+    var(--foreground) 9%,
+    var(--background)
+  );
+  --docs-menu-hover: color-mix(
+    in oklch,
+    var(--foreground) 8%,
+    var(--popover)
+  );
 }
 
 .dark {
@@ -115,6 +130,21 @@
   --docs-code-block-background: #000;
   --docs-inline-code-background: #2a2a2a;
   --docs-table-rule: rgb(255 255 255 / 12%);
+  --docs-action-background: color-mix(
+    in oklch,
+    var(--foreground) 5%,
+    var(--background)
+  );
+  --docs-action-hover: color-mix(
+    in oklch,
+    var(--foreground) 12%,
+    var(--background)
+  );
+  --docs-menu-hover: color-mix(
+    in oklch,
+    var(--foreground) 10%,
+    var(--popover)
+  );
 }
 
 /* Expose the semantic variables as Tailwind CSS 4 utilities. */

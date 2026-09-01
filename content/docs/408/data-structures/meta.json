@@ -1,0 +1,14 @@
+{
+  "title": "数据结构",
+  "pages": [
+    "index",
+    "01-introduction",
+    "02-linear-list",
+    "03-stack-queue-array",
+    "04-string",
+    "05-tree-binary-tree",
+    "06-graph",
+    "07-search",
+    "08-sorting"
+  ]
+}

@@ -1,11 +1,9 @@
 {
-  "title": "考研政治知识点",
-  "description": "按课程与教材章节组织的考研政治知识点系统讲义。",
+  "title": "考研复习知识库",
+  "description": "408 计算机统考与考研政治课程的章节复习讲义。",
   "pages": [
     "index",
-    "marxism-principles",
-    "mao-zedong-thought",
-    "modern-chinese-history",
-    "xi-jinping-thought"
+    "408",
+    "politics"
   ]
 }

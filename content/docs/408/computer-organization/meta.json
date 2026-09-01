@@ -1,0 +1,13 @@
+{
+  "title": "计算机组成原理",
+  "pages": [
+    "index",
+    "01-system-overview",
+    "02-data-representation-and-arithmetic",
+    "03-memory-system",
+    "04-instruction-set",
+    "05-cpu",
+    "06-bus",
+    "07-io-system"
+  ]
+}

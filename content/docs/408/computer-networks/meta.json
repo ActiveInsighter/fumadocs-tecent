@@ -1,0 +1,12 @@
+{
+  "title": "计算机网络",
+  "pages": [
+    "index",
+    "01-network-architecture",
+    "02-physical-layer",
+    "03-data-link-layer",
+    "04-network-layer",
+    "05-transport-layer",
+    "06-application-layer"
+  ]
+}
