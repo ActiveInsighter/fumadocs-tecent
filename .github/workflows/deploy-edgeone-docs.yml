@@ -360,7 +360,20 @@ jobs:
 
           probe_dir="$(mktemp -d)"
           trap 'rm -rf -- "${probe_dir}"' EXIT
+          warmup_headers_file="${probe_dir}/warmup-headers.txt"
           headers_file="${probe_dir}/headers.txt"
+
+          warmup_status="$(
+            curl --http1.1 --compressed \
+              --retry 3 --retry-all-errors --retry-delay 2 \
+              --silent --show-error --max-time 30 \
+              -H 'Accept-Encoding: br, gzip' \
+              -D "${warmup_headers_file}" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              'https://fumadocs.any1.tech/docs/408'
+          )"
+          echo "static_docs_warmup_status=${warmup_status}"
 
           curl --http1.1 --compressed \
             --retry 3 --retry-all-errors --retry-delay 2 \
@@ -393,11 +406,12 @@ jobs:
           echo "static_docs_cache_control=${cache_control}"
           echo "static_docs_edge_cache_status=${edge_cache_status}"
 
+          [[ "${warmup_status}" == "200" ]]
           [[ "${status}" == "200" ]]
           [[ "${content_type}" == text/html* ]]
           [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]
           [[ "${cache_control}" != *private* && "${cache_control}" != *no-store* ]]
-          [[ "${edge_cache_status}" == 'Cache Hit' || "${edge_cache_status}" == 'Cache Miss' ]]
+          [[ "${edge_cache_status}" == 'Cache Hit' ]]
 
       - name: Write deployment summary
         if: always()

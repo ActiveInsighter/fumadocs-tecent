@@ -85,5 +85,6 @@ describe('docs deployment footprint', () => {
     expect(workflowSource).toContain('Accept-Encoding: br, gzip');
     expect(workflowSource).toContain('Content-Encoding');
     expect(workflowSource).toContain('EO-Cache-Status');
+    expect(workflowSource).toContain('static_docs_warmup_status');
   });
 });
