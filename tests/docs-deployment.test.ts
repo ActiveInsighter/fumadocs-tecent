@@ -3,16 +3,19 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('docs deployment footprint', () => {
-  it('prerenders every document page and rejects unknown runtime paths', () => {
-    const routeSource = readFileSync(
-      resolve(process.cwd(), 'app/docs/[[...slug]]/page.tsx'),
-      'utf8',
-    );
+  it('prerenders every content route and rejects unknown runtime paths', () => {
+    const contentRoutes = [
+      'app/docs/[[...slug]]/page.tsx',
+      'app/(home)/blog/[[...slug]]/page.tsx',
+      'app/llms.mdx/docs/[[...slug]]/route.ts',
+    ];
 
-    expect(routeSource).toMatch(/export function generateStaticParams\s*\(/u);
-    expect(routeSource).toMatch(
-      /return source\.generateParams\(\);/u,
-    );
-    expect(routeSource).toMatch(/export const dynamicParams = false;/u);
+    for (const route of contentRoutes) {
+      const routeSource = readFileSync(resolve(process.cwd(), route), 'utf8');
+
+      expect(routeSource, route).toMatch(/export function generateStaticParams\s*\(/u);
+      expect(routeSource, route).toMatch(/generateParams\(\);/u);
+      expect(routeSource, route).toMatch(/export const dynamicParams = false;/u);
+    }
   });
 });

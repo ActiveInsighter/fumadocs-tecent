@@ -12,6 +12,8 @@ type PageParameters = {
   }>;
 };
 
+export const dynamicParams = false;
+
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }

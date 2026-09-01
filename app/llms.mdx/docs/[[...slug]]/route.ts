@@ -3,6 +3,7 @@ import { source } from '@/lib/source';
 import { notFound } from 'next/navigation';
 
 export const revalidate = false;
+export const dynamicParams = false;
 
 type RouteParameters = {
   params: Promise<{
