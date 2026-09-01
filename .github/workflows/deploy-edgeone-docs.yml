@@ -62,6 +62,10 @@ jobs:
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-build.log
 
+      - name: Remove duplicated prerendered files from SSR bundle
+        shell: bash
+        run: node scripts/prune-edgeone-prerendered.mjs
+
       - name: Deploy the prebuilt Fumadocs application
         id: deploy
         shell: bash

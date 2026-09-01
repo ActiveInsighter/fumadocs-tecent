@@ -18,4 +18,13 @@ describe('docs deployment footprint', () => {
       expect(routeSource, route).toMatch(/export const dynamicParams = false;/u);
     }
   });
+
+  it('prunes prerendered files duplicated inside the EdgeOne SSR bundle', () => {
+    const workflowSource = readFileSync(
+      resolve(process.cwd(), '.github/workflows/deploy-edgeone-docs.yml'),
+      'utf8',
+    );
+
+    expect(workflowSource).toMatch(/node scripts\/prune-edgeone-prerendered\.mjs/u);
+  });
 });
