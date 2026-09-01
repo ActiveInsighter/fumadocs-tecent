@@ -3,12 +3,16 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('docs deployment footprint', () => {
-  it('renders document pages on demand instead of prerendering every document', () => {
+  it('prerenders every document page and rejects unknown runtime paths', () => {
     const routeSource = readFileSync(
       resolve(process.cwd(), 'app/docs/[[...slug]]/page.tsx'),
       'utf8',
     );
 
-    expect(routeSource).not.toMatch(/export function generateStaticParams\s*\(/u);
+    expect(routeSource).toMatch(/export function generateStaticParams\s*\(/u);
+    expect(routeSource).toMatch(
+      /return source\.generateParams\(\);/u,
+    );
+    expect(routeSource).toMatch(/export const dynamicParams = false;/u);
   });
 });

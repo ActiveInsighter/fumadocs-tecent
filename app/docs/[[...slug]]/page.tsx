@@ -19,6 +19,12 @@ type PageParameters = {
   }>;
 };
 
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return source.generateParams();
+}
+
 export default async function Page({ params }: PageParameters) {
   const { slug } = await params;
   const page = source.getPage(slug);
