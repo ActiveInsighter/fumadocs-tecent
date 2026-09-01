@@ -62,10 +62,6 @@ export default async function Page({ params }: PageParameters) {
   );
 }
 
-export function generateStaticParams() {
-  return source.generateParams();
-}
-
 export async function generateMetadata({
   params,
 }: PageParameters): Promise<Metadata> {
