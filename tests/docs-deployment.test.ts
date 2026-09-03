@@ -32,6 +32,18 @@ describe('docs deployment footprint', () => {
     expect(workflowSource).toMatch(/node scripts\/prune-edgeone-prerendered\.mjs/u);
   });
 
+  it('loads formula-heavy document bodies lazily for the server bundle', () => {
+    const sourceConfig = readFileSync(resolve(process.cwd(), 'source.config.ts'), 'utf8');
+    const pageSource = readFileSync(
+      resolve(process.cwd(), 'app/docs/[[...slug]]/page.tsx'),
+      'utf8',
+    );
+
+    expect(sourceConfig).toMatch(/docs:\s*\{[\s\S]*?async:\s*true/u);
+    expect(pageSource).toMatch(/const data = await page\.data\.load\(\);/u);
+    expect(pageSource).toMatch(/const MDX = data\.body;/u);
+  });
+
   it('removes static Next segment trees without removing flat route output', async () => {
     const serverAppDir = await mkdtemp(resolve(tmpdir(), 'fumadocs-edgeone-segments-'));
     const segmentFiles = [

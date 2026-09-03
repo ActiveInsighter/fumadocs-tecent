@@ -30,11 +30,12 @@ export default async function Page({ params }: PageParameters) {
   const page = source.getPage(slug);
   if (!page) notFound();
 
-  const MDX = page.data.body;
+  const data = await page.data.load();
+  const MDX = data.body;
   const markdownUrl = `${page.url}.md`;
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage toc={data.toc} full={page.data.full}>
       <DocsTitle className="font-medium">{page.data.title}</DocsTitle>
       <DocsDescription className="mb-1 font-normal">
         {page.data.description}
