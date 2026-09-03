@@ -74,8 +74,12 @@ jobs:
           set -euo pipefail
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l)"
-          largest_file_size="$(find .static-docs -type f -printf '%s\n' | sort -nr | head -n 1)"
-          largest_file_path="$(find .static-docs -type f -printf '%s %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          largest="$(
+            find .static-docs -type f -printf '%s %p\n' \
+              | awk '{ size = $1; $1 = ""; sub(/^ /, ""); if (size > max) { max = size; path = $0 } } END { print max, path }'
+          )"
+          largest_file_size="${largest%% *}"
+          largest_file_path="${largest#* }"
 
           echo "package_bytes=${package_bytes}"
           echo "file_count=${file_count}"
