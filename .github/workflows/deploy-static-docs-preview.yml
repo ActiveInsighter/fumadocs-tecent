@@ -105,10 +105,50 @@ jobs:
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
             --json \
-            | tee static-docs-deploy.json
+            | tee static-docs-deploy.log
 
-          deployment_url="$(jq -r '.url // empty' static-docs-deploy.json)"
+          deployment_url="$(
+            grep -Eo '\{"status":"success".*' static-docs-deploy.log \
+              | tail -n 1 \
+              | jq -r '.url // empty'
+          )"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify deployed routes from the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_url="${{ steps.deploy.outputs.deployment_url }}"
+          [[ -n "${deployment_url}" ]] || { echo '::error::No deployment URL captured.'; exit 1; }
+
+          cookie_jar="$(mktemp)"
+          warmup_status="$(
+            curl --silent --show-error --max-time 60 \
+              -L -c "${cookie_jar}" -b "${cookie_jar}" \
+              -o /dev/null -w '%{http_code}' \
+              "${deployment_url}"
+          )"
+          echo "warmup_status=${warmup_status}"
+
+          status_for() {
+            curl --silent --show-error --max-time 60 \
+              -L -b "${cookie_jar}" \
+              -o /dev/null -w '%{http_code}' \
+              "${deployment_url%%\?*}$1"
+          }
+
+          for path in \
+            "/" \
+            "/docs/" \
+            "/docs/math/advanced-mathematics/01-limits-continuity/" \
+            "/docs/math/advanced-mathematics/01-limits-continuity.md"; do
+            status="$(status_for "${path}")"
+            echo "route ${path} -> ${status}"
+          done
+
+          homepage_status="$(status_for "/")"
+          [[ "${warmup_status}" == "200" ]]
+          [[ "${homepage_status}" == "200" ]]
 
       - name: Write deployment summary
         if: always()
