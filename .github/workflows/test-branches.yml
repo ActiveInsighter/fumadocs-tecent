@@ -1,9 +1,6 @@
 name: Test non-main branches
 
 on:
-  push:
-    branches-ignore:
-      - main
   workflow_dispatch:
 
 permissions:
