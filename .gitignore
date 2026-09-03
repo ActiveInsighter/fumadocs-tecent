@@ -31,6 +31,8 @@ next-env.d.ts
 
 # deployment staging
 /.deploy-tmp
+/.static-docs
+/.static-docs-stage-*
 
 # system files
 .DS_Store
