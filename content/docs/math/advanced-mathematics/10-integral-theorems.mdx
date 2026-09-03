@@ -1,0 +1,2084 @@
+---
+title: "第 10 章 多元积分基本公式及其应用"
+description: "掌握格林、高斯、斯托克斯公式，以及路径无关、原函数、散度和旋度等综合问题。"
+---
+
+本章用格林公式、高斯公式和斯托克斯公式建立不同积分之间的转换关系，并进一步处理路径无关、全微分原函数、散度和旋度。
+
+---
+
+## 一、先建立整章的总框架
+
+第 9 章是在问：
+
+> 这些积分“分别怎么算”？
+
+第 10 章开始问：
+
+> **这些积分能不能互相转换？**
+
+最核心的三条桥梁是：
+
+| 公式     | 左边      | 右边   | 核心微分量                         |
+| ------ | ------- | ---- | ----------------------------- |
+| 格林公式   | 平面闭曲线积分 | 二重积分 | $Q_x-P_y$                     |
+| 高斯公式   | 闭曲面积分   | 三重积分 | $P_x+Q_y+R_z$                 |
+| 斯托克斯公式 | 空间闭曲线积分 | 曲面积分 | $\operatorname{rot}\mathbf F$ |
+
+所以整章可以浓缩成一句话：
+
+> **边界上的积分，通过求导，可以转化为内部区域上的积分。**
+
+这也是为什么这三条公式长得如此相似。
+
+---
+
+## 二、格林公式
+
+格林公式研究的是：
+
+> **平面闭曲线积分 $\leftrightarrow$ 二重积分。**
+
+它是本章考研中最重要、应用最灵活的公式之一。
+
+---
+
+### 1. 使用格林公式前必须理解“正向”
+
+设平面区域为 $D$，边界为 $L$。
+
+边界的**正向**规定为：
+
+> 沿曲线正向行进时，区域始终位于行进方向的左侧。
+
+所以对普通单连通区域：
+
+**外边界正向 = 逆时针。**
+
+如果区域中间有洞，例如圆环：
+
+* 外圆逆时针；
+* 内圆顺时针。
+
+这是以后“挖洞法”判断正负号的基础。
+
+---
+
+## 三、格林公式的标准形式
+
+设 $D$ 是平面有界闭区域，边界 $L$ 分段光滑，并且 $P,Q$ 在区域内具有连续的一阶偏导数，则
+
+$$
+\boxed{
+\oint_{L^+}P\,dx+Q\,dy
+=
+\iint_D
+\left(
+\frac{\partial Q}{\partial x}
+-
+\frac{\partial P}{\partial y}
+\right)
+dx\,dy
+}
+$$
+
+最重要的是记住：
+
+$$
+\boxed{Q_x-P_y}
+$$
+
+不要写成 $P_x-Q_y$。
+
+可以这样记：
+
+> $dx$ 前面是 $P$，$dy$ 前面是 $Q$，结果“后面对前面求 $x$，前面对后面求 $y$”：
+
+$$
+Q_x-P_y.
+$$
+
+---
+
+### 2. 格林公式的另一种形式
+
+还有
+
+$$
+\boxed{
+\iint_D(P_x+Q_y)\,dx\,dy
+=
+\oint_{L^+}P\,dy-Q\,dx
+}
+$$
+
+从向量分析角度，这其实是二维的散度定理。
+
+---
+
+## 四、格林公式为什么这么有用？
+
+假设要求直接计算
+
+$$
+\oint_L P\,dx+Q\,dy.
+$$
+
+直接参数化曲线可能非常麻烦。
+
+但如果发现
+
+$$
+Q_x-P_y
+$$
+
+特别简单，例如
+
+$$
+Q_x-P_y=1,
+$$
+
+那么立即得到
+
+$$
+\oint_LP\,dx+Q\,dy
+=
+\iint_D1\,dx\,dy
+=
+S_D.
+$$
+
+于是一个复杂曲线积分直接变成了**求面积**。
+
+这就是这一章最重要的思维：
+
+> 不要看到曲线积分就马上参数化。
+> 先算 $Q_x-P_y$ 看看。
+
+---
+
+## 五、利用格林公式求面积
+
+若 $L^+$ 是区域 $D$ 的正向边界，取
+
+$$
+P=-\frac y2,\qquad Q=\frac x2,
+$$
+
+则
+
+$$
+Q_x-P_y=1.
+$$
+
+所以
+
+$$
+\boxed{
+S_D
+=
+\frac12
+\oint_{L^+}
+(x\,dy-y\,dx)
+}
+$$
+
+还可以取其他形式：
+
+$$
+\boxed{
+S_D=\oint_{L^+}x\,dy
+}
+$$
+
+或
+
+$$
+\boxed{
+S_D=-\oint_{L^+}y\,dx
+}
+$$
+
+只要最后产生的 $Q_x-P_y=1$ 即可。
+
+---
+
+## 六、格林公式最常考的第一类题：闭曲线积分
+
+例如讲义中有一类题，积分非常复杂：
+
+$$
+I=\oint_C P\,dx+Q\,dy,
+$$
+
+但是求导后出现大量抵消：
+
+$$
+Q_x-P_y=y^2.
+$$
+
+于是立即变成
+
+$$
+I=\iint_Dy^2\,dx\,dy.
+$$
+
+原来可能含根式、对数、复杂组合函数，经过偏导之后全部消掉。
+
+这种题的核心不是积分，而是：
+
+$$
+\boxed{
+\text{先求 }Q_x-P_y
+}
+$$
+
+---
+
+### 标准做题流程
+
+以后看见平面闭曲线上的第二类曲线积分，可以直接形成条件反射：
+
+$$
+\boxed{
+P\,dx+Q\,dy
+\rightarrow
+Q_x-P_y
+\rightarrow
+D
+\rightarrow
+\iint_D(Q_x-P_y)\,dx\,dy
+}
+$$
+
+然后再考虑：
+
+* 对称性；
+* 极坐标；
+* 面积；
+* 质心；
+* 换积分次序。
+
+---
+
+## 七、非闭曲线：补线法
+
+这是非常高频的一类。
+
+如果 $L$ 从 $A$ 到 $B$，不是闭曲线：
+
+$$
+\int_LP\,dx+Q\,dy
+$$
+
+当然不能直接使用格林公式。
+
+怎么办？
+
+添加一条简单曲线 $L_0$，例如：
+
+* 直线段；
+* 坐标轴；
+* $x=\text{常数}$；
+* $y=\text{常数}$。
+
+使
+
+$$
+L+L_0
+$$
+
+构成闭曲线。
+
+于是
+
+$$
+\int_L+\int_{L_0}
+=
+\oint_{L+L_0}.
+$$
+
+再利用格林公式：
+
+$$
+\oint_{L+L_0}
+P\,dx+Q\,dy
+=
+\pm
+\iint_D(Q_x-P_y)\,dx\,dy.
+$$
+
+所以
+
+$$
+\boxed{
+\int_L
+=
+\text{区域积分}
+-
+\int_{L_0}
+}
+$$
+
+关键是：
+
+> **补的边一定要选最容易积分的。**
+
+---
+
+### 方向尤其重要
+
+如果 $L+L_0$ 是逆时针：
+
+$$
+\oint=P\text{ 的格林公式正号}.
+$$
+
+如果是顺时针：
+
+$$
+\oint
+=
+-
+\iint_D(Q_x-P_y)\,dx\,dy.
+$$
+
+很多格林公式题最后错一个负号，就是这里出了问题。
+
+---
+
+## 八、奇点问题：挖洞法
+
+这是第 10 章非常经典的难点。
+
+看下面这个微分式：
+
+$$
+-\frac{y}{x^2+y^2}\,dx
++
+\frac{x}{x^2+y^2}\,dy.
+$$
+
+令
+
+$$
+P=-\frac{y}{x^2+y^2},
+\qquad
+Q=\frac{x}{x^2+y^2}.
+$$
+
+在 $(x,y)\neq(0,0)$ 时，
+
+$$
+Q_x-P_y=0.
+$$
+
+有人因此马上写：
+
+$$
+\oint_LP\,dx+Q\,dy=0.
+$$
+
+这是错误的。
+
+因为在原点
+
+$$
+x^2+y^2=0,
+$$
+
+函数没有定义。
+
+所以如果 $L$ 包围原点，格林公式的光滑条件不满足。
+
+---
+
+### 正确办法：挖掉原点
+
+在原点周围挖一个小圆
+
+$$
+C_\varepsilon:x^2+y^2=\varepsilon^2.
+$$
+
+剩下的区域是复连通区域。
+
+在这个新区域里面：
+
+$$
+Q_x-P_y=0.
+$$
+
+所以外边界积分与小圆边界积分之间存在关系。
+
+对于经典微分式
+
+$$
+\boxed{
+\frac{-y\,dx+x\,dy}{x^2+y^2}
+}
+$$
+
+绕原点逆时针一圈，有
+
+$$
+\boxed{
+\oint
+\frac{-y\,dx+x\,dy}{x^2+y^2}
+=
+2\pi
+}
+$$
+
+事实上令
+
+$$
+x=r\cos\theta,\qquad y=r\sin\theta,
+$$
+
+则
+
+$$
+-y\,dx+x\,dy=r^2\,d\theta,
+$$
+
+同时
+
+$$
+x^2+y^2=r^2.
+$$
+
+所以
+
+$$
+\frac{-y\,dx+x\,dy}{x^2+y^2}
+=d\theta.
+$$
+
+于是
+
+$$
+\int_0^{2\pi}d\theta=2\pi.
+$$
+
+这是第 10 章必须认识的模型。
+
+---
+
+## 九、高斯公式
+
+格林公式是二维：
+
+$$
+\text{闭曲线}\rightarrow\text{平面区域}.
+$$
+
+高斯公式就是三维版本：
+
+$$
+\boxed{
+\text{闭曲面}\rightarrow\text{空间区域}.
+}
+$$
+
+设 $\Omega$ 是空间闭区域，边界为 $S$，且 $S$ 取**外侧**，则
+
+$$
+\boxed{
+\iint_{S^+}
+P\,dy\,dz
++
+Q\,dz\,dx
++
+R\,dx\,dy
+=
+\iiint_\Omega
+(P_x+Q_y+R_z)\,dV
+}
+$$
+
+记忆核心：
+
+$$
+\boxed{
+P_x+Q_y+R_z
+}
+$$
+
+也就是各分量对自己的变量求偏导再相加。
+
+---
+
+## 十、散度
+
+设
+
+$$
+\mathbf F=(P,Q,R).
+$$
+
+定义
+
+$$
+\boxed{
+\operatorname{div}\mathbf F
+=
+P_x+Q_y+R_z
+}
+$$
+
+又写作
+
+$$
+\nabla\cdot\mathbf F.
+$$
+
+因此高斯公式就是
+
+$$
+\boxed{
+\iint_{S^+}\mathbf F\cdot\mathbf n\,dS
+=
+\iiint_\Omega
+\operatorname{div}\mathbf F\,dV
+}
+$$
+
+这就是著名的**散度定理**。
+
+---
+
+### 散度的物理直觉
+
+把 $\mathbf F$ 想象成水流速度场。
+
+如果一点附近：
+
+$$
+\operatorname{div}\mathbf F>0,
+$$
+
+说明流出去的比流进来的多，这一点类似一个**源**。
+
+如果
+
+$$
+\operatorname{div}\mathbf F<0,
+$$
+
+类似一个**汇**。
+
+如果
+
+$$
+\operatorname{div}\mathbf F=0,
+$$
+
+意味着局部净流出量为零。
+
+所以高斯公式说的是：
+
+> 整个闭曲面流出去的总通量
+> = 内部所有“源强度”的总体积积分。
+
+---
+
+## 十一、高斯公式的典型闭曲面题
+
+讲义中的典型例子：
+
+$$
+I
+=
+\iint_S
+x^2\,dy\,dz
++
+y^2\,dz\,dx
++
+z^2\,dx\,dy,
+$$
+
+其中 $S$ 是长方体
+
+$$
+0\le x\le a,\qquad
+0\le y\le b,\qquad
+0\le z\le c
+$$
+
+的外表面。
+
+如果直接六个面逐个积分，非常繁琐。
+
+利用高斯公式：
+
+$$
+P=x^2,\quad Q=y^2,\quad R=z^2.
+$$
+
+所以
+
+$$
+P_x+Q_y+R_z=2x+2y+2z.
+$$
+
+于是
+
+$$
+I
+=
+2\iiint_\Omega(x+y+z)\,dV.
+$$
+
+计算得到
+
+$$
+\boxed{
+I=abc(a+b+c)
+}
+$$
+
+这非常典型地体现了：
+
+> **分块复杂的闭曲面，往往用高斯公式特别简单。**
+
+---
+
+## 十二、非闭曲面：补面法
+
+高斯公式要求的是：
+
+$$
+\boxed{\text{闭曲面}}
+$$
+
+所以如果题目只给一个上半球：
+
+$$
+x^2+y^2+z^2=a^2,\qquad z\ge0,
+$$
+
+不能直接用。
+
+要补上底面：
+
+$$
+z=0,\qquad x^2+y^2\le a^2.
+$$
+
+设上半球为 $\Sigma$，底面为 $\Sigma_0$。
+
+则
+
+$$
+\Sigma+\Sigma_0
+$$
+
+组成闭曲面。
+
+于是
+
+$$
+\iint_{\Sigma}
+=
+\iint_{\Sigma+\Sigma_0}
+-
+\iint_{\Sigma_0}.
+$$
+
+第一部分用高斯：
+
+$$
+\iint_{\Sigma+\Sigma_0}
+=
+\iiint_\Omega
+(P_x+Q_y+R_z)\,dV.
+$$
+
+所以形成标准套路：
+
+$$
+\boxed{
+\text{非闭曲面}
+\rightarrow
+\text{补面}
+\rightarrow
+\text{高斯}
+\rightarrow
+\text{减补面}
+}
+$$
+
+讲义里的上半球例题正是这种处理方式。
+
+---
+
+## 十三、用高斯公式表示体积
+
+取
+
+$$
+P=x,\qquad Q=y,\qquad R=z.
+$$
+
+于是
+
+$$
+P_x+Q_y+R_z=3.
+$$
+
+所以
+
+$$
+3V
+=
+\iint_{S^+}
+x\,dy\,dz
++y\,dz\,dx
++z\,dx\,dy.
+$$
+
+即
+
+$$
+\boxed{
+V
+=
+\frac13
+\iint_{S^+}
+\left(
+x\,dy\,dz
++y\,dz\,dx
++z\,dx\,dy
+\right)
+}
+$$
+
+这与格林公式求面积完全对应：
+
+$$
+\boxed{
+\text{格林可求面积，高斯可求体积。}
+}
+$$
+
+---
+
+## 十四、斯托克斯公式
+
+现在有了：
+
+$$
+\text{平面闭曲线}\leftrightarrow\text{二重积分}
+$$
+
+和
+
+$$
+\text{闭曲面}\leftrightarrow\text{三重积分}.
+$$
+
+还缺一个：
+
+$$
+\boxed{
+\text{空间闭曲线}\leftrightarrow\text{曲面积分}.
+}
+$$
+
+这就是斯托克斯公式。
+
+设空间闭曲线 $\Gamma$ 是有向曲面 $S$ 的边界，则
+
+$$
+\boxed{
+\oint_\Gamma
+P\,dx+Q\,dy+R\,dz
+=
+\iint_S
+\operatorname{rot}\mathbf F
+\cdot\mathbf n\,dS
+}
+$$
+
+其中
+
+$$
+\mathbf F=(P,Q,R).
+$$
+
+---
+
+## 十五、旋度
+
+旋度定义为
+
+$$
+\boxed{
+\operatorname{rot}\mathbf F
+=
+\nabla\times\mathbf F
+}
+$$
+
+计算公式：
+
+$$
+\boxed{
+\operatorname{rot}\mathbf F
+=
+\left(
+R_y-Q_z,\,
+P_z-R_x,\,
+Q_x-P_y
+\right)
+}
+$$
+
+也经常写成行列式：
+
+$$
+\operatorname{rot}\mathbf F
+=
+\begin{vmatrix}
+\mathbf i&\mathbf j&\mathbf k\\
+\dfrac{\partial}{\partial x}
+&
+\dfrac{\partial}{\partial y}
+&
+\dfrac{\partial}{\partial z}\\
+P&Q&R
+\end{vmatrix}.
+$$
+
+---
+
+### 散度与旋度千万不要混
+
+散度：
+
+$$
+\operatorname{div}\mathbf F=P_x+Q_y+R_z
+$$
+
+是一个**数**。
+
+旋度：
+
+$$
+\operatorname{rot}\mathbf F
+=
+(R_y-Q_z,P_z-R_x,Q_x-P_y)
+$$
+
+是一个**向量**。
+
+可以理解为：
+
+> 散度：这个点有没有“往外冒”？
+
+> 旋度：这个点附近有没有“打旋”？
+
+---
+
+## 十六、斯托克斯公式最重要的技巧：换曲面
+
+这是斯托克斯公式比直接曲面积分更强大的地方。
+
+只要：
+
+1. 边界仍然是同一个 $\Gamma$；
+2. 定向保持一致；
+3. 向量场在中间区域满足光滑条件；
+
+那么跨越 $\Gamma$ 的曲面可以换。
+
+也就是说：
+
+> 原曲面很复杂，完全没必要在原曲面上积分。
+
+例如某空间曲线是球面与平面的交线。
+
+与其在球面片上积分，不如直接选择：
+
+$$
+\boxed{\text{交线所在平面中的平面片}}
+$$
+
+因为平面通常最好算。
+
+所以斯托克斯题看到复杂空间闭曲线时，第一反应不应该是参数化曲线，而应该是：
+
+$$
+\boxed{
+\text{找一个最简单的跨越曲面}
+}
+$$
+
+---
+
+## 十七、斯托克斯公式中的方向：右手法则
+
+这是最大的易错点之一。
+
+曲面法向 $\mathbf n$ 与边界方向 $\Gamma$ 必须满足右手法则：
+
+> 右手四指沿 $\Gamma$ 的正向弯曲，拇指方向就是曲面法向。
+
+例如法向朝 $+z$：
+
+从 $+z$ 轴往下看，边界应该是**逆时针**。
+
+如果题目给的是相反方向，最终积分：
+
+$$
+\boxed{\text{整体乘 }-1}
+$$
+
+---
+
+## 十八、三大公式其实是同一个思想
+
+现在可以把它们放在一起。
+
+### 格林
+
+$$
+\boxed{
+\oint_{\partial D}
+P\,dx+Q\,dy
+=
+\iint_D(Q_x-P_y)\,dA
+}
+$$
+
+#### 高斯
+
+$$
+\boxed{
+\iint_{\partial\Omega}
+\mathbf F\cdot\mathbf n\,dS
+=
+\iiint_\Omega
+\operatorname{div}\mathbf F\,dV
+}
+$$
+
+#### 斯托克斯
+
+$$
+\boxed{
+\oint_{\partial S}
+\mathbf F\cdot d\mathbf r
+=
+\iint_S
+\operatorname{rot}\mathbf F\cdot\mathbf n\,dS
+}
+$$
+
+共同思想：
+
+$$
+\boxed{
+\text{边界积分}
+=
+\text{内部的导数积分}
+}
+$$
+
+讲义也特别强调，格林公式实际上可以看作斯托克斯公式和高斯公式在二维平面中的相应特殊情形。
+
+---
+
+## 十九、曲线积分与路径无关
+
+这是本章的第二条主线，而且考研特别重要。
+
+考虑
+
+$$
+\int_LP\,dx+Q\,dy.
+$$
+
+如果从 $A$ 到 $B$，无论走哪条路径 $L$，结果都一样，就称：
+
+$$
+\boxed{
+\text{曲线积分与路径无关}
+}
+$$
+
+这意味着它只由：
+
+$$
+\boxed{\text{起点和终点}}
+$$
+
+决定。
+
+---
+
+## 二十、路径无关的本质：存在原函数
+
+若存在函数 $u(x,y)$，满足
+
+$$
+du=P\,dx+Q\,dy,
+$$
+
+也就是
+
+$$
+u_x=P,\qquad u_y=Q,
+$$
+
+那么
+
+$$
+\int_A^BP\,dx+Q\,dy
+=
+\int_A^Bdu
+=
+u(B)-u(A).
+$$
+
+显然只依赖端点。
+
+于是有：
+
+$$
+\boxed{
+\text{有原函数}
+\Rightarrow
+\text{路径无关}
+}
+$$
+
+---
+
+## 二十一、单连通区域中的四个等价条件
+
+在 $P,Q$ 具有连续一阶偏导，并且区域 $D$ **单连通**时，以下条件等价：
+
+$$
+\boxed{
+\begin{aligned}
+&\int_LP\,dx+Q\,dy\text{ 与路径无关}\\
+\Longleftrightarrow\;&
+\oint_CP\,dx+Q\,dy=0\\
+\Longleftrightarrow\;&
+P_y=Q_x\\
+\Longleftrightarrow\;&
+\exists u,\quad du=P\,dx+Q\,dy.
+\end{aligned}
+}
+$$
+
+考研中最常使用的是：
+
+$$
+\boxed{P_y=Q_x}
+$$
+
+或等价写法
+
+$$
+\boxed{Q_x-P_y=0}.
+$$
+
+为什么？
+
+格林公式告诉我们：
+
+$$
+\oint_C
+P\,dx+Q\,dy
+=
+\iint_D(Q_x-P_y)\,dx\,dy.
+$$
+
+如果
+
+$$
+Q_x-P_y=0,
+$$
+
+则所有闭曲线积分都为零，于是路径无关。
+
+---
+
+## 二十二、一个极其重要的限定词：单连通
+
+很多人做这类题最大的错误是：
+
+看到
+
+$$
+P_y=Q_x
+$$
+
+就马上宣布路径无关。
+
+不一定。
+
+例如
+
+$$
+D=\mathbb R^2\setminus\{(0,0)\}.
+$$
+
+区域中间有洞，不是单连通。
+
+经典例子仍然是
+
+$$
+\frac{-y\,dx+x\,dy}{x^2+y^2}.
+$$
+
+原点之外满足
+
+$$
+P_y=Q_x,
+$$
+
+但绕原点一圈：
+
+$$
+\oint
+\frac{-y\,dx+x\,dy}{x^2+y^2}
+=
+2\pi\ne0.
+$$
+
+所以不存在整个穿孔平面上的单值原函数。
+
+因此务必记住：
+
+$$
+\boxed{
+P_y=Q_x
++
+\text{单连通}
+\Rightarrow
+\text{路径无关}
+}
+$$
+
+如果不是单连通区域，就需要进一步判断。
+
+---
+
+## 二十三、但是“非单连通”不等于“一定路径有关”
+
+这个区别非常重要。
+
+非单连通区域只是说：
+
+$$
+P_y=Q_x
+$$
+
+不再是充分条件。
+
+但它仍可能存在原函数。
+
+讲义中的例子考虑
+
+$$
+\frac{x\,dx+y\,dy}
+{1+\ln^2\sqrt{x^2+y^2}}.
+$$
+
+即使区域是
+
+$$
+x^2+y^2>0,
+$$
+
+也可以直接凑成
+
+$$
+d\left[
+\int_1^{\sqrt{x^2+y^2}}
+\frac{t\,dt}{1+\ln^2t}
+\right].
+$$
+
+所以仍然存在原函数，积分仍与路径无关。
+
+因此逻辑是：
+
+$$
+\boxed{
+\text{非单连通}
+\Rightarrow
+\text{不能只靠 }P_y=Q_x
+}
+$$
+
+而不是：
+
+$$
+\text{非单连通}\Rightarrow\text{一定路径有关}.
+$$
+
+---
+
+## 二十四、求原函数的三种标准方法
+
+这是考研必须熟练掌握的。
+
+---
+
+### 方法一：不定积分法
+
+已知
+
+$$
+u_x=P,\qquad u_y=Q.
+$$
+
+例如从
+
+$$
+u_x=P(x,y)
+$$
+
+出发，对 $x$ 积分：
+
+$$
+u(x,y)
+=
+\int P(x,y)\,dx+\varphi(y).
+$$
+
+注意：
+
+> 因为是对 $x$ 积分，“积分常数”可以是 $y$ 的函数。
+
+然后对 $y$ 求偏导：
+
+$$
+u_y
+=
+\frac{\partial}{\partial y}
+\int P(x,y)\,dx
++
+\varphi'(y).
+$$
+
+与 $Q$ 比较，求出
+
+$$
+\varphi'(y).
+$$
+
+再积分得到 $\varphi(y)$。
+
+---
+
+### 方法二：特殊路径法
+
+已知积分路径无关，从 $(x_0,y_0)$ 到 $(x,y)$ 时，直接换成折线：
+
+$$
+(x_0,y_0)
+\rightarrow
+(x,y_0)
+\rightarrow
+(x,y).
+$$
+
+于是
+
+$$
+\boxed{
+u(x,y)
+=
+\int_{x_0}^{x}P(t,y_0)\,dt
++
+\int_{y_0}^{y}Q(x,t)\,dt
+}
+$$
+
+往往比直接求原函数还快。
+
+---
+
+### 方法三：凑微分
+
+例如看到
+
+$$
+x\,dx+y\,dy
+$$
+
+马上想到
+
+$$
+\frac12d(x^2+y^2).
+$$
+
+看到
+
+$$
+y\,dx+x\,dy
+$$
+
+想到
+
+$$
+d(xy).
+$$
+
+看到
+
+$$
+\frac{x\,dx+y\,dy}{x^2+y^2}
+$$
+
+想到
+
+$$
+\frac12d\ln(x^2+y^2).
+$$
+
+如果能够直接看出来，凑微分最快。
+
+但讲义中特别强调的思路是：
+
+> 看不出来不要硬凑，不定积分法一定能系统处理。
+
+---
+
+## 二十五、含参数的路径无关问题
+
+常见考法：
+
+求 $\lambda$，使
+
+$$
+\int_LP(x,y,\lambda)\,dx
++
+Q(x,y,\lambda)\,dy
+$$
+
+与路径无关。
+
+在单连通区域中直接写：
+
+$$
+P_y=Q_x.
+$$
+
+然后解参数。
+
+例如如果
+
+$$
+P_y=2\lambda x+y,
+$$
+
+$$
+Q_x=6x+y,
+$$
+
+为了恒等成立，需要
+
+$$
+2\lambda=6,
+$$
+
+所以
+
+$$
+\lambda=3.
+$$
+
+这里一定注意：
+
+> 是对所有 $(x,y)$ 恒成立，不是取某一个点成立。
+
+---
+
+## 二十六、散度、旋度、梯度之间的关系
+
+设数量函数 $u(x,y,z)$。
+
+梯度：
+
+$$
+\boxed{
+\operatorname{grad}u
+=
+\nabla u
+=
+(u_x,u_y,u_z)
+}
+$$
+
+散度：
+
+$$
+\boxed{
+\operatorname{div}\mathbf F
+=
+\nabla\cdot\mathbf F
+}
+$$
+
+旋度：
+
+$$
+\boxed{
+\operatorname{rot}\mathbf F
+=
+\nabla\times\mathbf F
+}
+$$
+
+还有一个重要算子：
+
+$$
+\boxed{
+\Delta u
+=
+u_{xx}+u_{yy}+u_{zz}
+}
+$$
+
+称为拉普拉斯算子。
+
+由于
+
+$$
+\operatorname{grad}u=(u_x,u_y,u_z),
+$$
+
+所以
+
+$$
+\boxed{
+\operatorname{div}(\operatorname{grad}u)
+=
+\Delta u
+}
+$$
+
+---
+
+## 二十七、三个必须会的恒等式
+
+当相应二阶偏导连续时：
+
+$$
+\boxed{
+\operatorname{div}(\operatorname{grad}u)
+=
+\Delta u
+}
+$$
+
+$$
+\boxed{
+\operatorname{rot}(\operatorname{grad}u)
+=
+\mathbf0
+}
+$$
+
+$$
+\boxed{
+\operatorname{div}(\operatorname{rot}\mathbf F)
+=
+0
+}
+$$
+
+其中后两个来自混合偏导可交换。
+
+例如
+
+$$
+u_{xy}=u_{yx}.
+$$
+
+所以：
+
+> 梯度场一定无旋。
+
+以及：
+
+> 旋度场一定无散。
+
+但逆命题需要附加区域条件，不能随意反推。
+
+---
+
+## 二十八、径向函数是综合题重点
+
+讲义中专门给出了这一类题。
+
+令
+
+$$
+r=\sqrt{x^2+y^2+z^2},
+$$
+
+且
+
+$$
+u=f(r).
+$$
+
+首先：
+
+$$
+r_x=\frac{x}{r},
+\qquad
+r_y=\frac{y}{r},
+\qquad
+r_z=\frac{z}{r}.
+$$
+
+所以
+
+$$
+\boxed{
+\nabla f(r)
+=
+\frac{f'(r)}{r}(x,y,z)
+}
+$$
+
+进一步可得非常重要的公式：
+
+$$
+\boxed{
+\Delta f(r)
+=
+f''(r)
++
+\frac{2}{r}f'(r)
+}
+$$
+
+这是三维径向函数的拉普拉斯公式。
+
+讲义中的综合题就是先利用高斯公式，把“对任意闭曲面的积分条件”转化成偏微分方程，再利用这一公式，把偏微分方程降低成关于 $r$ 的常微分方程。
+
+---
+
+## 二十九、“任意区域成立”类综合题
+
+这一类非常有考研味道。
+
+例如已知：
+
+$$
+\iiint_\Omega f(x,y,z)\,dV=0
+$$
+
+对于任意空间子区域 $\Omega$ 都成立。
+
+如果 $f$ 连续，那么一定有
+
+$$
+\boxed{
+f(x,y,z)=0.
+}
+$$
+
+因为如果某一点
+
+$$
+f(x_0,y_0,z_0)>0,
+$$
+
+根据连续性，它附近一个小区域内仍有
+
+$$
+f>0,
+$$
+
+那么这个小区域上的积分就应该大于零，与题设矛盾。
+
+所以：
+
+$$
+\boxed{
+\forall\Omega,\
+\iiint_\Omega f\,dV=0
+\Rightarrow
+f\equiv0.
+}
+$$
+
+---
+
+### 典型应用
+
+如果题目给出对任意闭曲面 $S$：
+
+$$
+\iint_S
+u_x\,dy\,dz
++
+u_y\,dz\,dx
++
+u_z\,dx\,dy
+=
+\iiint_\Omega g(x,y,z)\,dV,
+$$
+
+使用高斯公式：
+
+$$
+\iiint_\Omega
+(u_{xx}+u_{yy}+u_{zz})\,dV
+=
+\iiint_\Omega g\,dV.
+$$
+
+于是
+
+$$
+\iiint_\Omega
+(\Delta u-g)\,dV=0.
+$$
+
+由于 $\Omega$ 任意：
+
+$$
+\boxed{
+\Delta u=g.
+}
+$$
+
+这样一道复杂积分题就变成了微分方程。
+
+---
+
+## 三十、格林第一恒等式与综合证明
+
+讲义最后还给出了格林公式的进一步应用。
+
+二维散度形式：
+
+$$
+\boxed{
+\iint_D(P_x+Q_y)\,dA
+=
+\int_C
+(P\cos\alpha+Q\cos\beta)\,ds
+}
+$$
+
+其中
+
+$$
+\mathbf n=(\cos\alpha,\cos\beta)
+$$
+
+为外单位法向量。
+
+若取
+
+$$
+P=v u_x,
+\qquad
+Q=v u_y,
+$$
+
+则得到格林第一恒等式：
+
+$$
+\boxed{
+\iint_Dv\Delta u\,dA
+=
+\int_C
+v\frac{\partial u}{\partial n}\,ds
+-
+\iint_D
+\nabla u\cdot\nabla v\,dA
+}
+$$
+
+即
+
+$$
+\iint_Dv(u_{xx}+u_{yy})\,dA
+=
+\int_Cv\frac{\partial u}{\partial n}\,ds
+-
+\iint_D
+(u_xv_x+u_yv_y)\,dA.
+$$
+
+讲义用它证明了调和函数边值问题的唯一性。
+
+---
+
+## 三十一、为什么取 $v=u$ 特别重要？
+
+取
+
+$$
+v=u,
+$$
+
+得到
+
+$$
+\iint_Du\Delta u\,dA
+=
+\int_Cu\frac{\partial u}{\partial n}\,ds
+-
+\iint_D
+(u_x^2+u_y^2)\,dA.
+$$
+
+如果同时满足
+
+$$
+\Delta u=0
+$$
+
+以及
+
+$$
+u|_C=0,
+$$
+
+那么前两部分都是 $0$。
+
+所以
+
+$$
+\iint_D
+(u_x^2+u_y^2)\,dA
+=0.
+$$
+
+注意：
+
+$$
+u_x^2+u_y^2\ge0.
+$$
+
+连续非负函数积分为零，只能说明
+
+$$
+u_x^2+u_y^2=0.
+$$
+
+于是
+
+$$
+u_x=u_y=0.
+$$
+
+所以
+
+$$
+u=\text{常数}.
+$$
+
+结合边界
+
+$$
+u=0,
+$$
+
+得到
+
+$$
+\boxed{u\equiv0}.
+$$
+
+这是经典的：
+
+> **把问题转化成非负积分为零。**
+
+以后看到证明唯一性、证明函数恒为零的题，一定留意这种技巧。
+
+---
+
+## 三十二、第 10 章考研题型总结
+
+讲义本章后半部分把常考题归纳为三大公式应用、路径无关与原函数、散度旋度以及综合题。结合前面的例题，做题时可以用下面这张决策表。
+
+| 题目特征       | 第一反应               |
+| ---------- | ------------------ |
+| 平面闭曲线第二类积分 | 格林公式               |
+| 平面非闭曲线     | 补线后格林              |
+| 区域存在奇点     | 挖洞                 |
+| 求平面面积      | 格林面积公式             |
+| 闭曲面第二类积分   | 高斯公式               |
+| 非闭曲面       | 补面后高斯              |
+| 求闭曲面所围体积   | 高斯体积公式             |
+| 空间闭曲线积分    | 斯托克斯公式             |
+| 原曲面很复杂     | 换简单跨越曲面            |
+| 问路径是否无关    | 先看区域，再算 $P_y,Q_x$  |
+| 求全微分原函数    | 不定积分法 / 特殊路径 / 凑微分 |
+| 求参数使路径无关   | 令 $P_y=Q_x$ 恒成立    |
+| 求通量        | 想散度、高斯             |
+| 求环量        | 想旋度、斯托克斯           |
+| 对任意闭区域成立   | 化为区域积分后令被积函数为零     |
+
+---
+
+## 三十三、三个公式最容易混淆的地方
+
+可以把它们记成下面三个“关键词”。
+
+### 格林公式
+
+$$
+\boxed{
+\text{平面 + 闭曲线 + }Q_x-P_y
+}
+$$
+
+正向：
+
+$$
+\boxed{\text{逆时针}}
+$$
+
+---
+
+#### 高斯公式
+
+$$
+\boxed{
+\text{空间 + 闭曲面 + }P_x+Q_y+R_z
+}
+$$
+
+方向：
+
+$$
+\boxed{\text{外法向}}
+$$
+
+---
+
+#### 斯托克斯公式
+
+$$
+\boxed{
+\text{空间 + 闭曲线 + }\operatorname{rot}\mathbf F
+}
+$$
+
+方向：
+
+$$
+\boxed{\text{右手法则}}
+$$
+
+这是整章最应该背熟的三组信息。
+
+---
+
+## 三十四、考场上的统一解题程序
+
+无论是格林、高斯还是斯托克斯，建议都先执行四步检查：
+
+$$
+\boxed{
+\text{闭合性}
+\rightarrow
+\text{光滑性}
+\rightarrow
+\text{方向}
+\rightarrow
+\text{转换后是否更容易}
+}
+$$
+
+### 第一步：闭不闭？
+
+平面曲线不闭：
+
+$$
+\text{补线}.
+$$
+
+曲面不闭：
+
+$$
+\text{补面}.
+$$
+
+---
+
+#### 第二步：里面有没有奇点？
+
+如果
+
+$$
+P,Q,R
+$$
+
+在区域内部有分母为零、对数无定义等情况：
+
+不能直接套公式。
+
+考虑：
+
+$$
+\boxed{\text{挖洞}}
+$$
+
+---
+
+#### 第三步：方向对不对？
+
+格林：
+
+$$
+\text{区域在左边}.
+$$
+
+高斯：
+
+$$
+\text{外法向}.
+$$
+
+斯托克斯：
+
+$$
+\text{右手法则}.
+$$
+
+方向反了：
+
+$$
+\boxed{\text{答案整体乘 }-1}.
+$$
+
+---
+
+#### 第四步：真的值得转换吗？
+
+公式不是见到就用。
+
+例如：
+
+$$
+\oint_C P\,dx+Q\,dy
+$$
+
+如果参数化 $C$ 后一行就能算，而
+
+$$
+Q_x-P_y
+$$
+
+产生非常复杂的二重积分，那么就没必要用格林。
+
+公式的目的始终是：
+
+$$
+\boxed{\text{简化计算}}
+$$
+
+而不是为了“套公式”。
+
+---
+
+## 三十五、整章真正需要形成的解题直觉
+
+如果把第 10 章压缩成几条考研做题反射，可以记成：
+
+$$
+\boxed{
+\begin{array}{c}
+\text{平面闭曲线}\Rightarrow\text{想格林}\\
+\text{空间闭曲面}\Rightarrow\text{想高斯}\\
+\text{空间闭曲线}\Rightarrow\text{想斯托克斯}
+\end{array}
+}
+$$
+
+其次：
+
+$$
+\boxed{
+\begin{array}{c}
+\text{不闭}\Rightarrow\text{补}\\
+\text{有奇点}\Rightarrow\text{挖}\\
+\text{方向反}\Rightarrow\text{变号}
+\end{array}
+}
+$$
+
+然后：
+
+$$
+\boxed{
+\begin{array}{c}
+\text{路径无关}
+\Rightarrow
+P_y=Q_x+\text{区域条件}\\
+\text{求原函数}
+\Rightarrow
+u_x=P,\ u_y=Q
+\end{array}
+}
+$$
+
+最后把向量分析三个量牢牢记住：
+
+$$
+\boxed{
+\nabla u=\operatorname{grad}u
+}
+$$
+
+$$
+\boxed{
+\nabla\cdot\mathbf F=\operatorname{div}\mathbf F
+}
+$$
+
+$$
+\boxed{
+\nabla\times\mathbf F=\operatorname{rot}\mathbf F
+}
+$$
+
+以及
+
+$$
+\boxed{
+\Delta u
+=
+\operatorname{div}(\operatorname{grad}u)
+}
+$$
+
+---
+
+### 最后给出一张“第10章核心公式表”
+
+| 内容   | 必背公式                                                                                                      |
+| ---- | --------------------------------------------------------------------------------------------------------- |
+| 格林   | $\displaystyle \oint Pdx+Qdy=\iint(Q_x-P_y)dA$                                                            |
+| 面积   | $\displaystyle S=\frac12\oint(xdy-ydx)$                                                                   |
+| 高斯   | $\displaystyle \iint_S\mathbf F\cdot\mathbf n,dS=\iiint_\Omega\operatorname{div}\mathbf F,dV$             |
+| 散度   | $\displaystyle \operatorname{div}\mathbf F=P_x+Q_y+R_z$                                                   |
+| 体积   | $\displaystyle V=\frac13\iint_S(x,dy,dz+y,dz,dx+z,dx,dy)$                                                 |
+| 斯托克斯 | $\displaystyle \oint_\Gamma\mathbf F\cdot d\mathbf r=\iint_S\operatorname{rot}\mathbf F\cdot\mathbf n,dS$ |
+| 旋度   | $\displaystyle \operatorname{rot}\mathbf F=(R_y-Q_z,P_z-R_x,Q_x-P_y)$                                     |
+| 路径无关 | 单连通区域内 $\displaystyle P_y=Q_x$                                                                            |
+| 原函数  | $\displaystyle du=Pdx+Qdy,\quad u_x=P,\ u_y=Q$                                                            |
+| 拉普拉斯 | $\displaystyle \Delta u=u_{xx}+u_{yy}+u_{zz}$                                                             |
+| 径向函数 | $\displaystyle \Delta f(r)=f''(r)+\frac2r f'(r)$                                                          |
+| 恒等式  | $\displaystyle \operatorname{rot}(\operatorname{grad}u)=0$                                                |
+| 恒等式  | $\displaystyle \operatorname{div}(\operatorname{rot}\mathbf F)=0$                                         |
+
+**这一章最核心的能力不是背公式，而是识别什么时候“闭了可以直接套”、什么时候“没闭要补”、什么时候“有奇点必须挖”，以及转换之后到底哪一种积分最简单。**掌握这一层，第 10 章绝大多数考研题其实都是在几套固定框架中变化。

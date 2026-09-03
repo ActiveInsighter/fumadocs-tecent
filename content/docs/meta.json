@@ -1,9 +1,10 @@
 {
   "title": "考研复习知识库",
-  "description": "408 计算机统考与考研政治课程的章节复习讲义。",
+  "description": "408 计算机统考、考研数学与考研政治课程的章节复习讲义。",
   "pages": [
     "index",
     "408",
+    "math",
     "politics"
   ]
 }

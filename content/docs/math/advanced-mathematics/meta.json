@@ -1,0 +1,18 @@
+{
+  "title": "高等数学",
+  "pages": [
+    "index",
+    "01-limits-continuity",
+    "02-derivatives-differentials",
+    "03-single-variable-integration",
+    "04-mean-value-theorems",
+    "05-taylor-formula",
+    "06-ordinary-differential-equations",
+    "07-vector-algebra-analytic-geometry",
+    "08-multivariable-differentiation",
+    "09-multivariable-integration",
+    "10-integral-theorems",
+    "11-infinite-series"
+  ],
+  "defaultOpen": false
+}

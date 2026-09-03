@@ -1,0 +1,10 @@
+{
+  "title": "考研数学",
+  "pages": [
+    "index",
+    "advanced-mathematics",
+    "linear-algebra",
+    "probability-statistics"
+  ],
+  "defaultOpen": true
+}

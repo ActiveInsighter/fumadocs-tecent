@@ -1,0 +1,11 @@
+{
+  "title": "线性代数",
+  "pages": [
+    "index",
+    "01-determinants",
+    "02-matrices",
+    "03-vector-spaces-rank",
+    "04-linear-systems"
+  ],
+  "defaultOpen": false
+}
