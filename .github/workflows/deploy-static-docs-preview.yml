@@ -91,7 +91,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
           if (( largest_file_size >= 25000000 )); then
-            echo '::error::A static file is at or above EdgeOne\'s 25 MB single-file limit.'
+            echo '::error::A static file is at or above the EdgeOne 25 MB single-file limit.'
             exit 1
           fi
 
