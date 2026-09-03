@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The deployment helper is intentionally a Node.js ESM script.
-import {
-  pruneStaticSegmentFiles,
-  pruneUnusedImageOptimizerPackages,
-} from '../scripts/prune-edgeone-prerendered.mjs';
+import { pruneStaticSegmentFiles, pruneUnusedImageOptimizerPackages } from '../scripts/prune-edgeone-prerendered.mjs';
 
 describe('docs deployment footprint', () => {
   it('prerenders every content route and rejects unknown runtime paths', () => {
