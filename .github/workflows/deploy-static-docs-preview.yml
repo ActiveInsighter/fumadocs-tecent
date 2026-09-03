@@ -103,7 +103,7 @@ jobs:
           edgeone pages deploy .static-docs \
             -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
-            -e preview \
+            -e production \
             --json \
             | tee static-docs-deploy.json
 
@@ -118,7 +118,7 @@ jobs:
             echo "## Static docs preview deployment"
             echo
             echo "- Project: \`${EDGEONE_STATIC_DOCS_PROJECT_NAME}\` (isolated from production)"
-            echo "- Environment: \`preview\`"
+            echo "- Environment: \`production\` of the isolated experiment project"
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
