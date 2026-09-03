@@ -100,7 +100,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          edgeone pages deploy .static-docs \
+          # Deploy from outside the workspace: an ancestor edgeone.json makes the
+          # CLI treat the upload as a framework ("preset") deployment instead of
+          # a pure direct upload, which leaves the site serving 404s.
+          deploy_dir="${RUNNER_TEMP}/static-docs-deploy"
+          rm -rf "${deploy_dir}"
+          cp -r .static-docs "${deploy_dir}"
+
+          edgeone pages deploy "${deploy_dir}" \
             -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
