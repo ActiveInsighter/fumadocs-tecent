@@ -1,0 +1,123 @@
+name: Deploy static docs preview
+
+on:
+  push:
+    branches:
+      - codex/static-docs-cdn
+    paths:
+      - 'content/docs/**'
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'scripts/build-static-docs.mjs'
+      - 'scripts/static-docs-config.mjs'
+      - 'scripts/static-docs-markdown.mjs'
+      - 'scripts/static-root-layout.tsx'
+      - 'next.config.static.mjs'
+      - 'tests/static-docs-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-static-docs-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.31-3
+  EDGEONE_STATIC_DOCS_PROJECT_NAME: fumadocs-static-docs-preview
+
+jobs:
+  deploy:
+    name: Deploy pure static docs package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          edgeone --version
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${EDGEONE_API_TOKEN:-}" ]] || {
+            echo "::error::Missing GitHub Actions secret: EDGEONE_API_TOKEN"
+            exit 1
+          }
+
+      - name: Build the pure static documentation package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build:static-docs 2>&1 | tee static-docs-build.log
+
+      - name: Check static package footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_bytes="$(du -sb .static-docs | awk '{print $1}')"
+          file_count="$(find .static-docs -type f | wc -l)"
+          largest_file_size="$(find .static-docs -type f -printf '%s\n' | sort -nr | head -n 1)"
+          largest_file_path="$(find .static-docs -type f -printf '%s %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+
+          echo "package_bytes=${package_bytes}"
+          echo "file_count=${file_count}"
+          echo "largest_file=${largest_file_size} ${largest_file_path}"
+          {
+            echo "- Package size: $((package_bytes / 1024 / 1024)) MiB"
+            echo "- File count: ${file_count}"
+            echo "- Largest file: ${largest_file_path} ($((largest_file_size / 1024 / 1024)) MiB)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if (( largest_file_size >= 25000000 )); then
+            echo '::error::A static file is at or above EdgeOne\'s 25 MB single-file limit.'
+            exit 1
+          fi
+
+      - name: Deploy the static documentation package
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          edgeone pages deploy .static-docs \
+            -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e preview \
+            --json \
+            | tee static-docs-deploy.json
+
+          deployment_url="$(jq -r '.url // empty' static-docs-deploy.json)"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Static docs preview deployment"
+            echo
+            echo "- Project: \`${EDGEONE_STATIC_DOCS_PROJECT_NAME}\` (isolated from production)"
+            echo "- Environment: \`preview\`"
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
+              echo "- Preview URL: ${{ steps.deploy.outputs.deployment_url }}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
