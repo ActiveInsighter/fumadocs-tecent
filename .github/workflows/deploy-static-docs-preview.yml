@@ -150,6 +150,43 @@ jobs:
           [[ "${warmup_status}" == "200" ]]
           [[ "${homepage_status}" == "200" ]]
 
+      - name: Diagnose EdgeOne deployment status
+        if: ${{ always() && steps.deploy.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_tmp="$(mktemp -d)"
+          response_file="${api_tmp}/describe.json"
+          jq -cn \
+            --arg project_id "makers-vhp1u9ywp8a4" \
+            '{
+              Action: "DescribePagesDeployments",
+              ProjectId: $project_id,
+              Offset: 0,
+              Limit: 5,
+              OrderBy: "CreatedOn",
+              Order: "Desc"
+            }' \
+            | curl --http1.1 --silent --show-error --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${response_file}" \
+                "${EDGEONE_PAGES_API_URL:-https://pages-api.cloud.tencent.com/v1}"
+          jq '{
+            code: .Code,
+            message: .Message,
+            deployments: ((.Data.Response.Deployments // []) | map({
+              deploymentId: .DeploymentId,
+              status: .Status,
+              environment: .Env,
+              usedInProd: .UsedInProd,
+              createdOn: .CreatedOn,
+              updatedOn: .UpdatedOn,
+              error: (.Error // .ErrorMessage // .FailReason // .Reason // null)
+            }))
+          }' "${response_file}"
+
       - name: Write deployment summary
         if: always()
         shell: bash
