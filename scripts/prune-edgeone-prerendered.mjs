@@ -65,6 +65,39 @@ export async function prunePrerenderedFiles({ assetsDir, serverAppDir }) {
 }
 
 /**
+ * Next emits segment-level RSC files for every statically generated route.
+ * EdgeOne serves the flattened HTML and RSC files from `.edgeone/assets`, so
+ * these internal segment trees are not needed by this app's SSR function.
+ */
+export async function pruneStaticSegmentFiles({ serverAppDir }) {
+  const candidates = await walkFiles(serverAppDir);
+  const segmentDirectories = new Set();
+  const segmentFiles = [];
+
+  for (const filePath of candidates) {
+    const relativeParts = path.relative(serverAppDir, filePath).split(path.sep);
+    const segmentIndex = relativeParts.findIndex((part) => part.endsWith('.segments'));
+    if (segmentIndex === -1) continue;
+
+    segmentFiles.push(filePath);
+    segmentDirectories.add(
+      path.join(serverAppDir, ...relativeParts.slice(0, segmentIndex + 1)),
+    );
+  }
+
+  let removedBytes = 0;
+  for (const filePath of segmentFiles) {
+    removedBytes += (await stat(filePath)).size;
+  }
+
+  for (const directory of segmentDirectories) {
+    await rm(directory, { recursive: true, force: true });
+  }
+
+  return { removedCount: segmentFiles.length, removedBytes };
+}
+
+/**
  * Next includes the optional sharp packages in the standalone server even
  * when image optimization is disabled. This app does not use next/image, so
  * those packages are not needed by the deployed SSR function.
@@ -122,11 +155,16 @@ async function main() {
   );
 
   const result = await prunePrerenderedFiles({ assetsDir, serverAppDir });
+  const segmentResult = await pruneStaticSegmentFiles({ serverAppDir });
   const imageResult = await pruneUnusedImageOptimizerPackages({ serverRoot });
   const megabytes = (result.removedBytes / 1024 / 1024).toFixed(2);
+  const segmentMegabytes = (segmentResult.removedBytes / 1024 / 1024).toFixed(2);
   const imageMegabytes = (imageResult.removedBytes / 1024 / 1024).toFixed(2);
   console.log(
     `[EdgeOne] Removed ${result.removedCount} duplicated prerendered files (${megabytes} MiB) from the SSR bundle.`,
+  );
+  console.log(
+    `[EdgeOne] Removed ${segmentResult.removedCount} static segment files (${segmentMegabytes} MiB) from the SSR bundle.`,
   );
   console.log(
     `[EdgeOne] Removed ${imageResult.removedCount} unused image optimizer packages (${imageMegabytes} MiB) from the SSR bundle.`,

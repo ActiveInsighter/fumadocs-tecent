@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The deployment helper is intentionally a Node.js ESM script.
-import { pruneUnusedImageOptimizerPackages } from '../scripts/prune-edgeone-prerendered.mjs';
+import {
+  pruneStaticSegmentFiles,
+  pruneUnusedImageOptimizerPackages,
+} from '../scripts/prune-edgeone-prerendered.mjs';
 
 describe('docs deployment footprint', () => {
   it('prerenders every content route and rejects unknown runtime paths', () => {
@@ -30,6 +33,33 @@ describe('docs deployment footprint', () => {
     );
 
     expect(workflowSource).toMatch(/node scripts\/prune-edgeone-prerendered\.mjs/u);
+  });
+
+  it('removes static Next segment trees without removing flat route output', async () => {
+    const serverAppDir = await mkdtemp(resolve(tmpdir(), 'fumadocs-edgeone-segments-'));
+    const segmentFiles = [
+      'docs/math/01-limits.segments/_full.segment.rsc',
+      'docs/math/01-limits.segments/docs/$oc$slug/__PAGE__.segment.rsc',
+    ];
+    const flatRouteFile = 'docs/math/01-limits.rsc';
+
+    try {
+      for (const file of [...segmentFiles, flatRouteFile]) {
+        const filePath = resolve(serverAppDir, file);
+        await mkdir(resolve(filePath, '..'), { recursive: true });
+        await writeFile(filePath, file);
+      }
+
+      const result = await pruneStaticSegmentFiles({ serverAppDir });
+
+      expect(result.removedCount).toBe(segmentFiles.length);
+      for (const file of segmentFiles) {
+        await expect(access(resolve(serverAppDir, file))).rejects.toThrow();
+      }
+      await expect(access(resolve(serverAppDir, flatRouteFile))).resolves.toBeUndefined();
+    } finally {
+      await rm(serverAppDir, { recursive: true, force: true });
+    }
   });
 
   it('uses the current EdgeOne CLI for the static docs deployment', () => {
