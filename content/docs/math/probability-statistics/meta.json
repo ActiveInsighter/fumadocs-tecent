@@ -1,0 +1,12 @@
+{
+  "title": "概率论与数理统计",
+  "pages": [
+    "index",
+    "01-events-probability",
+    "02-random-variables-distributions",
+    "03-joint-distributions",
+    "04-numerical-characteristics",
+    "05-limit-theorems"
+  ],
+  "defaultOpen": false
+}
