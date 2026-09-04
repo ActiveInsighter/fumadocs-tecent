@@ -1,4 +1,5 @@
 name: Deploy static docs preview
+# Preview deployment for the pure static CDN docs experiment (branch codex/static-docs-cdn).
 
 on:
   push:
