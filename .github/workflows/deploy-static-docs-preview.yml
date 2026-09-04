@@ -33,9 +33,6 @@ permissions:
 env:
   EDGEONE_CLI_VERSION: 1.6.31-3
   EDGEONE_STATIC_DOCS_PROJECT_NAME: fumadocs-static-docs-preview
-  NEXT_PUBLIC_ALGOLIA_APP_ID: ${{ vars.NEXT_PUBLIC_ALGOLIA_APP_ID }}
-  NEXT_PUBLIC_ALGOLIA_SEARCH_KEY: ${{ vars.NEXT_PUBLIC_ALGOLIA_SEARCH_KEY }}
-  NEXT_PUBLIC_ALGOLIA_INDEX_NAME: ${{ vars.NEXT_PUBLIC_ALGOLIA_INDEX_NAME }}
 
 jobs:
   deploy:
@@ -50,13 +47,44 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
+
+      - name: Restore project dependency tree
+        id: node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node22-modules-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore npm download cache on dependency miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+
+      - name: Install project dependencies on cache miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_started="$(date +%s)"
+          npm ci --no-audit --no-fund
+          install_finished="$(date +%s)"
+          echo "- Dependency install: $((install_finished - install_started))s (cache miss)" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Refresh Fumadocs generated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run postinstall
+          echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Restore Next/Turbopack build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .static-docs-stage/.next/cache
           key: ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
@@ -64,27 +92,43 @@ jobs:
             ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
             ${{ runner.os }}-static-docs-turbopack-v2-
 
-      - name: Install EdgeOne CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
-          edgeone --version
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: .edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
 
-      - name: Validate deployment configuration
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${EDGEONE_API_TOKEN:-}" ]] || {
-            echo "::error::Missing GitHub Actions secret: EDGEONE_API_TOKEN"
+          install_started="$(date +%s)"
+          npm install --global --prefix "${GITHUB_WORKSPACE}/.edgeone-cli" \
+            "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          install_finished="$(date +%s)"
+          echo "- EdgeOne CLI install: $((install_finished - install_started))s (cache miss)" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Configure deployment tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
+          [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]] || {
+            echo '::error::EdgeOne CLI executable is missing.'
             exit 1
           }
+          [[ -n "${EDGEONE_API_TOKEN:-}" ]] || {
+            echo '::error::Missing GitHub Actions secret: EDGEONE_API_TOKEN'
+            exit 1
+          }
+          echo "- EdgeOne CLI cache hit: ${{ steps.edgeone-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Build the pure static documentation package
         shell: bash
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund
           build_started="$(date +%s)"
           npm run build:static-docs 2>&1 | tee static-docs-build.log
           build_finished="$(date +%s)"
@@ -105,9 +149,6 @@ jobs:
           largest_file_size="${largest%% *}"
           largest_file_path="${largest#* }"
 
-          echo "package_bytes=${package_bytes}"
-          echo "file_count=${file_count}"
-          echo "largest_file=${largest_file_size} ${largest_file_path}"
           {
             echo "- Package size: $((package_bytes / 1024 / 1024)) MiB"
             echo "- File count: ${file_count}"
@@ -124,19 +165,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Deploy from outside the workspace: an ancestor edgeone.json makes the
-          # CLI treat the upload as a framework ("preset") deployment instead of
-          # a pure direct upload, which leaves the site serving 404s.
           deploy_dir="${RUNNER_TEMP}/static-docs-deploy"
           rm -rf "${deploy_dir}"
           cp -r .static-docs "${deploy_dir}"
 
+          deploy_started="$(date +%s)"
           edgeone pages deploy "${deploy_dir}" \
             -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
             --json \
             | tee static-docs-deploy.log
+          deploy_finished="$(date +%s)"
+          echo "- EdgeOne deploy: $((deploy_finished - deploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
 
           deployment_url="$(
             grep -Eo '\{"status":"success".*' static-docs-deploy.log \
@@ -160,29 +201,23 @@ jobs:
               "${deployment_url}"
           )"
           echo "warmup_status=${warmup_status}"
-
-          status_for() {
-            curl --silent --show-error --max-time 60 \
-              -L -b "${cookie_jar}" \
-              -o /dev/null -w '%{http_code}' \
-              "${deployment_url%%\?*}$1"
-          }
-
-          for path in \
-            "/" \
-            "/docs/" \
-            "/docs/math/advanced-mathematics/01-limits-continuity/" \
-            "/docs/math/advanced-mathematics/01-limits-continuity.md"; do
-            status="$(status_for "${path}")"
-            echo "route ${path} -> ${status}"
-          done
-
-          homepage_status="$(status_for "/")"
           [[ "${warmup_status}" == "200" ]]
-          [[ "${homepage_status}" == "200" ]]
+
+          export base_url="${deployment_url%%\?*}"
+          export cookie_jar
+          printf '%s\n' \
+            '/' \
+            '/docs/' \
+            '/docs/math/advanced-mathematics/01-limits-continuity/' \
+            '/docs/math/advanced-mathematics/01-limits-continuity.md' \
+            | xargs -P 4 -I '{}' bash -c '
+                status="$(curl --silent --show-error --max-time 60 -L -b "${cookie_jar}" -o /dev/null -w "%{http_code}" "${base_url}$1")"
+                echo "route $1 -> ${status}"
+                [[ "${status}" == "200" ]]
+              ' _ '{}'
 
       - name: Diagnose EdgeOne deployment status
-        if: ${{ always() && steps.deploy.outcome == 'success' }}
+        if: ${{ failure() && steps.deploy.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
