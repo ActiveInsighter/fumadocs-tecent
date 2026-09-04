@@ -165,12 +165,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deploy_dir="${RUNNER_TEMP}/static-docs-deploy"
-          rm -rf "${deploy_dir}"
-          cp -r .static-docs "${deploy_dir}"
+          deploy_zip="${RUNNER_TEMP}/static-docs-deploy.zip"
+          rm -f "${deploy_zip}"
+
+          package_started="$(date +%s)"
+          (
+            cd .static-docs
+            zip -q -r -6 "${deploy_zip}" .
+          )
+          package_finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${deploy_zip}")"
+          echo "- ZIP packaging: $((package_finished - package_started))s ($((zip_bytes / 1024 / 1024)) MiB)" >> "${GITHUB_STEP_SUMMARY}"
 
           deploy_started="$(date +%s)"
-          edgeone pages deploy "${deploy_dir}" \
+          edgeone makers deploy "${deploy_zip}" \
             -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
