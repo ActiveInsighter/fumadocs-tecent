@@ -1,5 +1,4 @@
 import { getMDXComponents } from '@/components/mdx';
-import { DocumentDownloadMenu } from '@/components/document-download-menu';
 import { source } from '@/lib/source';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -50,13 +49,6 @@ export default async function Page({ params }: PageParameters) {
           githubUrl={`https://github.com/ActiveInsighter/fumadocs-tecent/blob/main/content/docs/${page.path}`}
           className="docs-page-action"
         />
-        {page.data.taskRecordId && page.data.messageRecordId && page.data.documentVersion ? (
-          <DocumentDownloadMenu
-            taskRecordId={page.data.taskRecordId}
-            messageRecordId={page.data.messageRecordId}
-            version={page.data.documentVersion}
-          />
-        ) : null}
       </div>
       <DocsBody id="docs-body" className="pb-10 pt-4">
         <MDX
