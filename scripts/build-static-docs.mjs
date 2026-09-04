@@ -11,8 +11,7 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
-// A stable staging path is important for Turbopack's filesystem cache: cached
-// module identities must see the same project path on subsequent CI runs.
+// A stable staging path lets Turbopack reuse filesystem cache entries across CI runs.
 const staticStageRoot = path.join(projectRoot, '.static-docs-stage');
 
 const projectEntries = [
