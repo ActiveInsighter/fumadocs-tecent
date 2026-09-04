@@ -34,7 +34,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col font-sans" suppressHydrationWarning>
-        <RootProvider>{children}</RootProvider>
+        <RootProvider
+          search={{
+            options: {
+              // 静态搜索：/api/search 现在导出构建期生成的索引 JSON，
+              // 客户端下载后本地查询，运行时不再需要按查询调用函数。
+              type: 'static',
+            },
+          }}
+        >
+          {children}
+        </RootProvider>
       </body>
     </html>
   );

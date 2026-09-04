@@ -23,7 +23,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN" style={fontVariables} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col font-sans" suppressHydrationWarning>
-        <RootProvider>{children}</RootProvider>
+        <RootProvider
+          search={{
+            options: {
+              // 静态搜索：客户端从 /api/search 下载构建期导出的索引并在本地查询。
+              type: 'static',
+            },
+          }}
+        >
+          {children}
+        </RootProvider>
       </body>
     </html>
   );

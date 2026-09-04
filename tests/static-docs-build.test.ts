@@ -17,9 +17,17 @@ describe('static docs build', () => {
   it('keeps documentation sources but excludes dynamic application routes', () => {
     expect(shouldIncludeInStaticDocsProject('content/docs/math/index.mdx')).toBe(true);
     expect(shouldIncludeInStaticDocsProject('app/docs/[[...slug]]/page.tsx')).toBe(true);
-    expect(shouldIncludeInStaticDocsProject('app/api/search/route.ts')).toBe(false);
     expect(shouldIncludeInStaticDocsProject('app/download/tasks/[id]/route.ts')).toBe(false);
     expect(shouldIncludeInStaticDocsProject('app/llms.mdx/docs/[[...slug]]/route.ts')).toBe(false);
+  });
+
+  it('keeps the statically exported search index route but no other APIs', () => {
+    // `app/api` 本身必须放行（祖先目录），否则递归复制进不去
+    expect(shouldIncludeInStaticDocsProject('app/api')).toBe(true);
+    expect(shouldIncludeInStaticDocsProject('app/api/search')).toBe(true);
+    expect(shouldIncludeInStaticDocsProject('app/api/search/route.ts')).toBe(true);
+    expect(shouldIncludeInStaticDocsProject('app/api/upload/route.ts')).toBe(false);
+    expect(shouldIncludeInStaticDocsProject('app/api/download/tasks/route.ts')).toBe(false);
   });
 
   it('maps source pages to stable direct markdown URLs', () => {
