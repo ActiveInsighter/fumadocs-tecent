@@ -1,0 +1,197 @@
+name: Verify pure static docs without SSR
+
+on:
+  push:
+    branches:
+      - codex/remove-next-ssr
+  workflow_dispatch:
+
+concurrency:
+  group: pure-static-no-ssr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.31-3
+  EDGEONE_STATIC_DOCS_PROJECT_NAME: fumadocs-static-docs-preview
+
+jobs:
+  verify:
+    name: Build and deploy zero-function docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Restore project dependency tree
+        id: node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node22-modules-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore npm download cache
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Refresh Fumadocs generated source
+        run: npm run postinstall
+
+      - name: Restore Next/Turbopack build cache
+        uses: actions/cache@v5
+        with:
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v2-
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: .edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
+        run: npm install --global --prefix "${GITHUB_WORKSPACE}/.edgeone-cli" "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+
+      - name: Configure EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
+          [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]]
+          [[ -n "${EDGEONE_API_TOKEN:-}" ]]
+
+      - name: Build pure static docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          npm run build:static-docs 2>&1 | tee pure-static-build.log
+          finished="$(date +%s)"
+          echo "- Static build: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Prove deployment contains zero functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d .static-docs
+
+          if find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print -quit | grep -q .; then
+            echo '::error::Function directory found in pure static output.'
+            find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print
+            exit 1
+          fi
+
+          if find .static-docs -type f \( -path '*/cloud-functions/*' -o -path '*/edge-functions/*' \) -print -quit | grep -q .; then
+            echo '::error::Function artifact found in pure static output.'
+            exit 1
+          fi
+
+          package_bytes="$(du -sb .static-docs | awk '{print $1}')"
+          file_count="$(find .static-docs -type f | wc -l | tr -d ' ')"
+          {
+            echo '- Cloud Functions: 0'
+            echo '- Edge Functions: 0'
+            echo "- Static files: ${file_count}"
+            echo "- Static output: $((package_bytes / 1024 / 1024)) MiB"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Package pure static ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="${RUNNER_TEMP}/fumadocs-pure-static.zip"
+          started="$(date +%s)"
+          (cd .static-docs && zip -qr -9 "${zip_path}" .)
+          finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${zip_path}")"
+          echo "PURE_STATIC_ZIP=${zip_path}" >> "${GITHUB_ENV}"
+          echo "- Deploy ZIP: $((zip_bytes / 1024 / 1024)) MiB; packaging $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Deploy zero-function package to isolated EdgeOne project
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          edgeone makers deploy "${PURE_STATIC_ZIP}" \
+            -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production \
+            --site global \
+            --json \
+            | tee pure-static-deploy.log
+          finished="$(date +%s)"
+          echo "- EdgeOne deploy: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+          deployment_url="$(grep -Eo '\{"status":"success".*' pure-static-deploy.log | tail -n 1 | jq -r '.url // empty')"
+          test -n "${deployment_url}"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify static pages and removed dynamic routes
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          base_url="${DEPLOYMENT_URL%%\?*}"
+          query="${DEPLOYMENT_URL#*\?}"
+          test "${query}" != "${DEPLOYMENT_URL}"
+
+          status_for() {
+            local path="$1"
+            curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' "${base_url}${path}?${query}"
+          }
+
+          home="$(status_for '/')"
+          docs="$(status_for '/docs/')"
+          math="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity/')"
+          upload_api="$(status_for '/api/blob/upload-url')"
+          ingest_api="$(status_for '/api/integrations/anyworkflow')"
+          download_api="$(status_for '/download/tasks/probe/1/probe/md')"
+
+          printf 'home=%s\ndocs=%s\nmath=%s\nupload_api=%s\ningest_api=%s\ndownload_api=%s\n' \
+            "${home}" "${docs}" "${math}" "${upload_api}" "${ingest_api}" "${download_api}"
+
+          [[ "${home}" == '200' ]]
+          [[ "${docs}" == '200' ]]
+          [[ "${math}" == '200' ]]
+          [[ "${upload_api}" == '404' ]]
+          [[ "${ingest_api}" == '404' ]]
+          [[ "${download_api}" == '404' ]]
+
+      - name: Write summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Pure static / zero SSR validation'
+            echo
+            echo '- Target: isolated EdgeOne static docs project'
+            echo '- Expected server runtime: none'
+            echo "- Job status: `${{ job.status }}`"
+            echo "- Commit: `${GITHUB_SHA}`"
+          } >> "${GITHUB_STEP_SUMMARY}"
