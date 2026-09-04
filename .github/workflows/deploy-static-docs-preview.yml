@@ -182,6 +182,7 @@ jobs:
             -n "${EDGEONE_STATIC_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
+            --site global \
             --json \
             | tee static-docs-deploy.log
           deploy_finished="$(date +%s)"
@@ -201,25 +202,21 @@ jobs:
           deployment_url="${{ steps.deploy.outputs.deployment_url }}"
           [[ -n "${deployment_url}" ]] || { echo '::error::No deployment URL captured.'; exit 1; }
 
-          cookie_jar="$(mktemp)"
-          warmup_status="$(
-            curl --silent --show-error --max-time 60 \
-              -L -c "${cookie_jar}" -b "${cookie_jar}" \
-              -o /dev/null -w '%{http_code}' \
-              "${deployment_url}"
-          )"
-          echo "warmup_status=${warmup_status}"
-          [[ "${warmup_status}" == "200" ]]
+          base_url="${deployment_url%%\?*}"
+          preview_query="${deployment_url#*\?}"
+          [[ "${preview_query}" != "${deployment_url}" ]] || {
+            echo '::error::Preview deployment URL does not contain its access token.'
+            exit 1
+          }
 
-          export base_url="${deployment_url%%\?*}"
-          export cookie_jar
+          export base_url preview_query
           printf '%s\n' \
             '/' \
             '/docs/' \
             '/docs/math/advanced-mathematics/01-limits-continuity/' \
             '/docs/math/advanced-mathematics/01-limits-continuity.md' \
             | xargs -P 4 -I '{}' bash -c '
-                status="$(curl --silent --show-error --max-time 60 -L -b "${cookie_jar}" -o /dev/null -w "%{http_code}" "${base_url}$1")"
+                status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w "%{http_code}" "${base_url}$1?${preview_query}")"
                 echo "route $1 -> ${status}"
                 [[ "${status}" == "200" ]]
               ' _ '{}'
