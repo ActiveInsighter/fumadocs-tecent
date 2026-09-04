@@ -58,11 +58,11 @@ jobs:
       - name: Restore Next/Turbopack build cache
         uses: actions/cache@v4
         with:
-          path: .static-docs-next-cache
-          key: ${{ runner.os }}-static-docs-turbopack-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-static-docs-turbopack-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
-            ${{ runner.os }}-static-docs-turbopack-
+            ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v2-
 
       - name: Install EdgeOne CLI
         shell: bash

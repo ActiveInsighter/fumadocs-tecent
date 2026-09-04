@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -11,8 +11,9 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
-// Keep the build cache outside the disposable staging directory so CI can reuse it.
-const persistentBuildCacheRoot = path.join(projectRoot, '.static-docs-next-cache');
+// A stable staging path is important for Turbopack's filesystem cache: cached
+// module identities must see the same project path on subsequent CI runs.
+const staticStageRoot = path.join(projectRoot, '.static-docs-stage');
 
 const projectEntries = [
   'app',
@@ -59,6 +60,28 @@ async function copyProjectEntry(stageRoot, relativePath) {
   await cp(sourcePath, destinationPath);
 }
 
+/**
+ * Remove stale staged source/output while deliberately preserving only
+ * `.next/cache`. GitHub Actions restores that directory before this script
+ * runs, and Turbopack can reuse it because `staticStageRoot` is stable.
+ */
+async function cleanStagePreservingBuildCache(stageRoot) {
+  await mkdir(stageRoot, { recursive: true });
+
+  for (const entry of await readdir(stageRoot, { withFileTypes: true })) {
+    if (entry.name === '.next') continue;
+    await rm(path.join(stageRoot, entry.name), { recursive: true, force: true });
+  }
+
+  const nextRoot = path.join(stageRoot, '.next');
+  if (!(await exists(nextRoot))) return;
+
+  for (const entry of await readdir(nextRoot, { withFileTypes: true })) {
+    if (entry.name === 'cache') continue;
+    await rm(path.join(nextRoot, entry.name), { recursive: true, force: true });
+  }
+}
+
 async function prepareStage(stageRoot) {
   for (const entry of projectEntries) {
     await copyProjectEntry(stageRoot, entry);
@@ -69,6 +92,7 @@ async function prepareStage(stageRoot) {
     path.join(stageRoot, 'app', 'layout.tsx'),
   );
 
+  await mkdir(path.join(stageRoot, 'scripts'), { recursive: true });
   await cp(
     path.join(projectRoot, 'next.config.static.mjs'),
     path.join(stageRoot, 'next.config.mjs'),
@@ -77,43 +101,6 @@ async function prepareStage(stageRoot) {
     path.join(projectRoot, 'scripts', 'static-docs-config.mjs'),
     path.join(stageRoot, 'scripts', 'static-docs-config.mjs'),
   );
-}
-
-async function restoreBuildCache(stageRoot) {
-  if (!(await exists(persistentBuildCacheRoot))) {
-    console.log('[static-docs] No persisted Next/Turbopack cache found; cold build.');
-    return;
-  }
-
-  const destination = path.join(stageRoot, '.next', 'cache');
-  await mkdir(path.dirname(destination), { recursive: true });
-  await cp(persistentBuildCacheRoot, destination, { recursive: true });
-  console.log('[static-docs] Restored persisted Next/Turbopack cache.');
-}
-
-async function persistBuildCache(stageRoot) {
-  const source = path.join(stageRoot, '.next', 'cache');
-  if (!(await exists(source))) {
-    console.log('[static-docs] Next/Turbopack cache directory was not produced.');
-    return;
-  }
-
-  await rm(persistentBuildCacheRoot, { recursive: true, force: true });
-  await mkdir(path.dirname(persistentBuildCacheRoot), { recursive: true });
-  await cp(source, persistentBuildCacheRoot, { recursive: true });
-  console.log('[static-docs] Persisted Next/Turbopack cache for the next build.');
-}
-
-async function removeStage(stageRoot) {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    try {
-      await rm(stageRoot, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (!['EBUSY', 'EPERM'].includes(error?.code) || attempt === 7) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-  }
 }
 
 function runNextBuild(stageRoot) {
@@ -219,13 +206,17 @@ async function summarizeOutput(outputRoot) {
 }
 
 async function main() {
-  const stageRoot = await mkdtemp(path.join(projectRoot, '.static-docs-stage-'));
+  const stageRoot = staticStageRoot;
 
   try {
+    await cleanStagePreservingBuildCache(stageRoot);
+    const cacheState = (await exists(path.join(stageRoot, '.next', 'cache')))
+      ? 'warm candidate'
+      : 'cold';
+    console.log(`[static-docs] Turbopack cache state: ${cacheState}.`);
+
     await prepareStage(stageRoot);
-    await restoreBuildCache(stageRoot);
     await runNextBuild(stageRoot);
-    await persistBuildCache(stageRoot);
 
     await rm(staticOutputRoot, { recursive: true, force: true });
     await cp(path.join(stageRoot, 'out'), staticOutputRoot, { recursive: true });
@@ -242,7 +233,8 @@ async function main() {
       ).toFixed(2)} MiB ${path.relative(projectRoot, summary.largestFile.path)}`,
     );
   } finally {
-    await removeStage(stageRoot);
+    // Leave only `.next/cache` behind for actions/cache's post-job save step.
+    await cleanStagePreservingBuildCache(stageRoot);
   }
 }
 
