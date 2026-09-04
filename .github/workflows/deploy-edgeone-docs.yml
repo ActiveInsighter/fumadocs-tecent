@@ -102,7 +102,7 @@ jobs:
           build_started="$(date +%s)"
           edgeone makers build --mode prod \
             2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-build.log
           build_finished="$(date +%s)"
           echo "- Production EdgeOne build: $((build_finished - build_started))s" >> "${GITHUB_STEP_SUMMARY}"
@@ -139,6 +139,33 @@ jobs:
             echo '::error::An EdgeOne upload file is at or above the 25 MB limit.'
             exit 1
           fi
+
+      - name: Package EdgeOne deployment as ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deploy_zip="${RUNNER_TEMP}/fumadocs-edgeone-production.zip"
+          raw_bytes="$(du -sb .edgeone | awk '{print $1}')"
+          file_count="$(find .edgeone -type f | wc -l | tr -d ' ')"
+          zip_started="$(date +%s)"
+          (
+            cd .edgeone
+            zip -qr -9 "${deploy_zip}" .
+          )
+          zip_finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${deploy_zip}")"
+
+          echo "EDGEONE_DEPLOY_ZIP=${deploy_zip}" >> "${GITHUB_ENV}"
+          echo "edgeone_raw_bytes=${raw_bytes}"
+          echo "edgeone_file_count=${file_count}"
+          echo "edgeone_zip_bytes=${zip_bytes}"
+          echo "edgeone_zip_seconds=$((zip_finished - zip_started))"
+          {
+            echo "- EdgeOne raw artifact: ${raw_bytes} bytes (${file_count} files)"
+            echo "- EdgeOne ZIP artifact: ${zip_bytes} bytes"
+            echo "- EdgeOne ZIP packaging: $((zip_finished - zip_started))s"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Configure Fumadocs runtime variables
         shell: bash
@@ -242,13 +269,13 @@ jobs:
           set -euo pipefail
           deploy_started="$(date +%s)"
 
-          edgeone makers deploy .edgeone \
+          edgeone makers deploy "${EDGEONE_DEPLOY_ZIP}" \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
             --site global \
             2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-deploy.log
 
           deploy_finished="$(date +%s)"
