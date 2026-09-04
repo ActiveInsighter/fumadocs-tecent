@@ -170,15 +170,41 @@ jobs:
         run: |
           set -euo pipefail
           started="$(date +%s)"
-          edgeone makers deploy "${STATIC_DEPLOY_ZIP}" \
-            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production \
-            --site global \
-            --json \
-            | tee edgeone-static-production.log
+          max_attempts=3
+          attempt=1
+
+          while :; do
+            : > edgeone-static-production.log
+            echo "EdgeOne deployment attempt ${attempt}/${max_attempts}"
+
+            if edgeone makers deploy "${STATIC_DEPLOY_ZIP}" \
+              -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+              -t "${EDGEONE_API_TOKEN}" \
+              -e production \
+              --site global \
+              --json \
+              2>&1 | tee edgeone-static-production.log; then
+              break
+            fi
+
+            if ! grep -Eqi 'timeout|timed out|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|check and set region failed|HTTP[^0-9]*5[0-9]{2}|status[^0-9]*5[0-9]{2}' edgeone-static-production.log; then
+              echo '::error::EdgeOne deployment failed with a non-transient error; skipping retries.'
+              exit 1
+            fi
+
+            if (( attempt >= max_attempts )); then
+              echo "::error::EdgeOne deployment still failed after ${max_attempts} attempts."
+              exit 1
+            fi
+
+            retry_delay=$((attempt * 3))
+            echo "::warning::Transient EdgeOne deployment error detected; retrying in ${retry_delay}s."
+            sleep "${retry_delay}"
+            attempt=$((attempt + 1))
+          done
+
           finished="$(date +%s)"
-          echo "- EdgeOne deploy: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- EdgeOne deploy: $((finished - started))s; attempts ${attempt}/${max_attempts}" >> "${GITHUB_STEP_SUMMARY}"
 
           deployment_json="$(grep -Eo '\{"status":"success".*' edgeone-static-production.log | tail -n 1)"
           deployment_url="$(printf '%s' "${deployment_json}" | jq -r '.url // empty')"
