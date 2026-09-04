@@ -191,20 +191,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${probe_dir}"' EXIT
+          started="$(date +%s)"
+          pids=()
 
-          status_for() {
-            local path="$1"
-            curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' \
-              "https://fumadocs.any1.tech${path}"
+          start_probe() {
+            local name="$1"
+            local path="$2"
+            (
+              curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' \
+                "https://fumadocs.any1.tech${path}" > "${probe_dir}/${name}.status"
+            ) &
+            pids+=("$!")
           }
 
-          home="$(status_for '/')"
-          docs="$(status_for '/docs/')"
-          math="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity/')"
-          markdown="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity.md')"
-          retired_upload="$(status_for '/api/blob/upload-url')"
-          retired_ingest="$(status_for '/api/integrations/anyworkflow')"
-          retired_download="$(status_for '/download/tasks/probe/1/probe/md')"
+          start_probe home '/'
+          start_probe docs '/docs/'
+          start_probe math '/docs/math/advanced-mathematics/01-limits-continuity/'
+          start_probe markdown '/docs/math/advanced-mathematics/01-limits-continuity.md'
+          start_probe retired_upload '/api/blob/upload-url'
+          start_probe retired_ingest '/api/integrations/anyworkflow'
+          start_probe retired_download '/download/tasks/probe/1/probe/md'
+
+          for pid in "${pids[@]}"; do
+            wait "${pid}"
+          done
+
+          home="$(cat "${probe_dir}/home.status")"
+          docs="$(cat "${probe_dir}/docs.status")"
+          math="$(cat "${probe_dir}/math.status")"
+          markdown="$(cat "${probe_dir}/markdown.status")"
+          retired_upload="$(cat "${probe_dir}/retired_upload.status")"
+          retired_ingest="$(cat "${probe_dir}/retired_ingest.status")"
+          retired_download="$(cat "${probe_dir}/retired_download.status")"
 
           printf 'home=%s\ndocs=%s\nmath=%s\nmarkdown=%s\nretired_upload=%s\nretired_ingest=%s\nretired_download=%s\n' \
             "${home}" "${docs}" "${math}" "${markdown}" "${retired_upload}" "${retired_ingest}" "${retired_download}"
@@ -216,6 +236,9 @@ jobs:
           [[ "${retired_upload}" == '404' ]]
           [[ "${retired_ingest}" == '404' ]]
           [[ "${retired_download}" == '404' ]]
+
+          finished="$(date +%s)"
+          echo "- Parallel route verification: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Verify CDN compression and cache
         shell: bash
