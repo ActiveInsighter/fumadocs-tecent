@@ -10,12 +10,14 @@
     "dev": "next dev",
     "build": "next build",
     "build:static-docs": "node scripts/build-static-docs.mjs",
+    "algolia:sync": "node scripts/sync-algolia.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
+    "algoliasearch": "5.56.0",
     "fumadocs-core": "16.14.0",
     "fumadocs-mdx": "15.2.2",
     "fumadocs-ui": "npm:@fumadocs/base-ui@16.14.0",
@@ -26,9 +28,11 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "rehype-katex": "7.0.1",
-    "remark-math": "6.0.0"
+    "remark-math": "6.0.0",
+    "remark-mdx": "3.1.1"
   },
   "devDependencies": {
+    "@next/env": "16.3.3",
     "@tailwindcss/postcss": "4.3.3",
     "@types/mdx": "2.0.14",
     "@types/node": "26.1.2",

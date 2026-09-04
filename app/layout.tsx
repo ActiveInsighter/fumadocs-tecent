@@ -1,7 +1,7 @@
 import './global.css';
 import 'katex/dist/katex.css';
 import './surface-overrides.css';
-import { RootProvider } from 'fumadocs-ui/provider/next';
+import { SearchProvider } from '@/components/search-provider';
 import type { Metadata } from 'next';
 import { Inter, Source_Serif_4 } from 'next/font/google';
 import type { ReactNode } from 'react';
@@ -34,17 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col font-sans" suppressHydrationWarning>
-        <RootProvider
-          search={{
-            options: {
-              // 静态搜索：/api/search 现在导出构建期生成的索引 JSON，
-              // 客户端下载后本地查询，运行时不再需要按查询调用函数。
-              type: 'static',
-            },
-          }}
-        >
-          {children}
-        </RootProvider>
+        <SearchProvider>{children}</SearchProvider>
       </body>
     </html>
   );

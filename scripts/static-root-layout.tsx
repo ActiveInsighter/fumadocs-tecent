@@ -1,7 +1,7 @@
 import './global.css';
 import 'katex/dist/katex.css';
 import './surface-overrides.css';
-import { RootProvider } from 'fumadocs-ui/provider/next';
+import { SearchProvider } from '@/components/search-provider';
 import type { Metadata } from 'next';
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -23,16 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN" style={fontVariables} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col font-sans" suppressHydrationWarning>
-        <RootProvider
-          search={{
-            options: {
-              // 静态搜索：客户端从 /api/search 下载构建期导出的索引并在本地查询。
-              type: 'static',
-            },
-          }}
-        >
-          {children}
-        </RootProvider>
+        <SearchProvider>{children}</SearchProvider>
       </body>
     </html>
   );
