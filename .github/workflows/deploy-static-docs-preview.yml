@@ -1,10 +1,11 @@
 name: Deploy static docs preview
-# Preview deployment for the pure static CDN docs experiment (branch codex/static-docs-cdn).
+# Preview deployment for the pure static CDN docs experiment.
 
 on:
   push:
     branches:
       - codex/static-docs-cdn
+      - codex/static-build-performance
     paths:
       - 'content/docs/**'
       - 'app/**'
@@ -15,11 +16,16 @@ on:
       - 'scripts/static-docs-markdown.mjs'
       - 'scripts/static-root-layout.tsx'
       - 'next.config.static.mjs'
+      - 'source.config.ts'
       - 'tests/static-docs-build.test.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/deploy-static-docs-preview.yml'
   workflow_dispatch:
+
+concurrency:
+  group: static-docs-preview-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -49,6 +55,15 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Restore Next/Turbopack build cache
+        uses: actions/cache@v4
+        with:
+          path: .static-docs-next-cache
+          key: ${{ runner.os }}-static-docs-turbopack-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-turbopack-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-
+
       - name: Install EdgeOne CLI
         shell: bash
         run: |
@@ -70,7 +85,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          build_started="$(date +%s)"
           npm run build:static-docs 2>&1 | tee static-docs-build.log
+          build_finished="$(date +%s)"
+          build_seconds="$((build_finished - build_started))"
+          echo "static_build_seconds=${build_seconds}"
+          echo "- Static package build: ${build_seconds}s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Check static package footprint
         shell: bash

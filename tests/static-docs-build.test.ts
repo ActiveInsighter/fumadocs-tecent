@@ -5,13 +5,14 @@ import { getStaticDocsConfig, shouldIncludeInStaticDocsProject } from '../script
 import { getStaticMarkdownOutputPath, renderStaticMarkdown } from '../scripts/static-docs-markdown.mjs';
 
 describe('static docs build', () => {
-  it('uses a pure static export without server-only Next features', () => {
+  it('uses a pure static export with Turbopack build caching enabled', () => {
     const config = getStaticDocsConfig();
 
     expect(config.output).toBe('export');
     expect(config.trailingSlash).toBe(true);
     expect(config.rewrites).toBeUndefined();
     expect(config.headers).toBeUndefined();
+    expect(config.experimental?.turbopackFileSystemCacheForBuild).toBe(true);
   });
 
   it('keeps documentation sources but excludes dynamic application routes', () => {
@@ -21,13 +22,11 @@ describe('static docs build', () => {
     expect(shouldIncludeInStaticDocsProject('app/llms.mdx/docs/[[...slug]]/route.ts')).toBe(false);
   });
 
-  it('keeps the statically exported search index route but no other APIs', () => {
-    // `app/api` 本身必须放行（祖先目录），否则递归复制进不去
-    expect(shouldIncludeInStaticDocsProject('app/api')).toBe(true);
-    expect(shouldIncludeInStaticDocsProject('app/api/search')).toBe(true);
-    expect(shouldIncludeInStaticDocsProject('app/api/search/route.ts')).toBe(true);
+  it('excludes all API routes from the pure static package', () => {
+    expect(shouldIncludeInStaticDocsProject('app/api')).toBe(false);
+    expect(shouldIncludeInStaticDocsProject('app/api/search')).toBe(false);
+    expect(shouldIncludeInStaticDocsProject('app/api/search/route.ts')).toBe(false);
     expect(shouldIncludeInStaticDocsProject('app/api/upload/route.ts')).toBe(false);
-    expect(shouldIncludeInStaticDocsProject('app/api/download/tasks/route.ts')).toBe(false);
   });
 
   it('maps source pages to stable direct markdown URLs', () => {

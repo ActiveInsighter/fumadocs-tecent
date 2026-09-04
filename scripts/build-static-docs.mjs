@@ -11,6 +11,7 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
+const persistentBuildCacheRoot = path.join(projectRoot, '.static-docs-next-cache');
 
 const projectEntries = [
   'app',
@@ -77,6 +78,31 @@ async function prepareStage(stageRoot) {
   );
 }
 
+async function restoreBuildCache(stageRoot) {
+  if (!(await exists(persistentBuildCacheRoot))) {
+    console.log('[static-docs] No persisted Next/Turbopack cache found; cold build.');
+    return;
+  }
+
+  const destination = path.join(stageRoot, '.next', 'cache');
+  await mkdir(path.dirname(destination), { recursive: true });
+  await cp(persistentBuildCacheRoot, destination, { recursive: true });
+  console.log('[static-docs] Restored persisted Next/Turbopack cache.');
+}
+
+async function persistBuildCache(stageRoot) {
+  const source = path.join(stageRoot, '.next', 'cache');
+  if (!(await exists(source))) {
+    console.log('[static-docs] Next/Turbopack cache directory was not produced.');
+    return;
+  }
+
+  await rm(persistentBuildCacheRoot, { recursive: true, force: true });
+  await mkdir(path.dirname(persistentBuildCacheRoot), { recursive: true });
+  await cp(source, persistentBuildCacheRoot, { recursive: true });
+  console.log('[static-docs] Persisted Next/Turbopack cache for the next build.');
+}
+
 async function removeStage(stageRoot) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
@@ -98,7 +124,7 @@ function runNextBuild(stageRoot) {
   );
 
   return new Promise((resolve, reject) => {
-    const child = spawn(nextCommand, ['build', '--webpack'], {
+    const child = spawn(nextCommand, ['build'], {
       cwd: stageRoot,
       env: {
         ...process.env,
@@ -196,7 +222,9 @@ async function main() {
 
   try {
     await prepareStage(stageRoot);
+    await restoreBuildCache(stageRoot);
     await runNextBuild(stageRoot);
+    await persistBuildCache(stageRoot);
 
     await rm(staticOutputRoot, { recursive: true, force: true });
     await cp(path.join(stageRoot, 'out'), staticOutputRoot, { recursive: true });

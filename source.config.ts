@@ -1,4 +1,4 @@
-import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
+import { remarkMdxMermaid, remarkStructure } from 'fumadocs-core/mdx-plugins';
 import { pageSchema } from 'fumadocs-core/source/schema';
 import { defineCollections, defineConfig, defineDocs } from 'fumadocs-mdx/config';
 import rehypeKatex from 'rehype-katex';
@@ -9,9 +9,6 @@ export const docs = defineDocs({
   dir: 'content/docs',
   docs: {
     async: true,
-    postprocess: {
-      includeProcessedMarkdown: true,
-    },
     schema: pageSchema.extend({
       taskRecordId: z.string().regex(/^[a-z0-9]{15}$/u).optional(),
       messageRecordId: z.string().regex(/^[a-z0-9]{15}$/u).optional(),
@@ -31,7 +28,17 @@ export const blog = defineCollections({
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkMath, remarkMdxMermaid],
+    // Search is intentionally disabled for the static CDN build. Remove the
+    // default Remark Structure plugin so every long document is not traversed
+    // and stringified again solely to produce an unused search index.
+    remarkPlugins: (plugins) => [
+      ...plugins.filter((plugin) => {
+        const entry = Array.isArray(plugin) ? plugin[0] : plugin;
+        return entry !== remarkStructure;
+      }),
+      remarkMath,
+      remarkMdxMermaid,
+    ],
     // Do not make production builds depend on third-party image hosts.
     remarkImageOptions: { external: false },
     // KaTeX must run before Fumadocs' syntax highlighter.
