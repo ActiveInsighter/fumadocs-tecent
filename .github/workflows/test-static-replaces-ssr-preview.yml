@@ -1,0 +1,201 @@
+name: Verify static deployment replaces SSR in existing project
+
+on:
+  push:
+    branches:
+      - codex/remove-next-ssr
+  workflow_dispatch:
+
+concurrency:
+  group: static-replaces-ssr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.31-3
+  EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
+
+jobs:
+  verify:
+    name: Replace SSR with static preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Restore project dependency tree
+        id: node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node22-modules-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore npm download cache on dependency miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies on cache miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Refresh Fumadocs generated source
+        run: npm run postinstall
+
+      - name: Restore Next/Turbopack build cache
+        uses: actions/cache@v5
+        with:
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v3-
+            ${{ runner.os }}-static-docs-turbopack-v2-
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: .edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
+        run: npm install --global --prefix "${GITHUB_WORKSPACE}/.edgeone-cli" "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+
+      - name: Configure tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
+          [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]]
+          [[ -n "${EDGEONE_API_TOKEN:-}" ]]
+          [[ -n "${EDGEONE_DOCS_PROJECT_NAME:-}" ]]
+
+      - name: Build static package
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          npm run build:static-docs >/tmp/static-build.log 2>&1 || {
+            cat /tmp/static-build.log
+            exit 1
+          }
+          finished="$(date +%s)"
+          echo "- Static build: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Assert zero Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d .static-docs
+          if find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print -quit | grep -q .; then
+            echo '::error::Function directory found.'
+            exit 1
+          fi
+          if find .static-docs -type f \( -path '*/cloud-functions/*' -o -path '*/edge-functions/*' \) -print -quit | grep -q .; then
+            echo '::error::Function artifact found.'
+            exit 1
+          fi
+          echo '- Cloud Functions: 0' >> "${GITHUB_STEP_SUMMARY}"
+          echo '- Edge Functions: 0' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Package static ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="${RUNNER_TEMP}/static-replaces-ssr.zip"
+          (cd .static-docs && zip -qr -9 "${zip_path}" .)
+          echo "STATIC_ZIP=${zip_path}" >> "${GITHUB_ENV}"
+          echo "- ZIP: $(( $(stat -c '%s' "${zip_path}") / 1024 / 1024 )) MiB" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Deploy to existing project preview without logging access token
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_log="${RUNNER_TEMP}/edgeone-preview.raw.log"
+          started="$(date +%s)"
+          if ! edgeone makers deploy "${STATIC_ZIP}" \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e preview \
+            --site global \
+            --json \
+            >"${raw_log}" 2>&1; then
+            sed -E 's/(eo_token=)[^&[:space:]"}]*/\1REDACTED/g' "${raw_log}"
+            exit 1
+          fi
+          finished="$(date +%s)"
+          echo "- Existing-project preview deploy: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+          deployment_json="$(grep -Eo '\{"status":"success".*' "${raw_log}" | tail -n 1)"
+          deployment_url="$(printf '%s' "${deployment_json}" | jq -r '.url // empty')"
+          test -n "${deployment_url}"
+          url_file="${RUNNER_TEMP}/preview-url.txt"
+          printf '%s' "${deployment_url}" > "${url_file}"
+          echo "preview_url_file=${url_file}" >> "${GITHUB_OUTPUT}"
+          rm -f -- "${raw_log}"
+
+      - name: Verify previous SSR routes are absent from new deployment
+        shell: bash
+        env:
+          URL_FILE: ${{ steps.deploy.outputs.preview_url_file }}
+        run: |
+          set -euo pipefail
+          deployment_url="$(cat "${URL_FILE}")"
+          base_url="${deployment_url%%\?*}"
+          query="${deployment_url#*\?}"
+          test "${query}" != "${deployment_url}"
+
+          status_for() {
+            local path="$1"
+            curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' \
+              "${base_url}${path}?${query}"
+          }
+
+          home="$(status_for '/')"
+          docs="$(status_for '/docs/')"
+          markdown="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity.md')"
+          old_upload="$(status_for '/api/blob/upload-url')"
+          old_ingest="$(status_for '/api/integrations/anyworkflow')"
+          old_download="$(status_for '/download/tasks/probe/1/probe/md')"
+
+          printf 'home=%s\ndocs=%s\nmarkdown=%s\nold_upload=%s\nold_ingest=%s\nold_download=%s\n' \
+            "${home}" "${docs}" "${markdown}" "${old_upload}" "${old_ingest}" "${old_download}"
+
+          [[ "${home}" == '200' ]]
+          [[ "${docs}" == '200' ]]
+          [[ "${markdown}" == '200' ]]
+          [[ "${old_upload}" == '404' ]]
+          [[ "${old_ingest}" == '404' ]]
+          [[ "${old_download}" == '404' ]]
+          rm -f -- "${URL_FILE}"
+
+      - name: Write summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Existing EdgeOne project static replacement test'
+            echo
+            echo "- Project: ${EDGEONE_DOCS_PROJECT_NAME}"
+            echo '- Environment: preview only'
+            echo '- Expected runtime in this deployment: static only'
+            echo "- Job status: ${{ job.status }}"
+            echo "- Commit: ${GITHUB_SHA}"
+          } >> "${GITHUB_STEP_SUMMARY}"
