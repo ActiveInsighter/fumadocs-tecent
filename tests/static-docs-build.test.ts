@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// This no-op test comment intentionally triggers a warm-cache deployment measurement.
 // @ts-expect-error The static build helpers are intentionally Node.js ESM scripts.
 import { getStaticDocsConfig, shouldIncludeInStaticDocsProject } from '../scripts/static-docs-config.mjs';
 // @ts-expect-error The static build helpers are intentionally Node.js ESM scripts.
