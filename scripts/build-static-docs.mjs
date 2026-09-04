@@ -116,6 +116,7 @@ function runNextBuild(stageRoot) {
       env: {
         ...process.env,
         NEXT_TELEMETRY_DISABLED: '1',
+        STATIC_DOCS_BUILD: '1',
       },
       shell: process.platform === 'win32',
       stdio: 'inherit',
