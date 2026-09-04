@@ -6,23 +6,22 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: fumadocs-production-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 env:
   EDGEONE_CLI_VERSION: 1.6.31-3
-  EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
-  EDGEONE_DOCS_PROJECT_ID: makers-nycxgnmbk5ft
   EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
-  NEXT_PUBLIC_ALGOLIA_APP_ID: ${{ vars.NEXT_PUBLIC_ALGOLIA_APP_ID }}
-  NEXT_PUBLIC_ALGOLIA_SEARCH_KEY: ${{ vars.NEXT_PUBLIC_ALGOLIA_SEARCH_KEY }}
-  NEXT_PUBLIC_ALGOLIA_INDEX_NAME: ${{ vars.NEXT_PUBLIC_ALGOLIA_INDEX_NAME }}
 
 jobs:
   deploy:
-    name: Deploy Fumadocs site
+    name: Deploy pure static Fumadocs site
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 30
     env:
       EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
 
@@ -31,360 +30,209 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
 
-      - name: Install EdgeOne CLI
+      - name: Restore project dependency tree
+        id: node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node22-modules-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore npm download cache on dependency miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Install project dependencies on cache miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Refresh Fumadocs generated source
         shell: bash
         run: |
           set -euo pipefail
-          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          npm run postinstall
+          echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Restore Next/Turbopack build cache
+        uses: actions/cache@v5
+        with:
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v3-
+            ${{ runner.os }}-static-docs-turbopack-v2-
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: .edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --prefix "${GITHUB_WORKSPACE}/.edgeone-cli" \
+            "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+
+      - name: Configure deployment tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
+          [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]] || {
+            echo '::error::EdgeOne CLI executable is missing.'
+            exit 1
+          }
+          [[ -n "${EDGEONE_API_TOKEN:-}" ]] || {
+            echo '::error::Missing GitHub Actions secret: EDGEONE_API_TOKEN'
+            exit 1
+          }
+          [[ -n "${EDGEONE_DOCS_PROJECT_NAME:-}" ]] || {
+            echo '::error::Missing GitHub Actions variable: EDGEONE_DOCS_PROJECT_NAME'
+            exit 1
+          }
           edgeone --version
+          echo "- EdgeOne CLI cache hit: ${{ steps.edgeone-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Validate deployment configuration
+      - name: Build pure static documentation
         shell: bash
         run: |
           set -euo pipefail
-          missing=0
-          for name in EDGEONE_API_TOKEN EDGEONE_DOCS_PROJECT_NAME; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing GitHub Actions value: ${name}"
-              missing=1
-            fi
-          done
-          exit "${missing}"
+          started="$(date +%s)"
+          npm run build:static-docs 2>&1 | tee static-docs-build.log
+          finished="$(date +%s)"
+          echo "- Static build: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Build the Fumadocs application locally
+      - name: Verify zero-function deployment artifact
         shell: bash
         run: |
           set -euo pipefail
-          edgeone makers build --mode prod \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
-            | tee edgeone-docs-build.log
+          test -d .static-docs
 
-      - name: Reduce the EdgeOne SSR bundle footprint
-        shell: bash
-        run: node scripts/prune-edgeone-prerendered.mjs
+          if find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print -quit | grep -q .; then
+            echo '::error::A Functions directory exists in the static deployment artifact.'
+            find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print
+            exit 1
+          fi
 
-      - name: Check EdgeOne upload footprint
-        shell: bash
-        run: |
-          set -euo pipefail
+          if find .static-docs -type f \( -path '*/cloud-functions/*' -o -path '*/edge-functions/*' \) -print -quit | grep -q .; then
+            echo '::error::A Functions file exists in the static deployment artifact.'
+            exit 1
+          fi
 
-          function_bytes="$(du -sb .edgeone/cloud-functions | awk '{print $1}')"
-          asset_bytes="$(du -sb .edgeone/assets | awk '{print $1}')"
-          largest_file="$({ find .edgeone -type f -printf '%s %p\n' | sort -nr | head -n 1; } || true)"
+          package_bytes="$(du -sb .static-docs | awk '{print $1}')"
+          file_count="$(find .static-docs -type f | wc -l | tr -d ' ')"
+          largest_file="$({ find .static-docs -type f -printf '%s %p\n' | sort -nr | head -n 1; } || true)"
+          largest_bytes="${largest_file%% *}"
 
-          echo "cloud_functions_bytes=${function_bytes}"
-          echo "assets_bytes=${asset_bytes}"
-          echo "largest_file=${largest_file}"
           {
-            echo "- Cloud Functions: ${function_bytes} bytes"
-            echo "- Static assets: ${asset_bytes} bytes"
-            echo "- Largest upload file: ${largest_file}"
+            echo '- Cloud Functions: 0'
+            echo '- Edge Functions: 0'
+            echo "- Static files: ${file_count}"
+            echo "- Static output: $((package_bytes / 1024 / 1024)) MiB"
+            echo "- Largest file: ${largest_file}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if (( function_bytes >= 128000000 )); then
-            echo "::error::Cloud Functions output is at or above EdgeOne's 128 MB limit."
-            exit 1
-          fi
-
-          largest_bytes="${largest_file%% *}"
           if (( largest_bytes >= 25000000 )); then
-            echo '::error::An EdgeOne upload file is at or above the 25 MB limit.'
+            echo '::error::A static file is at or above the EdgeOne 25 MB single-file limit.'
             exit 1
           fi
 
-      - name: Deploy the prebuilt Fumadocs application
+      - name: Package pure static deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="${RUNNER_TEMP}/fumadocs-static-production.zip"
+          rm -f -- "${zip_path}"
+          started="$(date +%s)"
+          (cd .static-docs && zip -qr -9 "${zip_path}" .)
+          finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${zip_path}")"
+          echo "STATIC_DEPLOY_ZIP=${zip_path}" >> "${GITHUB_ENV}"
+          echo "- Deployment ZIP: $((zip_bytes / 1024 / 1024)) MiB; packaging $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Deploy prebuilt static site to EdgeOne
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
-
-          edgeone makers deploy .edgeone \
+          started="$(date +%s)"
+          edgeone makers deploy "${STATIC_DEPLOY_ZIP}" \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
-            | tee edgeone-docs-deploy.log
+            --site global \
+            --json \
+            | tee edgeone-static-production.log
+          finished="$(date +%s)"
+          echo "- EdgeOne deploy: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
-          deployment_url="$(
-            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
-              || true
-          )"
-          console_url="$(
-            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
-              || true
-          )"
+          deployment_json="$(grep -Eo '\{"status":"success".*' edgeone-static-production.log | tail -n 1)"
+          deployment_url="$(printf '%s' "${deployment_json}" | jq -r '.url // empty')"
+          console_url="$(printf '%s' "${deployment_json}" | jq -r '.consoleUrl // empty')"
+          [[ -n "${deployment_url}" ]] || { echo '::error::No deployment URL captured.'; exit 1; }
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
-      - name: Diagnose failed EdgeOne deployment
-        if: ${{ always() && steps.deploy.outcome == 'failure' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          api_tmp="$(mktemp -d)"
-          trap 'rm -rf -- "${api_tmp}"' EXIT
-          response_file="${api_tmp}/describe-pages-deployments.json"
-
-          jq -cn \
-            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
-            '{
-              Action: "DescribePagesDeployments",
-              ProjectId: $project_id,
-              Offset: 0,
-              Limit: 10,
-              OrderBy: "CreatedOn",
-              Order: "Desc"
-            }' \
-            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
-                --silent --show-error --fail-with-body --max-time 30 \
-                -H 'Content-Type: application/json' \
-                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
-                --data-binary @- \
-                --output "${response_file}" \
-                "${EDGEONE_PAGES_API_URL}"
-
-          jq '{
-            code: .Code,
-            message: .Message,
-            requestId: .RequestId,
-            deployments: ((.Data.Response.Deployments // []) | map({
-              deploymentId: .DeploymentId,
-              status: .Status,
-              environment: .Env,
-              usedInProd: .UsedInProd,
-              createdOn: .CreatedOn,
-              updatedOn: .UpdatedOn,
-              error: (.Error // .ErrorMessage // .FailReason // .Reason // null),
-              message: .Message
-            }))
-          }' "${response_file}"
-
-      - name: Configure Fumadocs runtime variables
-        shell: bash
-        env:
-          EDGEONE_INTERNAL_API_KEY: ${{ secrets.EDGEONE_INTERNAL_API_KEY }}
-          EDGEONE_DOWNLOAD_GATEWAY_SECRET: ${{ secrets.EDGEONE_DOWNLOAD_GATEWAY_SECRET }}
-          N8N_DOCUMENT_PUBLISH_SECRET: ${{ secrets.N8N_DOCUMENT_PUBLISH_SECRET }}
-          FUMADOCS_BLOB_UPLOAD_KEY: ${{ secrets.FUMADOCS_BLOB_UPLOAD_KEY }}
-        run: |
-          set -euo pipefail
-
-          api_tmp="$(mktemp -d)"
-          trap 'rm -rf -- "${api_tmp}"' EXIT
-          response_file="${api_tmp}/modify-pages-project-envs.json"
-
-          jq -cn \
-            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
-            --arg n8n_secret "${N8N_DOCUMENT_PUBLISH_SECRET}" \
-            --arg upload_key "${FUMADOCS_BLOB_UPLOAD_KEY}" \
-            --arg signer_secret "${EDGEONE_INTERNAL_API_KEY}" \
-            --arg gateway_secret "${EDGEONE_DOWNLOAD_GATEWAY_SECRET}" \
-            '{
-              Action: "ModifyPagesProjectEnvs",
-              ProjectId: $project_id,
-              EnvVars: [
-                {Key: "POCKETBASE_URL", Value: "https://pb.any1.tech"},
-                {Key: "N8N_DOCUMENT_PUBLISH_URL", Value: "https://n8n.any1.tech/webhook/anyworkflow-task-enrich"},
-                {Key: "N8N_DOCUMENT_PUBLISH_SECRET", Value: $n8n_secret},
-                {Key: "FUMADOCS_BLOB_UPLOAD_KEY", Value: $upload_key},
-                {Key: "BLOB_SIGNER_URL", Value: "https://fumadocs-upload.any1.tech/api/blob/upload-url"},
-                {Key: "BLOB_SIGNER_SECRET", Value: $signer_secret},
-                {Key: "BLOB_DOWNLOAD_GATEWAY_URL", Value: "https://fumadocs-upload.any1.tech/download"},
-                {Key: "BLOB_DOWNLOAD_GATEWAY_SECRET", Value: $gateway_secret}
-              ]
-            }' \
-            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
-                --silent --show-error --fail-with-body --max-time 30 \
-                -H 'Content-Type: application/json' \
-                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
-                --data-binary @- \
-                --output "${response_file}" \
-                "${EDGEONE_PAGES_API_URL}"
-
-          if ! jq -e '((.Code // .Data.Response.Code // .Data.Code // 0) == 0) and ((.Error // .Data.Response.Error // .Data.Error) == null)' "${response_file}" >/dev/null; then
-            echo '::error::EdgeOne runtime variable update failed.'
-            exit 1
-          fi
-
-      - name: Verify Fumadocs runtime variables
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          api_tmp="$(mktemp -d)"
-          trap 'rm -rf -- "${api_tmp}"' EXIT
-          response_file="${api_tmp}/describe-pages-project-envs.json"
-
-          jq -cn \
-            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
-            '{Action: "DescribePagesProjectEnvs", ProjectId: $project_id}' \
-            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
-                --silent --show-error --fail-with-body --max-time 30 \
-                -H 'Content-Type: application/json' \
-                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
-                --data-binary @- \
-                --output "${response_file}" \
-                "${EDGEONE_PAGES_API_URL}"
-
-          api_env_present() {
-            local name="$1"
-            jq -e --arg name "${name}" '
-              (.Data.Response // .Data // .)
-              | (.EnvVars // [])
-              | any(.[]; .Key == $name and ((.Value // "") | length > 0))
-            ' "${response_file}" >/dev/null
-          }
-
-          missing=0
-          for name in \
-            POCKETBASE_URL \
-            N8N_DOCUMENT_PUBLISH_URL \
-            N8N_DOCUMENT_PUBLISH_SECRET \
-            FUMADOCS_BLOB_UPLOAD_KEY \
-            BLOB_SIGNER_URL \
-            BLOB_SIGNER_SECRET \
-            BLOB_DOWNLOAD_GATEWAY_URL \
-            BLOB_DOWNLOAD_GATEWAY_SECRET; do
-            if api_env_present "${name}"; then
-              echo "${name}=present"
-            else
-              echo "::error::Missing or empty EdgeOne runtime variable: ${name}"
-              missing=1
-            fi
-          done
-          exit "${missing}"
-
-      - name: Redeploy with configured runtime
-        id: redeploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          edgeone makers deploy .edgeone \
-            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
-            | tee edgeone-docs-redeploy.log
-
-          deployment_url="$(
-            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
-              || true
-          )"
-          console_url="$(
-            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
-              || true
-          )"
-          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
-          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
-
-      - name: Check EdgeOne custom domain binding
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const endpoint = process.env.EDGEONE_PAGES_API_URL;
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${process.env.EDGEONE_API_TOKEN}`,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-              Action: 'DescribePagesZoneCustomDomains',
-              ProjectId: process.env.EDGEONE_DOCS_PROJECT_ID,
-            }),
-          });
-          if (!response.ok) throw new Error(`EdgeOne domain query returned HTTP ${response.status}`);
-          const payload = await response.json();
-          const pagesDomains = payload?.Data?.Response?.PagesDomains ?? [];
-          const customDomain = pagesDomains.find(
-            (item) => item?.Type === 'Custom' && item?.Domain === 'fumadocs.any1.tech',
-          );
-          console.log(JSON.stringify(pagesDomains.map((item) => ({
-            Domain: item?.Domain,
-            Type: item?.Type,
-            Status: item?.Status,
-            CurrentCname: item?.CurrentCname,
-            Cname: item?.Cname,
-            MainDomain: item?.MainDomain,
-            Env: item?.Env,
-          })), null, 2));
-          if (!customDomain) throw new Error('fumadocs.any1.tech is not attached to the EdgeOne docs project.');
-          NODE
-
-      - name: Verify public EdgeOne routes
+      - name: Verify production static routes
         shell: bash
         run: |
           set -euo pipefail
 
           status_for() {
-            local method="$1"
-            local url="$2"
-            curl --fail-with-body --silent --show-error --max-time 30 \
-              --request "${method}" \
-              -o /dev/null \
-              -w '%{http_code}' \
-              "${url}" || true
+            local path="$1"
+            curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' \
+              "https://fumadocs.any1.tech${path}"
           }
 
-          homepage_status="$(status_for GET 'https://fumadocs.any1.tech/')"
-          signer_status="$(status_for POST 'https://fumadocs.any1.tech/api/blob/upload-url')"
-          download_status="$(status_for GET 'https://fumadocs.any1.tech/download/edgeone-verification-probe/1/md')"
+          home="$(status_for '/')"
+          docs="$(status_for '/docs/')"
+          math="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity/')"
+          markdown="$(status_for '/docs/math/advanced-mathematics/01-limits-continuity.md')"
+          retired_upload="$(status_for '/api/blob/upload-url')"
+          retired_ingest="$(status_for '/api/integrations/anyworkflow')"
+          retired_download="$(status_for '/download/tasks/probe/1/probe/md')"
 
-          echo "homepage=${homepage_status}"
-          echo "signer_without_key=${signer_status}"
-          echo "download_missing_artifact=${download_status}"
+          printf 'home=%s\ndocs=%s\nmath=%s\nmarkdown=%s\nretired_upload=%s\nretired_ingest=%s\nretired_download=%s\n' \
+            "${home}" "${docs}" "${math}" "${markdown}" "${retired_upload}" "${retired_ingest}" "${retired_download}"
 
-          [[ "${homepage_status}" == "200" ]]
-          [[ "${signer_status}" == "401" ]]
-          [[ "${download_status}" == "404" ]]
+          [[ "${home}" == '200' ]]
+          [[ "${docs}" == '200' ]]
+          [[ "${math}" == '200' ]]
+          [[ "${markdown}" == '200' ]]
+          [[ "${retired_upload}" == '404' ]]
+          [[ "${retired_ingest}" == '404' ]]
+          [[ "${retired_download}" == '404' ]]
 
-      - name: Verify static HTML compression and CDN cache
+      - name: Verify CDN compression and cache
         shell: bash
         run: |
           set -euo pipefail
-
           probe_dir="$(mktemp -d)"
           trap 'rm -rf -- "${probe_dir}"' EXIT
-          warmup_headers_file="${probe_dir}/warmup-headers.txt"
           headers_file="${probe_dir}/headers.txt"
 
-          warmup_status="$(
-            curl --http1.1 --compressed \
-              --retry 3 --retry-all-errors --retry-delay 2 \
-              --silent --show-error --max-time 30 \
-              -H 'Accept-Encoding: br, gzip' \
-              -D "${warmup_headers_file}" \
-              -o /dev/null \
-              -w '%{http_code}' \
-              'https://fumadocs.any1.tech/docs/408'
-          )"
-          echo "static_docs_warmup_status=${warmup_status}"
+          curl --http1.1 --compressed --silent --show-error --max-time 60 \
+            -H 'Accept-Encoding: br, gzip' \
+            -o /dev/null \
+            'https://fumadocs.any1.tech/docs/408'
 
-          curl --http1.1 --compressed \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            --silent --show-error --max-time 30 \
+          curl --http1.1 --compressed --silent --show-error --max-time 60 \
             -H 'Accept-Encoding: br, gzip' \
             -D "${headers_file}" \
             -o /dev/null \
-            -w 'static_docs_status=%{http_code}\nstatic_docs_ttfb=%{time_starttransfer}\nstatic_docs_total=%{time_total}\nstatic_docs_bytes=%{size_download}\n' \
             'https://fumadocs.any1.tech/docs/408'
 
           header_value() {
@@ -398,39 +246,28 @@ jobs:
             ' "${headers_file}"
           }
 
-          status="$(awk '$1 ~ /^HTTP\// { code = $2 } END { print code }' "${headers_file}")"
-          content_type="$(header_value 'Content-Type')"
           content_encoding="$(header_value 'Content-Encoding')"
           cache_control="$(header_value 'Cache-Control')"
           edge_cache_status="$(header_value 'EO-Cache-Status')"
+          echo "content_encoding=${content_encoding}"
+          echo "cache_control=${cache_control}"
+          echo "edge_cache_status=${edge_cache_status}"
 
-          echo "static_docs_content_type=${content_type}"
-          echo "static_docs_content_encoding=${content_encoding}"
-          echo "static_docs_cache_control=${cache_control}"
-          echo "static_docs_edge_cache_status=${edge_cache_status}"
-
-          [[ "${warmup_status}" == "200" ]]
-          [[ "${status}" == "200" ]]
-          [[ "${content_type}" == text/html* ]]
           [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]
           [[ "${cache_control}" != *private* && "${cache_control}" != *no-store* ]]
-          [[ "${edge_cache_status}" == 'Cache Hit' ]]
 
       - name: Write deployment summary
         if: always()
         shell: bash
         run: |
           {
-            echo "## EdgeOne Fumadocs deployment"
+            echo '## EdgeOne Fumadocs pure-static deployment'
             echo
-            echo "- Project: \`${EDGEONE_DOCS_PROJECT_NAME}\`"
-            echo "- Environment: \`production\`"
-            echo "- Job status: \`${{ job.status }}\`"
-            echo "- Commit: \`${GITHUB_SHA}\`"
-            if [ -n "${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}" ]; then
-              echo "- Site endpoint: ${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}"
-            fi
-            if [ -n "${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}" ]; then
-              echo "- Console: ${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}"
+            echo "- Project: ${EDGEONE_DOCS_PROJECT_NAME}"
+            echo '- Runtime: static CDN only; Cloud Functions 0; Edge Functions 0'
+            echo "- Job status: ${{ job.status }}"
+            echo "- Commit: ${GITHUB_SHA}"
+            if [ -n "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- Console: ${{ steps.deploy.outputs.console_url }}"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
