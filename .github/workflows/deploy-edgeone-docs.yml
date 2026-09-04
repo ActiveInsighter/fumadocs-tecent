@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: fumadocs-production-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -31,17 +35,52 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
 
-      - name: Install EdgeOne CLI
+      - name: Restore npm download cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          npm install --global "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          install_started="$(date +%s)"
+          npm install --global --prefix "${HOME}/.local/edgeone-cli" \
+            "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          install_finished="$(date +%s)"
+          echo "- EdgeOne CLI install: $((install_finished - install_started))s (cache miss)" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Configure EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${HOME}/.local/edgeone-cli/bin" >> "${GITHUB_PATH}"
+          export PATH="${HOME}/.local/edgeone-cli/bin:${PATH}"
           edgeone --version
+          echo "- EdgeOne CLI cache hit: ${{ steps.edgeone-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Restore Next/Turbopack build cache
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-production-next-v1-${{ hashFiles('package-lock.json', 'next.config.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-production-next-v1-${{ hashFiles('package-lock.json', 'next.config.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-production-next-v1-
 
       - name: Validate deployment configuration
         shell: bash
@@ -60,10 +99,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          build_started="$(date +%s)"
           edgeone makers build --mode prod \
             2>&1 \
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-build.log
+          build_finished="$(date +%s)"
+          echo "- Production EdgeOne build: $((build_finished - build_started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Reduce the EdgeOne SSR bundle footprint
         shell: bash
@@ -103,6 +145,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          deploy_started="$(date +%s)"
 
           edgeone makers deploy .edgeone \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
@@ -111,6 +154,9 @@ jobs:
             2>&1 \
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
             | tee edgeone-docs-deploy.log
+
+          deploy_finished="$(date +%s)"
+          echo "- Initial EdgeOne deploy: $((deploy_finished - deploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
 
           deployment_url="$(
             grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
@@ -271,6 +317,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          redeploy_started="$(date +%s)"
           edgeone makers deploy .edgeone \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
@@ -278,6 +325,8 @@ jobs:
             2>&1 \
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
             | tee edgeone-docs-redeploy.log
+          redeploy_finished="$(date +%s)"
+          echo "- Runtime EdgeOne redeploy: $((redeploy_finished - redeploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
 
           deployment_url="$(
             grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
