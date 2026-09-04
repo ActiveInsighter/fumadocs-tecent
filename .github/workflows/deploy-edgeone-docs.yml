@@ -140,83 +140,6 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy the prebuilt Fumadocs application
-        id: deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          deploy_started="$(date +%s)"
-
-          edgeone makers deploy .edgeone \
-            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production \
-            2>&1 \
-            | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
-            | tee edgeone-docs-deploy.log
-
-          deploy_finished="$(date +%s)"
-          echo "- Initial EdgeOne deploy: $((deploy_finished - deploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
-
-          deployment_url="$(
-            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
-              || true
-          )"
-          console_url="$(
-            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
-              | tail -n 1 \
-              | sed -E 's/^Console URL: //; s/[),.;]+$//' \
-              || true
-          )"
-          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
-          echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
-
-      - name: Diagnose failed EdgeOne deployment
-        if: ${{ always() && steps.deploy.outcome == 'failure' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          api_tmp="$(mktemp -d)"
-          trap 'rm -rf -- "${api_tmp}"' EXIT
-          response_file="${api_tmp}/describe-pages-deployments.json"
-
-          jq -cn \
-            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
-            '{
-              Action: "DescribePagesDeployments",
-              ProjectId: $project_id,
-              Offset: 0,
-              Limit: 10,
-              OrderBy: "CreatedOn",
-              Order: "Desc"
-            }' \
-            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
-                --silent --show-error --fail-with-body --max-time 30 \
-                -H 'Content-Type: application/json' \
-                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
-                --data-binary @- \
-                --output "${response_file}" \
-                "${EDGEONE_PAGES_API_URL}"
-
-          jq '{
-            code: .Code,
-            message: .Message,
-            requestId: .RequestId,
-            deployments: ((.Data.Response.Deployments // []) | map({
-              deploymentId: .DeploymentId,
-              status: .Status,
-              environment: .Env,
-              usedInProd: .UsedInProd,
-              createdOn: .CreatedOn,
-              updatedOn: .UpdatedOn,
-              error: (.Error // .ErrorMessage // .FailReason // .Reason // null),
-              message: .Message
-            }))
-          }' "${response_file}"
-
       - name: Configure Fumadocs runtime variables
         shell: bash
         env:
@@ -312,36 +235,83 @@ jobs:
           done
           exit "${missing}"
 
-      - name: Redeploy with configured runtime
-        id: redeploy
+      - name: Deploy the prebuilt Fumadocs application
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          redeploy_started="$(date +%s)"
+          deploy_started="$(date +%s)"
+
           edgeone makers deploy .edgeone \
             -n "${EDGEONE_DOCS_PROJECT_NAME}" \
             -t "${EDGEONE_API_TOKEN}" \
             -e production \
+            --site global \
             2>&1 \
             | sed -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
-            | tee edgeone-docs-redeploy.log
-          redeploy_finished="$(date +%s)"
-          echo "- Runtime EdgeOne redeploy: $((redeploy_finished - redeploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
+            | tee edgeone-docs-deploy.log
+
+          deploy_finished="$(date +%s)"
+          echo "- EdgeOne deploy: $((deploy_finished - deploy_started))s" >> "${GITHUB_STEP_SUMMARY}"
 
           deployment_url="$(
-            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
+            grep -Eo 'Deploy URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
               | tail -n 1 \
               | sed -E 's/^Deploy URL: //; s/\?.*$//; s/[),.;]+$//' \
               || true
           )"
           console_url="$(
-            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-redeploy.log \
+            grep -Eo 'Console URL: https://[^[:space:]]+' edgeone-docs-deploy.log \
               | tail -n 1 \
               | sed -E 's/^Console URL: //; s/[),.;]+$//' \
               || true
           )"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Diagnose failed EdgeOne deployment
+        if: ${{ always() && steps.deploy.outcome == 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api_tmp="$(mktemp -d)"
+          trap 'rm -rf -- "${api_tmp}"' EXIT
+          response_file="${api_tmp}/describe-pages-deployments.json"
+
+          jq -cn \
+            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
+            '{
+              Action: "DescribePagesDeployments",
+              ProjectId: $project_id,
+              Offset: 0,
+              Limit: 10,
+              OrderBy: "CreatedOn",
+              Order: "Desc"
+            }' \
+            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
+                --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                --output "${response_file}" \
+                "${EDGEONE_PAGES_API_URL}"
+
+          jq '{
+            code: .Code,
+            message: .Message,
+            requestId: .RequestId,
+            deployments: ((.Data.Response.Deployments // []) | map({
+              deploymentId: .DeploymentId,
+              status: .Status,
+              environment: .Env,
+              usedInProd: .UsedInProd,
+              createdOn: .CreatedOn,
+              updatedOn: .UpdatedOn,
+              error: (.Error // .ErrorMessage // .FailReason // .Reason // null),
+              message: .Message
+            }))
+          }' "${response_file}"
 
       - name: Check EdgeOne custom domain binding
         shell: bash
@@ -476,10 +446,10 @@ jobs:
             echo "- Environment: \`production\`"
             echo "- Job status: \`${{ job.status }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            if [ -n "${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}" ]; then
-              echo "- Site endpoint: ${{ steps.redeploy.outputs.deployment_url || steps.deploy.outputs.deployment_url }}"
+            if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
+              echo "- Site endpoint: ${{ steps.deploy.outputs.deployment_url }}"
             fi
-            if [ -n "${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}" ]; then
-              echo "- Console: ${{ steps.redeploy.outputs.console_url || steps.deploy.outputs.console_url }}"
+            if [ -n "${{ steps.deploy.outputs.console_url }}" ]; then
+              echo "- Console: ${{ steps.deploy.outputs.console_url }}"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
