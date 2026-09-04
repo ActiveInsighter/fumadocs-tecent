@@ -1,0 +1,162 @@
+name: Benchmark EdgeOne deploy transport
+
+on:
+  push:
+    branches:
+      - codex/edgeone-deploy-ab
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.31-3
+  EDGEONE_PAGES_API_URL: https://pages-api.cloud.tencent.com/v1
+  EDGEONE_DOCS_PROJECT_ID: makers-nycxgnmbk5ft
+  EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
+  NEXT_PUBLIC_ALGOLIA_APP_ID: ${{ vars.NEXT_PUBLIC_ALGOLIA_APP_ID }}
+  NEXT_PUBLIC_ALGOLIA_SEARCH_KEY: ${{ vars.NEXT_PUBLIC_ALGOLIA_SEARCH_KEY }}
+  NEXT_PUBLIC_ALGOLIA_INDEX_NAME: ${{ vars.NEXT_PUBLIC_ALGOLIA_INDEX_NAME }}
+
+jobs:
+  benchmark:
+    name: Preview deploy A/B
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --prefix "${HOME}/.local/edgeone-cli" \
+            "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+
+      - name: Configure EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${HOME}/.local/edgeone-cli/bin" >> "${GITHUB_PATH}"
+          export PATH="${HOME}/.local/edgeone-cli/bin:${PATH}"
+          edgeone --version
+
+      - name: Restore production Next cache
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-production-next-ab-${{ hashFiles('package-lock.json', 'next.config.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-production-next-v1-${{ hashFiles('package-lock.json', 'next.config.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-production-next-v1-
+
+      - name: Build identical production artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          edgeone makers build --mode prod \
+            2>&1 \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | tee edgeone-ab-build.log
+          node scripts/prune-edgeone-prerendered.mjs
+          finished="$(date +%s)"
+          echo "build_seconds=$((finished - started))" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Measure and package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_bytes="$(du -sb .edgeone | awk '{print $1}')"
+          file_count="$(find .edgeone -type f | wc -l | tr -d ' ')"
+          function_bytes="$(du -sb .edgeone/cloud-functions | awk '{print $1}')"
+          asset_bytes="$(du -sb .edgeone/assets | awk '{print $1}')"
+          zip_path="${RUNNER_TEMP}/edgeone-prebuilt.zip"
+          zip_started="$(date +%s)"
+          (
+            cd .edgeone
+            zip -qr -9 "${zip_path}" .
+          )
+          zip_finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${zip_path}")"
+          echo "EDGEONE_ZIP=${zip_path}" >> "${GITHUB_ENV}"
+          {
+            echo "raw_bytes=${raw_bytes}"
+            echo "file_count=${file_count}"
+            echo "cloud_function_bytes=${function_bytes}"
+            echo "asset_bytes=${asset_bytes}"
+            echo "zip_bytes=${zip_bytes}"
+            echo "zip_seconds=$((zip_finished - zip_started))"
+          } | tee artifact-metrics.txt
+          cat artifact-metrics.txt >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Preview deploy B - ZIP
+        id: zip-deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ZIP_DEPLOY_BEGIN=$(date -Ins)"
+          started="$(date +%s)"
+          edgeone makers deploy "${EDGEONE_ZIP}" \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e preview \
+            --site global \
+            2>&1 \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | tee edgeone-zip-preview.log
+          finished="$(date +%s)"
+          echo "ZIP_DEPLOY_END=$(date -Ins)"
+          echo "zip_deploy_seconds=$((finished - started))" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Preview deploy A - folder
+        id: folder-deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "FOLDER_DEPLOY_BEGIN=$(date -Ins)"
+          started="$(date +%s)"
+          edgeone makers deploy .edgeone \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e preview \
+            --site global \
+            2>&1 \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g; s/(sb_(publishable|secret)_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+)/REDACTED/g' \
+            | tee edgeone-folder-preview.log
+          finished="$(date +%s)"
+          echo "FOLDER_DEPLOY_END=$(date -Ins)"
+          echo "folder_deploy_seconds=$((finished - started))" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Inspect latest preview deployments
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -cn \
+            --arg project_id "${EDGEONE_DOCS_PROJECT_ID}" \
+            '{Action:"DescribePagesDeployments",ProjectId:$project_id,Offset:0,Limit:8,OrderBy:"CreatedOn",Order:"Desc"}' \
+            | curl --http1.1 --retry 3 --retry-all-errors --retry-delay 2 \
+                --silent --show-error --fail-with-body --max-time 30 \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer ${EDGEONE_API_TOKEN}" \
+                --data-binary @- \
+                "${EDGEONE_PAGES_API_URL}" \
+            | jq '(.Data.Response.Deployments // []) | map({deploymentId:.DeploymentId,status:.Status,env:.Env,createdOn:.CreatedOn,updatedOn:.UpdatedOn,usedInProd:.UsedInProd})'
