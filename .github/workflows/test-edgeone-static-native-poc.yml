@@ -1,0 +1,143 @@
+name: Benchmark static docs with native Edge Function
+
+on:
+  push:
+    branches:
+      - codex/edgeone-static-native-poc
+
+permissions:
+  contents: read
+
+env:
+  EDGEONE_CLI_VERSION: 1.6.31-3
+  EDGEONE_DOCS_PROJECT_NAME: ${{ vars.EDGEONE_DOCS_PROJECT_NAME }}
+
+jobs:
+  benchmark:
+    name: Static + native function preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Restore npm download cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Restore EdgeOne CLI
+        id: edgeone-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/edgeone-cli
+          key: ${{ runner.os }}-node22-edgeone-cli-v1-${{ env.EDGEONE_CLI_VERSION }}
+
+      - name: Install EdgeOne CLI on cache miss
+        if: steps.edgeone-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --prefix "${HOME}/.local/edgeone-cli" \
+            "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+
+      - name: Configure EdgeOne CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${HOME}/.local/edgeone-cli/bin" >> "${GITHUB_PATH}"
+          export PATH="${HOME}/.local/edgeone-cli/bin:${PATH}"
+          edgeone --version
+
+      - name: Restore static Turbopack cache
+        uses: actions/cache@v5
+        with:
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-native-next-v1-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'scripts/static-docs-config.mjs') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-next-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'scripts/static-docs-config.mjs') }}-
+            ${{ runner.os }}-static-docs-next-v2-
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Build pure static docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          npm run build:static-docs
+          finished="$(date +%s)"
+          echo "static_build_seconds=$((finished - started))" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Add one native Edge Function
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .static-docs/edge-functions
+          cat > .static-docs/edge-functions/__edgeone-benchmark.js <<'EOF'
+          export default function onRequest(context) {
+            return Response.json({ ok: true, runtime: 'edge-function' }, {
+              headers: { 'Cache-Control': 'no-store' },
+            });
+          }
+          EOF
+
+      - name: Package static deployment as ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_bytes="$(du -sb .static-docs | awk '{print $1}')"
+          file_count="$(find .static-docs -type f | wc -l | tr -d ' ')"
+          zip_path="${RUNNER_TEMP}/static-native.zip"
+          started="$(date +%s)"
+          (cd .static-docs && zip -qr -9 "${zip_path}" .)
+          finished="$(date +%s)"
+          zip_bytes="$(stat -c '%s' "${zip_path}")"
+          echo "STATIC_NATIVE_ZIP=${zip_path}" >> "${GITHUB_ENV}"
+          {
+            echo "raw_bytes=${raw_bytes}"
+            echo "file_count=${file_count}"
+            echo "zip_bytes=${zip_bytes}"
+            echo "zip_seconds=$((finished - started))"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Deploy static + native function to preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "STATIC_DEPLOY_BEGIN=$(date -Ins)"
+          started="$(date +%s)"
+          edgeone makers deploy "${STATIC_NATIVE_ZIP}" \
+            -n "${EDGEONE_DOCS_PROJECT_NAME}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e preview \
+            --site global \
+            2>&1 \
+            | sed -u -E 's/(eo_token=)[^&[:space:]]+/\1REDACTED/g' \
+            | tee edgeone-static-native-preview.log
+          finished="$(date +%s)"
+          echo "STATIC_DEPLOY_END=$(date -Ins)"
+          echo "static_native_deploy_seconds=$((finished - started))" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify preview function URL from deploy output
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="$(grep -Eo 'Deploy URL: https://[^?[:space:]]+' edgeone-static-native-preview.log | tail -n 1 | sed 's/^Deploy URL: //')"
+          test -n "${base_url}"
+          status="$(curl --silent --show-error --max-time 30 -o /tmp/benchmark.json -w '%{http_code}' "${base_url}/__edgeone-benchmark")"
+          echo "preview_function_status=${status}"
+          cat /tmp/benchmark.json
+          [[ "${status}" == "200" ]]
