@@ -11,6 +11,7 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
+// Keep the build cache outside the disposable staging directory so CI can reuse it.
 const persistentBuildCacheRoot = path.join(projectRoot, '.static-docs-next-cache');
 
 const projectEntries = [
