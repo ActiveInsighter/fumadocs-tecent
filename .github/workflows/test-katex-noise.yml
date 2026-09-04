@@ -1,0 +1,34 @@
+name: Validate quiet KaTeX build
+
+on:
+  push:
+    branches:
+      - codex/parallel-verify-katex-noise
+    paths:
+      - 'source.config.ts'
+      - '.github/workflows/test-katex-noise.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build static docs and reject KaTeX strict-warning noise
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:static-docs 2>&1 | tee static-build.log
+          if grep -E 'LaTeX-incompatible input|\[unicodeTextInMathMode\]|\[unknownSymbol\]' static-build.log; then
+            echo '::error::KaTeX strict-mode warning noise is still present.'
+            exit 1
+          fi
