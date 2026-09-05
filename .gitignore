@@ -10,6 +10,7 @@
 
 # Generated local ZBSearch index
 /public/search-index.json
+/public/search-index-*.json
 
 # Vercel project linkage and local output
 /.vercel
