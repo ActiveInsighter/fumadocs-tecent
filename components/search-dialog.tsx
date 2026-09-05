@@ -69,19 +69,22 @@ interface CategoryRouter {
 }
 
 const SEARCH_DELAY_MS = 80;
-const CATEGORY_BATCH = 2;
-const CORE_BATCH = 2;
-const BODY_BATCH = 3;
-const MAX_CATEGORY_ROUTERS_PER_QUERY = 8;
+const MAX_CATEGORY_ROUTERS_PER_QUERY = 4;
 const MAX_CORE_SHARDS_PER_QUERY = 6;
 const MAX_BODY_SHARDS_PER_QUERY = 9;
-const RESULT_TARGET = 18;
 const RESULT_LIMIT = 36;
 
 let manifestPromise: Promise<SearchManifest> | undefined;
 const routerPromiseCache = new Map<string, Promise<CategoryRouter>>();
 const clientCache = new Map<string, ReturnType<typeof staticClient>>();
 const bloomBytesCache = new Map<string, Uint8Array>();
+
+const MODULE_CATEGORIES = {
+  politics: new Set(['politics']),
+  english: new Set(['english']),
+  math: new Set(['math', 'math-question-types']),
+  professional: new Set(['408']),
+} as const;
 
 function getStaticClient(url: string, limit: number) {
   const key = `${url}\u0000${limit}`;
@@ -94,8 +97,6 @@ function getStaticClient(url: string, limit: number) {
 }
 
 async function loadManifest() {
-  // The only stable search URL is revalidated. Everything it points to is
-  // content-addressed and can be cached indefinitely by browser/CDN caches.
   const response = await fetch('/search-index.json', { cache: 'no-cache' });
   if (!response.ok) {
     throw new Error(`Failed to load ZBSearch manifest: HTTP ${response.status}`);
@@ -238,6 +239,17 @@ function currentScope() {
     : urlScope(window.location.pathname);
 }
 
+function currentModuleCategories() {
+  const { category } = currentScope();
+  if (category === 'politics') return MODULE_CATEGORIES.politics;
+  if (category === 'english') return MODULE_CATEGORIES.english;
+  if (category === 'math' || category === 'math-question-types') {
+    return MODULE_CATEGORIES.math;
+  }
+  if (category === '408') return MODULE_CATEGORIES.professional;
+  return null;
+}
+
 function mergeRoundRobin(groups: SortedResult[][], limit = RESULT_LIMIT) {
   const merged: SortedResult[] = [];
   const seen = new Set<string>();
@@ -265,15 +277,15 @@ async function searchFiles(files: SearchFile[], query: string, limitPerFile: num
 function rankCategories(manifest: SearchManifest, query: string) {
   const tokens = routingTokens(query);
   const scope = currentScope();
-  const normalizedQuery = query.normalize('NFKC').toLowerCase();
+  const allowed = currentModuleCategories();
 
   return manifest.categories
+    .filter((category) => !allowed || allowed.has(category.id))
     .map((category) => {
       const routeScore = bloomScore(`category:${category.id}`, category.route, tokens);
       let score = routeScore * 4;
       if (category.id === scope.category && scope.category !== 'root') score += 2;
       if (category.groups.includes(scope.group)) score += 1;
-      if (normalizedQuery.includes(category.id.toLowerCase())) score += 1;
       score -= Math.min(category.router.brotliBytes / 1_000_000, 0.2);
       return { category, routeScore, score };
     })
@@ -283,6 +295,7 @@ function rankCategories(manifest: SearchManifest, query: string) {
       if (leftStrong !== rightStrong) return rightStrong - leftStrong;
       return right.score - left.score;
     })
+    .slice(0, allowed ? allowed.size : MAX_CATEGORY_ROUTERS_PER_QUERY)
     .map((item) => item.category);
 }
 
@@ -290,6 +303,7 @@ function rankShards(
   shards: RoutedSearchShard[],
   query: string,
   minScore: number,
+  limit: number,
 ) {
   const tokens = routingTokens(query);
   const scope = currentScope();
@@ -303,10 +317,7 @@ function rankShards(
       score -= Math.min(shard.brotliBytes / 4_000_000, 0.2);
       return { shard, routeScore, score };
     })
-    .filter((item) => {
-      if (tokens.length === 0) return item.shard.category === scope.category;
-      return item.routeScore > 0 || item.shard.category === scope.category;
-    })
+    .filter((item) => tokens.length === 0 || item.routeScore > 0 || item.shard.category === scope.category)
     .sort((left, right) => {
       const leftStrong = left.routeScore >= minScore ? 1 : 0;
       const rightStrong = right.routeScore >= minScore ? 1 : 0;
@@ -314,27 +325,8 @@ function rankShards(
       if (left.score !== right.score) return right.score - left.score;
       return left.shard.brotliBytes - right.shard.brotliBytes;
     })
+    .slice(0, limit)
     .map((item) => item.shard);
-}
-
-function mergeCoreAndBody(core: SortedResult[], body: SortedResult[]) {
-  return mergeRoundRobin([body, core], RESULT_LIMIT);
-}
-
-function takeBatch(
-  candidates: RoutedSearchShard[],
-  searchedUrls: Set<string>,
-  batchSize: number,
-  maxShards: number,
-) {
-  const remainingBudget = maxShards - searchedUrls.size;
-  if (remainingBudget <= 0) return [];
-
-  const batch = candidates
-    .filter((shard) => !searchedUrls.has(shard.url))
-    .slice(0, Math.min(batchSize, remainingBudget));
-  batch.forEach((shard) => searchedUrls.add(shard.url));
-  return batch;
 }
 
 export function ShardedSearchDialog(props: SharedProps) {
@@ -360,101 +352,32 @@ export function ShardedSearchDialog(props: SharedProps) {
           const manifest = await getManifest();
           if (requestRef.current !== requestId) return;
 
-          const categoryQueue = rankCategories(manifest, query);
-          const coreCandidates: RoutedSearchShard[] = [];
-          const bodyCandidates: RoutedSearchShard[] = [];
-          const coreCandidateUrls = new Set<string>();
-          const bodyCandidateUrls = new Set<string>();
-          const searchedCoreUrls = new Set<string>();
-          const searchedBodyUrls = new Set<string>();
-          let coreResults: SortedResult[] = [];
-          let bodyResults: SortedResult[] = [];
-          let categoryOffset = 0;
+          const categories = rankCategories(manifest, query);
+          const routers = await Promise.all(categories.map(getCategoryRouter));
+          if (requestRef.current !== requestId) return;
 
-          const visibleResults = () => mergeCoreAndBody(coreResults, bodyResults);
+          const coreShards = rankShards(
+            routers.flatMap((router) => router.core),
+            query,
+            manifest.routing.minScore,
+            MAX_CORE_SHARDS_PER_QUERY,
+          );
+          const bodyShards = rankShards(
+            routers.flatMap((router) => router.body),
+            query,
+            manifest.routing.minScore,
+            MAX_BODY_SHARDS_PER_QUERY,
+          );
 
-          const searchNextCoreBatch = async () => {
-            const batch = takeBatch(
-              coreCandidates,
-              searchedCoreUrls,
-              CORE_BATCH,
-              MAX_CORE_SHARDS_PER_QUERY,
-            );
-            if (batch.length === 0) return false;
-            const results = await searchFiles(batch, query, 10);
-            if (requestRef.current !== requestId) return false;
-            coreResults = mergeRoundRobin([coreResults, results], RESULT_LIMIT);
-            setItems(visibleResults().length > 0 ? visibleResults() : null);
-            return true;
-          };
+          const coreResults = await searchFiles(coreShards, query, 10);
+          if (requestRef.current !== requestId) return;
+          setItems(coreResults.length > 0 ? coreResults : null);
 
-          const searchNextBodyBatch = async () => {
-            const batch = takeBatch(
-              bodyCandidates,
-              searchedBodyUrls,
-              BODY_BATCH,
-              MAX_BODY_SHARDS_PER_QUERY,
-            );
-            if (batch.length === 0) return false;
-            const results = await searchFiles(batch, query, 10);
-            if (requestRef.current !== requestId) return false;
-            bodyResults = mergeRoundRobin([bodyResults, results], RESULT_LIMIT);
-            setItems(visibleResults().length > 0 ? visibleResults() : null);
-            return true;
-          };
+          const bodyResults = await searchFiles(bodyShards, query, 10);
+          if (requestRef.current !== requestId) return;
 
-          while (
-            categoryOffset < categoryQueue.length &&
-            categoryOffset < MAX_CATEGORY_ROUTERS_PER_QUERY &&
-            visibleResults().length < RESULT_TARGET &&
-            (searchedCoreUrls.size < MAX_CORE_SHARDS_PER_QUERY ||
-              searchedBodyUrls.size < MAX_BODY_SHARDS_PER_QUERY)
-          ) {
-            const categoryBatch = categoryQueue.slice(
-              categoryOffset,
-              categoryOffset + CATEGORY_BATCH,
-            );
-            categoryOffset += categoryBatch.length;
-
-            const routers = await Promise.all(categoryBatch.map(getCategoryRouter));
-            if (requestRef.current !== requestId) return;
-
-            for (const router of routers) {
-              for (const shard of rankShards(router.core, query, manifest.routing.minScore)) {
-                if (coreCandidateUrls.has(shard.url)) continue;
-                coreCandidateUrls.add(shard.url);
-                coreCandidates.push(shard);
-              }
-              for (const shard of rankShards(router.body, query, manifest.routing.minScore)) {
-                if (bodyCandidateUrls.has(shard.url)) continue;
-                bodyCandidateUrls.add(shard.url);
-                bodyCandidates.push(shard);
-              }
-            }
-
-            // Lightweight page results arrive first; full-text heading matches
-            // fill in immediately after without loading unrelated categories.
-            await searchNextCoreBatch();
-            if (requestRef.current !== requestId) return;
-            await searchNextBodyBatch();
-            if (requestRef.current !== requestId) return;
-          }
-
-          // If one huge category contains many candidate shards, progressively
-          // consume only its next best routes. The hard budgets make query cost
-          // independent of total corpus size.
-          while (
-            visibleResults().length < RESULT_TARGET &&
-            (searchedCoreUrls.size < MAX_CORE_SHARDS_PER_QUERY ||
-              searchedBodyUrls.size < MAX_BODY_SHARDS_PER_QUERY)
-          ) {
-            const searchedCore = await searchNextCoreBatch();
-            if (requestRef.current !== requestId) return;
-            const searchedBody = await searchNextBodyBatch();
-            if (requestRef.current !== requestId) return;
-            if (!searchedCore && !searchedBody) break;
-          }
-
+          const merged = mergeRoundRobin([bodyResults, coreResults], RESULT_LIMIT);
+          setItems(merged.length > 0 ? merged : null);
           setIsLoading(false);
         } catch (error) {
           if (requestRef.current !== requestId) return;
