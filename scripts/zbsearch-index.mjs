@@ -12,6 +12,9 @@ import {
   isStaticDocSourceFile,
 } from './static-docs-markdown.mjs';
 
+export const ZBSEARCH_WARNING_BYTES = 15_000_000;
+export const ZBSEARCH_MAX_BYTES = 25_000_000;
+
 function normalizeSourcePath(relativePath) {
   return relativePath.replaceAll('\\', '/');
 }
@@ -120,6 +123,19 @@ export async function buildZBSearchIndex({
       [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
     },
   }).byteLength;
+
+  if (bytes >= ZBSEARCH_MAX_BYTES) {
+    throw new Error(
+      `ZBSearch index is ${bytes} bytes, at or above the EdgeOne 25 MB single-file limit.`,
+    );
+  }
+
+  if (bytes >= ZBSEARCH_WARNING_BYTES) {
+    console.warn(
+      `[zbsearch] Warning: raw search index is ${(bytes / 1024 / 1024).toFixed(2)} MiB; ` +
+        'consider moving to a hosted search service before first-search load time becomes excessive.',
+    );
+  }
 
   await mkdir(path.dirname(outputFile), { recursive: true });
   await writeFile(outputFile, json);
