@@ -8,11 +8,11 @@ import {
   isStaticDocSourceFile,
 } from './static-docs-markdown.mjs';
 import { buildZBSearchIndex } from './zbsearch-index.mjs';
+import { finalizeSearchManifest } from './search-manifest.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
-// A stable staging path lets Turbopack reuse filesystem cache entries across CI runs.
 const staticStageRoot = path.join(projectRoot, '.static-docs-stage');
 
 const projectEntries = [
@@ -60,11 +60,6 @@ async function copyProjectEntry(stageRoot, relativePath) {
   await cp(sourcePath, destinationPath);
 }
 
-/**
- * Remove stale staged source/output while deliberately preserving only
- * `.next/cache`. GitHub Actions restores that directory before this script
- * runs, and Turbopack can reuse it because `staticStageRoot` is stable.
- */
 async function cleanStagePreservingBuildCache(stageRoot) {
   await mkdir(stageRoot, { recursive: true });
 
@@ -154,13 +149,6 @@ async function walkFiles(directory) {
   return files;
 }
 
-/**
- * Static export does not support Next rewrites, and the markdown route
- * handler is excluded from the static project entirely (Windows file-lock
- * issues with the extensionless route output). Instead, publish direct
- * /docs/*.md files beside the HTML pages by converting the sources under
- * content/docs directly.
- */
 async function generateStaticMarkdownRoutes(outputRoot) {
   const contentRoot = path.join(projectRoot, 'content', 'docs');
   const sourceFiles = (await walkFiles(contentRoot)).filter((filePath) =>
@@ -226,10 +214,15 @@ async function main() {
     await rm(staticOutputRoot, { recursive: true, force: true });
     await cp(path.join(stageRoot, 'out'), staticOutputRoot, { recursive: true });
 
+    const searchManifestFile = path.join(staticOutputRoot, 'search-index.json');
     const searchIndex = await buildZBSearchIndex({
       contentRoot: path.join(projectRoot, 'content', 'docs'),
-      outputFile: path.join(staticOutputRoot, 'search-index.json'),
+      outputFile: searchManifestFile,
     });
+    const searchRouting = await finalizeSearchManifest({
+      manifestFile: searchManifestFile,
+    });
+
     const markdownCount = await generateStaticMarkdownRoutes(staticOutputRoot);
     const summary = await summarizeOutput(staticOutputRoot);
 
@@ -238,9 +231,14 @@ async function main() {
     );
     console.log(`[static-docs] Generated ${markdownCount} direct markdown routes.`);
     console.log(
-      `[static-docs] ZBSearch: ${searchIndex.pages} pages; raw ${formatMiB(
+      `[static-docs] ZBSearch: ${searchIndex.pages} pages; ${searchIndex.bodyShards.length} body shards; raw ${formatMiB(
         searchIndex.bytes,
-      )}; gzip ${formatMiB(searchIndex.gzipBytes)}; brotli ${formatMiB(searchIndex.brotliBytes)}.`,
+      )}; brotli ${formatMiB(searchIndex.brotliBytes)}.`,
+    );
+    console.log(
+      `[static-docs] Search routing: ${searchRouting.categories} category routers; public manifest ${formatMiB(
+        searchRouting.manifest.bytes,
+      )}.`,
     );
     console.log(
       `[static-docs] Largest file: ${formatMiB(summary.largestFile.size)} ${path.relative(
@@ -249,7 +247,6 @@ async function main() {
       )}`,
     );
   } finally {
-    // Leave only `.next/cache` behind for actions/cache's post-job save step.
     await cleanStagePreservingBuildCache(stageRoot);
   }
 }
