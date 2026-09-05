@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest';
 import { getStaticDocsConfig, shouldIncludeInStaticDocsProject } from '../scripts/static-docs-config.mjs';
 // @ts-expect-error The static build helpers are intentionally Node.js ESM scripts.
 import { getStaticMarkdownOutputPath, renderStaticMarkdown } from '../scripts/static-docs-markdown.mjs';
+// @ts-expect-error The static search helpers are intentionally Node.js ESM scripts.
+import {
+  buildZBSearchSourceIndex,
+  ZBSEARCH_MAX_BYTES,
+  ZBSEARCH_WARNING_BYTES,
+} from '../scripts/zbsearch-index.mjs';
 
 describe('static docs build', () => {
   it('uses a pure static export with Turbopack build caching enabled', () => {
@@ -71,5 +77,38 @@ describe('static docs build', () => {
     expect(markdown).toContain('import { useState } from "react";');
     expect(markdown).not.toContain('./gone');
     expect(markdown).toContain('Tail');
+  });
+
+  it('builds section-aware ZBSearch source records without enabling remarkStructure globally', () => {
+    const index = buildZBSearchSourceIndex(
+      'math/example.mdx',
+      [
+        '---',
+        'title: "示例章节"',
+        'description: "用于测试静态搜索"',
+        '---',
+        '',
+        '# 一阶标题',
+        '',
+        '矩阵相似对角化需要足够多的线性无关特征向量。',
+        '',
+        '## 二阶标题',
+        '',
+        '这里继续解释特征值与特征向量。',
+      ].join('\n'),
+    );
+
+    expect(index.id).toBe('/docs/math/example');
+    expect(index.url).toBe('/docs/math/example');
+    expect(index.title).toBe('示例章节');
+    expect(index.description).toBe('用于测试静态搜索');
+    expect(index.structuredData.headings.length).toBeGreaterThan(0);
+    expect(index.structuredData.contents.some((item) => item.content.includes('相似对角化'))).toBe(true);
+  });
+
+  it('keeps search index guardrails below the EdgeOne single-file limit', () => {
+    expect(ZBSEARCH_WARNING_BYTES).toBe(15_000_000);
+    expect(ZBSEARCH_MAX_BYTES).toBe(25_000_000);
+    expect(ZBSEARCH_WARNING_BYTES).toBeLessThan(ZBSEARCH_MAX_BYTES);
   });
 });
