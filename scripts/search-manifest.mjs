@@ -3,9 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 
-export const SEARCH_PUBLIC_MANIFEST_VERSION = 3;
-export const SEARCH_PUBLIC_MANIFEST_MODE = 'tiered-category-router-shards';
-export const SEARCH_ROUTER_VERSION = 1;
+export const SEARCH_PUBLIC_MANIFEST_VERSION = 4;
+export const SEARCH_PUBLIC_MANIFEST_MODE = 'category-bloom-router-shards';
+export const SEARCH_ROUTER_VERSION = 2;
 export const SEARCH_FILE_MAX_BYTES = 25_000_000;
 
 function compressionSizes(json) {
@@ -13,9 +13,7 @@ function compressionSizes(json) {
     bytes: Buffer.byteLength(json),
     gzipBytes: gzipSync(json, { level: 6 }).byteLength,
     brotliBytes: brotliCompressSync(json, {
-      params: {
-        [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
-      },
+      params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 6 },
     }).byteLength,
   };
 }
@@ -43,12 +41,10 @@ function sumSizes(items) {
 }
 
 /**
- * The raw ZBSearch builder emits per-shard Bloom filters. Keeping every Bloom
- * filter in /search-index.json would make the first-search manifest grow
- * linearly with a future hundreds-of-shards corpus. This post-processing step
- * moves shard metadata into content-addressed category routers, leaving the
- * root manifest tiny and stable even when the documentation grows by orders of
- * magnitude.
+ * Both lightweight page records and full-text records are routed by category.
+ * The stable root manifest therefore contains only one bounded Bloom summary
+ * per top-level category plus content-addressed router URLs; it never embeds
+ * every page/shard database descriptor.
  */
 export async function finalizeSearchManifest({ manifestFile } = {}) {
   if (!manifestFile) throw new Error('finalizeSearchManifest requires manifestFile.');
@@ -57,34 +53,51 @@ export async function finalizeSearchManifest({ manifestFile } = {}) {
   if (
     raw.version !== 2 ||
     raw.engine !== 'zbsearch' ||
-    raw.mode !== 'tiered-bloom-shards' ||
+    raw.mode !== 'routed-core-body-shards' ||
+    !Array.isArray(raw.categories) ||
+    !Array.isArray(raw.core?.shards) ||
     !Array.isArray(raw.body?.shards)
   ) {
-    throw new Error('Expected the internal tiered ZBSearch manifest before finalization.');
+    throw new Error('Expected the routed core/body ZBSearch manifest before finalization.');
   }
 
   const searchDirectory = path.join(path.dirname(manifestFile), 'search');
-  const categories = new Map();
-  for (const shard of raw.body.shards) {
-    const list = categories.get(shard.category) ?? [];
+  const rawCategoryMap = new Map(raw.categories.map((category) => [category.id, category]));
+  const coreByCategory = new Map();
+  const bodyByCategory = new Map();
+
+  for (const shard of raw.core.shards) {
+    const list = coreByCategory.get(shard.category) ?? [];
     list.push(shard);
-    categories.set(shard.category, list);
+    coreByCategory.set(shard.category, list);
+  }
+  for (const shard of raw.body.shards) {
+    const list = bodyByCategory.get(shard.category) ?? [];
+    list.push(shard);
+    bodyByCategory.set(shard.category, list);
   }
 
   const categoryEntries = [];
   const routerFiles = [];
 
-  for (const [category, shards] of Array.from(categories.entries()).sort(([left], [right]) => left.localeCompare(right))) {
-    shards.sort((left, right) => {
+  for (const categoryMeta of [...raw.categories].sort((left, right) => left.id.localeCompare(right.id))) {
+    const category = categoryMeta.id;
+    const core = coreByCategory.get(category) ?? [];
+    const body = bodyByCategory.get(category) ?? [];
+
+    const sortShards = (left, right) => {
       if (left.group !== right.group) return left.group.localeCompare(right.group);
       return left.url.localeCompare(right.url);
-    });
+    };
+    core.sort(sortShards);
+    body.sort(sortShards);
 
     const router = {
       version: SEARCH_ROUTER_VERSION,
       engine: 'zbsearch',
       category,
-      shards,
+      core,
+      body,
     };
     const json = JSON.stringify(router);
     const sizes = compressionSizes(json);
@@ -93,19 +106,17 @@ export async function finalizeSearchManifest({ manifestFile } = {}) {
     }
 
     const fileName = `router-${safeFileSegment(category)}-${digest(json)}.json`;
-    const filePath = path.join(searchDirectory, fileName);
-    await writeFile(filePath, json);
+    await writeFile(path.join(searchDirectory, fileName), json);
 
-    const routerFile = {
-      url: `/search/${fileName}`,
-      ...sizes,
-    };
+    const routerFile = { url: `/search/${fileName}`, ...sizes };
     routerFiles.push(routerFile);
     categoryEntries.push({
       id: category,
-      groups: Array.from(new Set(shards.map((shard) => shard.group))).sort(),
-      shards: shards.length,
-      records: shards.reduce((sum, shard) => sum + shard.records, 0),
+      groups: rawCategoryMap.get(category)?.groups ?? [],
+      route: categoryMeta.route,
+      coreShards: core.length,
+      bodyShards: body.length,
+      records: body.reduce((sum, shard) => sum + shard.records, 0),
       router: routerFile,
     });
   }
@@ -118,14 +129,20 @@ export async function finalizeSearchManifest({ manifestFile } = {}) {
     pages: raw.pages,
     records: raw.records,
     routing: raw.routing,
-    core: raw.core,
-    body: {
-      bytes: raw.body.bytes,
-      gzipBytes: raw.body.gzipBytes,
-      brotliBytes: raw.body.brotliBytes,
+    storage: {
+      core: {
+        bytes: raw.core.bytes,
+        gzipBytes: raw.core.gzipBytes,
+        brotliBytes: raw.core.brotliBytes,
+      },
+      body: {
+        bytes: raw.body.bytes,
+        gzipBytes: raw.body.gzipBytes,
+        brotliBytes: raw.body.brotliBytes,
+      },
       routers: routerTotals,
-      categories: categoryEntries,
     },
+    categories: categoryEntries,
   };
 
   const publicJson = JSON.stringify(publicManifest);
