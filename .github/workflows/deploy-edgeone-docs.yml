@@ -273,17 +273,8 @@ jobs:
           probe_dir="$(mktemp -d)"
           trap 'rm -rf -- "${probe_dir}"' EXIT
           headers_file="${probe_dir}/headers.txt"
-
-          curl --http1.1 --compressed --silent --show-error --max-time 60 \
-            -H 'Accept-Encoding: br, gzip' \
-            -o /dev/null \
-            'https://fumadocs.any1.tech/docs/408'
-
-          curl --http1.1 --compressed --silent --show-error --max-time 60 \
-            -H 'Accept-Encoding: br, gzip' \
-            -D "${headers_file}" \
-            -o /dev/null \
-            'https://fumadocs.any1.tech/docs/408'
+          probe_url='https://fumadocs.any1.tech/docs/408'
+          max_attempts=6
 
           header_value() {
             local key="$1"
@@ -296,15 +287,37 @@ jobs:
             ' "${headers_file}"
           }
 
-          content_encoding="$(header_value 'Content-Encoding')"
-          cache_control="$(header_value 'Cache-Control')"
-          edge_cache_status="$(header_value 'EO-Cache-Status')"
-          echo "content_encoding=${content_encoding}"
-          echo "cache_control=${cache_control}"
-          echo "edge_cache_status=${edge_cache_status}"
+          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+            : > "${headers_file}"
+            curl --http1.1 --compressed --silent --show-error --max-time 60 \
+              -H 'Accept-Encoding: br, gzip' \
+              -D "${headers_file}" \
+              -o /dev/null \
+              "${probe_url}"
 
-          [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]
-          [[ "${cache_control}" != *private* && "${cache_control}" != *no-store* ]]
+            content_encoding="$(header_value 'Content-Encoding')"
+            cache_control="$(header_value 'Cache-Control')"
+            edge_cache_status="$(header_value 'EO-Cache-Status')"
+            echo "attempt=${attempt}/${max_attempts} content_encoding=${content_encoding:-none} cache_control=${cache_control:-none} edge_cache_status=${edge_cache_status:-none}"
+
+            if [[ "${cache_control}" == *private* || "${cache_control}" == *no-store* ]]; then
+              echo "::error::Unsafe CDN cache policy: ${cache_control}"
+              exit 1
+            fi
+
+            if [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]; then
+              echo "- CDN verification: ${content_encoding}; ${edge_cache_status:-unknown}; attempt ${attempt}/${max_attempts}" >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+
+            if (( attempt < max_attempts )); then
+              echo "::warning::CDN compression is not ready (${edge_cache_status:-unknown}); retrying in 2s."
+              sleep 2
+            fi
+          done
+
+          echo "::error::CDN compression was still unavailable after ${max_attempts} attempts."
+          exit 1
 
       - name: Write deployment summary
         if: always()
