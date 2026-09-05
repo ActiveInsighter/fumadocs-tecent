@@ -8,6 +8,11 @@
 # Fumadocs generated source
 /.source
 
+# Generated local ZBSearch index
+/public/search-index.json
+/public/search-index-*.json
+/public/search/
+
 # Vercel project linkage and local output
 /.vercel
 

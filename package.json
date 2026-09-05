@@ -7,17 +7,16 @@
   },
   "scripts": {
     "postinstall": "fumadocs-mdx",
-    "dev": "next dev",
-    "build": "next build",
+    "search:build": "node scripts/build-search-index.mjs public/search-index.json",
+    "dev": "npm run search:build && next dev",
+    "build": "npm run search:build && next build",
     "build:static-docs": "node scripts/build-static-docs.mjs",
-    "algolia:sync": "node scripts/sync-algolia.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "algoliasearch": "5.56.0",
     "fumadocs-core": "16.14.0",
     "fumadocs-mdx": "15.2.2",
     "fumadocs-ui": "npm:@fumadocs/base-ui@16.14.0",

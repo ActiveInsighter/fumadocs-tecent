@@ -26,6 +26,11 @@ jobs:
       EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
 
     steps:
+      - name: Mark pipeline start
+        shell: bash
+        run: |
+          echo "PIPELINE_STARTED_AT=$(date +%s)" >> "${GITHUB_ENV}"
+
       - name: Checkout repository
         uses: actions/checkout@v6
 
@@ -52,24 +57,40 @@ jobs:
       - name: Install project dependencies on cache miss
         if: steps.node-modules-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: npm ci --no-audit --no-fund
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          npm ci --no-audit --no-fund
+          echo "- Dependency install: $(($(date +%s) - started))s (cache miss)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Refresh Fumadocs generated source
         shell: bash
         run: |
           set -euo pipefail
+          started="$(date +%s)"
           npm run postinstall
-          echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}"
+            echo "- Fumadocs source refresh: $(($(date +%s) - started))s"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Run static docs tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          npm test -- tests/static-docs-build.test.ts
+          echo "- Static/search tests: $(($(date +%s) - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Restore Next/Turbopack build cache
         uses: actions/cache@v5
         with:
           path: .static-docs-stage/.next/cache
-          key: ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          key: ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-
             ${{ runner.os }}-static-docs-turbopack-v3-
-            ${{ runner.os }}-static-docs-turbopack-v2-
 
       - name: Restore EdgeOne CLI
         id: edgeone-cache
@@ -83,14 +104,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          started="$(date +%s)"
           npm install --global --prefix "${GITHUB_WORKSPACE}/.edgeone-cli" \
             "edgeone@${EDGEONE_CLI_VERSION}" --no-audit --no-fund
+          echo "- EdgeOne CLI install: $(($(date +%s) - started))s (cache miss)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Configure deployment tooling
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="${GITHUB_WORKSPACE}/.edgeone-cli/bin:${PATH}"
           echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
           [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]] || {
             echo '::error::EdgeOne CLI executable is missing.'
@@ -107,49 +129,93 @@ jobs:
           edgeone --version
           echo "- EdgeOne CLI cache hit: ${{ steps.edgeone-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Build pure static documentation
+      - name: Build docs and ZBSearch in parallel
         shell: bash
         run: |
           set -euo pipefail
           started="$(date +%s)"
           npm run build:static-docs 2>&1 | tee static-docs-build.log
-          finished="$(date +%s)"
-          echo "- Static build: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+          wall_seconds="$(($(date +%s) - started))"
+          {
+            echo "- Static package wall time: ${wall_seconds}s"
+            grep '^\[timing\]' static-docs-build.log | sed 's/^/- /' || true
+          } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Verify zero-function deployment artifact
+      - name: Verify zero-function and search artifacts
         shell: bash
         run: |
           set -euo pipefail
+          started="$(date +%s)"
           test -d .static-docs
 
           if find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print -quit | grep -q .; then
             echo '::error::A Functions directory exists in the static deployment artifact.'
-            find .static-docs -type d \( -name cloud-functions -o -name edge-functions \) -print
             exit 1
           fi
-
           if find .static-docs -type f \( -path '*/cloud-functions/*' -o -path '*/edge-functions/*' \) -print -quit | grep -q .; then
             echo '::error::A Functions file exists in the static deployment artifact.'
             exit 1
           fi
 
+          manifest='.static-docs/search-index.json'
+          test -s "${manifest}"
+          [[ "$(jq -r '.version' "${manifest}")" == '4' ]]
+          [[ "$(jq -r '.engine' "${manifest}")" == 'zbsearch' ]]
+          [[ "$(jq -r '.mode' "${manifest}")" == 'category-bloom-router-shards' ]]
+
+          search_file_count=1
+          search_bytes="$(stat -c '%s' "${manifest}")"
+          router_count=0
+          core_count=0
+          body_count=0
+
+          check_search_file() {
+            local url="$1"
+            local file_path=".static-docs${url}"
+            test -s "${file_path}" || { echo "::error::Missing search file: ${file_path}"; exit 1; }
+            local bytes
+            bytes="$(stat -c '%s' "${file_path}")"
+            (( bytes < 25000000 )) || { echo "::error::Search file ${file_path} is at or above 25 MB."; exit 1; }
+            search_bytes="$((search_bytes + bytes))"
+            search_file_count="$((search_file_count + 1))"
+          }
+
+          while IFS= read -r router_url; do
+            router_count="$((router_count + 1))"
+            check_search_file "${router_url}"
+            router_path=".static-docs${router_url}"
+            [[ "$(jq -r '.version' "${router_path}")" == '2' ]]
+            [[ "$(jq -r '.engine' "${router_path}")" == 'zbsearch' ]]
+
+            while IFS= read -r core_url; do
+              core_count="$((core_count + 1))"
+              check_search_file "${core_url}"
+            done < <(jq -r '.core[].url' "${router_path}")
+
+            while IFS= read -r body_url; do
+              body_count="$((body_count + 1))"
+              check_search_file "${body_url}"
+            done < <(jq -r '.body[].url' "${router_path}")
+          done < <(jq -r '.categories[].router.url' "${manifest}")
+
+          [[ "${router_count}" -gt 0 && "${core_count}" -gt 0 && "${body_count}" -gt 0 ]]
+
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l | tr -d ' ')"
           largest_file="$({ find .static-docs -type f -printf '%s %p\n' | sort -nr | head -n 1; } || true)"
           largest_bytes="${largest_file%% *}"
+          (( largest_bytes < 25000000 )) || { echo '::error::A static file is at or above the EdgeOne 25 MB limit.'; exit 1; }
 
           {
             echo '- Cloud Functions: 0'
             echo '- Edge Functions: 0'
             echo "- Static files: ${file_count}"
             echo "- Static output: $((package_bytes / 1024 / 1024)) MiB"
+            echo "- Search files: ${search_file_count}; raw total $((search_bytes / 1024 / 1024)) MiB"
+            echo "- Search routers/core/body: ${router_count}/${core_count}/${body_count}"
             echo "- Largest file: ${largest_file}"
+            echo "- Artifact validation: $(($(date +%s) - started))s"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-          if (( largest_bytes >= 25000000 )); then
-            echo '::error::A static file is at or above the EdgeOne 25 MB single-file limit.'
-            exit 1
-          fi
 
       - name: Package pure static deployment
         shell: bash
@@ -158,7 +224,7 @@ jobs:
           zip_path="${RUNNER_TEMP}/fumadocs-static-production.zip"
           rm -f -- "${zip_path}"
           started="$(date +%s)"
-          (cd .static-docs && zip -qr -9 "${zip_path}" .)
+          (cd .static-docs && zip -qr -6 "${zip_path}" .)
           finished="$(date +%s)"
           zip_bytes="$(stat -c '%s' "${zip_path}")"
           echo "STATIC_DEPLOY_ZIP=${zip_path}" >> "${GITHUB_ENV}"
@@ -191,14 +257,13 @@ jobs:
               echo '::error::EdgeOne deployment failed with a non-transient error; skipping retries.'
               exit 1
             fi
-
             if (( attempt >= max_attempts )); then
               echo "::error::EdgeOne deployment still failed after ${max_attempts} attempts."
               exit 1
             fi
 
             retry_delay=$((attempt * 3))
-            echo "::warning::Transient EdgeOne deployment error detected; retrying in ${retry_delay}s."
+            echo "::warning::Transient EdgeOne deployment error; retrying in ${retry_delay}s."
             sleep "${retry_delay}"
             attempt=$((attempt + 1))
           done
@@ -213,15 +278,21 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
-      - name: Verify production static routes
+      - name: Verify production pages and search routes
         shell: bash
         run: |
           set -euo pipefail
           probe_dir="$(mktemp -d)"
           trap 'rm -rf -- "${probe_dir}"' EXIT
           started="$(date +%s)"
-          pids=()
 
+          manifest='.static-docs/search-index.json'
+          router_url="$(jq -r '.categories[0].router.url' "${manifest}")"
+          router_path=".static-docs${router_url}"
+          core_url="$(jq -r '.core[0].url' "${router_path}")"
+          body_url="$(jq -r '.body[0].url' "${router_path}")"
+
+          pids=()
           start_probe() {
             local name="$1"
             local path="$2"
@@ -236,93 +307,71 @@ jobs:
           start_probe docs '/docs/'
           start_probe math '/docs/math/advanced-mathematics/01-limits-continuity/'
           start_probe markdown '/docs/math/advanced-mathematics/01-limits-continuity.md'
+          start_probe search_manifest '/search-index.json'
+          start_probe search_router "${router_url}"
+          start_probe search_core "${core_url}"
+          start_probe search_body "${body_url}"
           start_probe retired_upload '/api/blob/upload-url'
           start_probe retired_ingest '/api/integrations/anyworkflow'
           start_probe retired_download '/download/tasks/probe/1/probe/md'
 
-          for pid in "${pids[@]}"; do
-            wait "${pid}"
+          for pid in "${pids[@]}"; do wait "${pid}"; done
+
+          for name in home docs math markdown search_manifest search_router search_core search_body; do
+            status="$(cat "${probe_dir}/${name}.status")"
+            echo "${name}=${status}"
+            [[ "${status}" == '200' ]]
+          done
+          for name in retired_upload retired_ingest retired_download; do
+            status="$(cat "${probe_dir}/${name}.status")"
+            echo "${name}=${status}"
+            [[ "${status}" == '404' ]]
           done
 
-          home="$(cat "${probe_dir}/home.status")"
-          docs="$(cat "${probe_dir}/docs.status")"
-          math="$(cat "${probe_dir}/math.status")"
-          markdown="$(cat "${probe_dir}/markdown.status")"
-          retired_upload="$(cat "${probe_dir}/retired_upload.status")"
-          retired_ingest="$(cat "${probe_dir}/retired_ingest.status")"
-          retired_download="$(cat "${probe_dir}/retired_download.status")"
-
-          printf 'home=%s\ndocs=%s\nmath=%s\nmarkdown=%s\nretired_upload=%s\nretired_ingest=%s\nretired_download=%s\n' \
-            "${home}" "${docs}" "${math}" "${markdown}" "${retired_upload}" "${retired_ingest}" "${retired_download}"
-
-          [[ "${home}" == '200' ]]
-          [[ "${docs}" == '200' ]]
-          [[ "${math}" == '200' ]]
-          [[ "${markdown}" == '200' ]]
-          [[ "${retired_upload}" == '404' ]]
-          [[ "${retired_ingest}" == '404' ]]
-          [[ "${retired_download}" == '404' ]]
-
-          finished="$(date +%s)"
-          echo "- Parallel route verification: $((finished - started))s" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Parallel production route verification: $(($(date +%s) - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Verify CDN compression and cache
         shell: bash
         run: |
           set -euo pipefail
-          probe_dir="$(mktemp -d)"
-          trap 'rm -rf -- "${probe_dir}"' EXIT
-          headers_file="${probe_dir}/headers.txt"
-          probe_url='https://fumadocs.any1.tech/docs/408'
-          max_attempts=6
+          started="$(date +%s)"
+          manifest='.static-docs/search-index.json'
+          router_url="$(jq -r '.categories[0].router.url' "${manifest}")"
+          router_path=".static-docs${router_url}"
+          body_url="$(jq -r '.body[0].url' "${router_path}")"
 
-          header_value() {
-            local key="$1"
-            awk -F': *' -v key="${key}" '
-              tolower($1) == tolower(key) {
-                sub(/\r$/, "", $2)
-                value = $2
-              }
-              END { print value }
-            ' "${headers_file}"
+          verify_compressed() {
+            local label="$1"
+            local url="$2"
+            local headers_file
+            headers_file="$(mktemp)"
+            trap 'rm -f -- "${headers_file}"' RETURN
+
+            for attempt in 1 2 3 4 5 6; do
+              : > "${headers_file}"
+              curl --http1.1 --compressed --silent --show-error --max-time 60 \
+                -H 'Accept-Encoding: br, gzip' -D "${headers_file}" -o /dev/null "${url}"
+              encoding="$(awk -F': *' 'tolower($1)=="content-encoding" {gsub(/\r/,"",$2); v=$2} END{print v}' "${headers_file}")"
+              cache_control="$(awk -F': *' 'tolower($1)=="cache-control" {gsub(/\r/,"",$2); v=$2} END{print v}' "${headers_file}")"
+              edge_cache="$(awk -F': *' 'tolower($1)=="eo-cache-status" {gsub(/\r/,"",$2); v=$2} END{print v}' "${headers_file}")"
+              echo "${label}: attempt=${attempt} encoding=${encoding:-none} cache=${edge_cache:-none}"
+              [[ "${cache_control}" != *private* && "${cache_control}" != *no-store* ]] || return 1
+              if [[ "${encoding}" == 'br' || "${encoding}" == 'gzip' ]]; then return 0; fi
+              sleep 2
+            done
+            return 1
           }
 
-          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-            : > "${headers_file}"
-            curl --http1.1 --compressed --silent --show-error --max-time 60 \
-              -H 'Accept-Encoding: br, gzip' \
-              -D "${headers_file}" \
-              -o /dev/null \
-              "${probe_url}"
-
-            content_encoding="$(header_value 'Content-Encoding')"
-            cache_control="$(header_value 'Cache-Control')"
-            edge_cache_status="$(header_value 'EO-Cache-Status')"
-            echo "attempt=${attempt}/${max_attempts} content_encoding=${content_encoding:-none} cache_control=${cache_control:-none} edge_cache_status=${edge_cache_status:-none}"
-
-            if [[ "${cache_control}" == *private* || "${cache_control}" == *no-store* ]]; then
-              echo "::error::Unsafe CDN cache policy: ${cache_control}"
-              exit 1
-            fi
-
-            if [[ "${content_encoding}" == 'br' || "${content_encoding}" == 'gzip' ]]; then
-              echo "- CDN verification: ${content_encoding}; ${edge_cache_status:-unknown}; attempt ${attempt}/${max_attempts}" >> "${GITHUB_STEP_SUMMARY}"
-              exit 0
-            fi
-
-            if (( attempt < max_attempts )); then
-              echo "::warning::CDN compression is not ready (${edge_cache_status:-unknown}); retrying in 2s."
-              sleep 2
-            fi
-          done
-
-          echo "::error::CDN compression was still unavailable after ${max_attempts} attempts."
-          exit 1
+          verify_compressed docs 'https://fumadocs.any1.tech/docs/408'
+          verify_compressed search "https://fumadocs.any1.tech${body_url}"
+          echo "- CDN docs/search compression verification: $(($(date +%s) - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Write deployment summary
         if: always()
         shell: bash
         run: |
+          finished="$(date +%s)"
+          total_seconds="$((finished - ${PIPELINE_STARTED_AT:-finished}))"
           {
             echo '## EdgeOne Fumadocs pure-static deployment'
             echo
@@ -330,6 +379,7 @@ jobs:
             echo '- Runtime: static CDN only; Cloud Functions 0; Edge Functions 0'
             echo "- Job status: ${{ job.status }}"
             echo "- Commit: ${GITHUB_SHA}"
+            echo "- Pipeline wall time (first step → final verification): ${total_seconds}s"
             if [ -n "${{ steps.deploy.outputs.console_url }}" ]; then
               echo "- Console: ${{ steps.deploy.outputs.console_url }}"
             fi

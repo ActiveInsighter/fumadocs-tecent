@@ -11,8 +11,8 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const staticOutputRoot = path.join(projectRoot, '.static-docs');
-// A stable staging path lets Turbopack reuse filesystem cache entries across CI runs.
 const staticStageRoot = path.join(projectRoot, '.static-docs-stage');
+const staticSearchRoot = path.join(projectRoot, '.static-search-output');
 
 const projectEntries = [
   'app',
@@ -37,6 +37,14 @@ async function exists(filePath) {
   }
 }
 
+function formatSeconds(ms) {
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function formatMiB(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
+
 async function copyProjectEntry(stageRoot, relativePath) {
   const sourcePath = path.join(projectRoot, relativePath);
   if (!(await exists(sourcePath))) return;
@@ -59,11 +67,6 @@ async function copyProjectEntry(stageRoot, relativePath) {
   await cp(sourcePath, destinationPath);
 }
 
-/**
- * Remove stale staged source/output while deliberately preserving only
- * `.next/cache`. GitHub Actions restores that directory before this script
- * runs, and Turbopack can reuse it because `staticStageRoot` is stable.
- */
 async function cleanStagePreservingBuildCache(stageRoot) {
   await mkdir(stageRoot, { recursive: true });
 
@@ -102,6 +105,35 @@ async function prepareStage(stageRoot) {
   );
 }
 
+function runProcess(command, args, { cwd, env, label }) {
+  const startedAt = Date.now();
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      shell: process.platform === 'win32',
+      stdio: 'inherit',
+    });
+
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      const durationMs = Date.now() - startedAt;
+      if (code === 0) {
+        console.log(`[timing] ${label}=${formatSeconds(durationMs)}`);
+        resolve({ durationMs });
+        return;
+      }
+
+      reject(
+        new Error(
+          `${label} failed${signal ? ` with ${signal}` : ` with exit code ${code}`}.`,
+        ),
+      );
+    });
+  });
+}
+
 function runNextBuild(stageRoot) {
   const nextCommand = path.join(
     projectRoot,
@@ -110,32 +142,33 @@ function runNextBuild(stageRoot) {
     process.platform === 'win32' ? 'next.cmd' : 'next',
   );
 
-  return new Promise((resolve, reject) => {
-    const child = spawn(nextCommand, ['build'], {
-      cwd: stageRoot,
+  return runProcess(nextCommand, ['build'], {
+    cwd: stageRoot,
+    env: {
+      ...process.env,
+      NEXT_TELEMETRY_DISABLED: '1',
+      STATIC_DOCS_BUILD: '1',
+    },
+    label: 'next_static_build',
+  });
+}
+
+async function runSearchBuild(outputRoot) {
+  await rm(outputRoot, { recursive: true, force: true });
+  await mkdir(outputRoot, { recursive: true });
+
+  return runProcess(
+    process.execPath,
+    [path.join(projectRoot, 'scripts', 'build-search-index.mjs'), path.join(outputRoot, 'search-index.json')],
+    {
+      cwd: projectRoot,
       env: {
         ...process.env,
         NEXT_TELEMETRY_DISABLED: '1',
-        STATIC_DOCS_BUILD: '1',
       },
-      shell: process.platform === 'win32',
-      stdio: 'inherit',
-    });
-
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(
-        new Error(
-          `Static documentation build failed${signal ? ` with ${signal}` : ` with exit code ${code}`}.`,
-        ),
-      );
-    });
-  });
+      label: 'zbsearch_build',
+    },
+  );
 }
 
 async function walkFiles(directory) {
@@ -153,13 +186,14 @@ async function walkFiles(directory) {
   return files;
 }
 
-/**
- * Static export does not support Next rewrites, and the markdown route
- * handler is excluded from the static project entirely (Windows file-lock
- * issues with the extensionless route output). Instead, publish direct
- * /docs/*.md files beside the HTML pages by converting the sources under
- * content/docs directly.
- */
+async function copyDirectoryContents(sourceRoot, destinationRoot) {
+  for (const entry of await readdir(sourceRoot, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceRoot, entry.name);
+    const destinationPath = path.join(destinationRoot, entry.name);
+    await cp(sourcePath, destinationPath, { recursive: entry.isDirectory() });
+  }
+}
+
 async function generateStaticMarkdownRoutes(outputRoot) {
   const contentRoot = path.join(projectRoot, 'content', 'docs');
   const sourceFiles = (await walkFiles(contentRoot)).filter((filePath) =>
@@ -206,6 +240,7 @@ async function summarizeOutput(outputRoot) {
 }
 
 async function main() {
+  const totalStartedAt = Date.now();
   const stageRoot = staticStageRoot;
 
   try {
@@ -215,26 +250,55 @@ async function main() {
       : 'cold';
     console.log(`[static-docs] Turbopack cache state: ${cacheState}.`);
 
+    const prepareStartedAt = Date.now();
     await prepareStage(stageRoot);
-    await runNextBuild(stageRoot);
+    console.log(`[timing] prepare_static_stage=${formatSeconds(Date.now() - prepareStartedAt)}`);
 
+    // Search extraction and Next static rendering are independent reads of the
+    // documentation corpus. Run them as separate OS processes on the same
+    // runner so they can use different cores without paying Actions artifact
+    // upload/download costs for the ~400 MiB static site.
+    const parallelStartedAt = Date.now();
+    const [nextTiming, searchTiming] = await Promise.all([
+      runNextBuild(stageRoot),
+      runSearchBuild(staticSearchRoot),
+    ]);
+    const parallelDurationMs = Date.now() - parallelStartedAt;
+    console.log(`[timing] parallel_build_wall=${formatSeconds(parallelDurationMs)}`);
+    console.log(
+      `[timing] parallel_overlap_saved=${formatSeconds(
+        Math.max(0, nextTiming.durationMs + searchTiming.durationMs - parallelDurationMs),
+      )}`,
+    );
+
+    const assembleStartedAt = Date.now();
     await rm(staticOutputRoot, { recursive: true, force: true });
     await cp(path.join(stageRoot, 'out'), staticOutputRoot, { recursive: true });
+    await copyDirectoryContents(staticSearchRoot, staticOutputRoot);
+    console.log(`[timing] assemble_static_and_search=${formatSeconds(Date.now() - assembleStartedAt)}`);
+
+    const markdownStartedAt = Date.now();
     const markdownCount = await generateStaticMarkdownRoutes(staticOutputRoot);
+    console.log(`[timing] direct_markdown_build=${formatSeconds(Date.now() - markdownStartedAt)}`);
+
+    const summaryStartedAt = Date.now();
     const summary = await summarizeOutput(staticOutputRoot);
+    console.log(`[timing] static_output_scan=${formatSeconds(Date.now() - summaryStartedAt)}`);
 
     console.log(
-      `[static-docs] Published ${summary.files} static files (${(summary.bytes / 1024 / 1024).toFixed(2)} MiB).`,
+      `[static-docs] Published ${summary.files} static files (${formatMiB(summary.bytes)}).`,
     );
     console.log(`[static-docs] Generated ${markdownCount} direct markdown routes.`);
     console.log(
-      `[static-docs] Largest file: ${(
-        summary.largestFile.size / 1024 / 1024
-      ).toFixed(2)} MiB ${path.relative(projectRoot, summary.largestFile.path)}`,
+      `[static-docs] Largest file: ${formatMiB(summary.largestFile.size)} ${path.relative(
+        projectRoot,
+        summary.largestFile.path,
+      )}`,
     );
+    console.log(`[timing] static_package_total=${formatSeconds(Date.now() - totalStartedAt)}`);
   } finally {
-    // Leave only `.next/cache` behind for actions/cache's post-job save step.
     await cleanStagePreservingBuildCache(stageRoot);
+    await rm(staticSearchRoot, { recursive: true, force: true });
   }
 }
 
