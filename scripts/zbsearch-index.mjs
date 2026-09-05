@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
@@ -12,9 +13,19 @@ import {
   isStaticDocSourceFile,
 } from './static-docs-markdown.mjs';
 
+export const SEARCH_MANIFEST_VERSION = 2;
+export const SEARCH_MANIFEST_MODE = 'tiered-bloom-shards';
 export const ZBSEARCH_WARNING_BYTES = 15_000_000;
+export const ZBSEARCH_SOFT_MAX_BYTES = 10_000_000;
 export const ZBSEARCH_MAX_BYTES = 25_000_000;
-export const ZBSEARCH_SHARD_COUNT = 3;
+export const ZBSEARCH_SOURCE_TARGET_CHARS = 650_000;
+export const ZBSEARCH_MAX_SECTION_CHARS = 6_000;
+export const ZBSEARCH_CORE_HEADING_CHARS = 600;
+
+const BLOOM_HASHES = 4;
+const BLOOM_BITS_PER_TOKEN = 10;
+const BLOOM_MIN_BITS = 16_384;
+const BLOOM_MAX_BITS = 65_536;
 
 function normalizeSourcePath(relativePath) {
   return relativePath.replaceAll('\\', '/');
@@ -30,6 +41,91 @@ function getMetadata(data) {
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 }
 
+function trimToCodePoints(text, maxChars) {
+  const chars = Array.from(text);
+  return chars.length <= maxChars ? text : chars.slice(0, maxChars).join('');
+}
+
+/**
+ * Search should spend bytes on natural-language concepts, not on the literal
+ * serialization of large formulas, URLs, or MDX syntax. Fenced code blocks do
+ * not enter Fumadocs structuredData by default; this additionally strips the
+ * low-value math/markup that can appear inside paragraphs and table cells.
+ */
+export function sanitizeSearchText(value) {
+  if (!value) return '';
+
+  let text = String(value).normalize('NFKC');
+  text = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/~~~[\s\S]*?~~~/g, ' ')
+    .replace(/\\text\{([^{}]{0,300})\}/g, ' $1 ')
+    .replace(/\\operatorname\{([^{}]{0,120})\}/g, ' $1 ')
+    .replace(/\$\$[\s\S]*?\$\$/g, ' ')
+    .replace(/\\\[[\s\S]*?\\\]/g, ' ')
+    .replace(/\\\([\s\S]*?\\\)/g, ' ')
+    .replace(/\$[^$\n]{1,2000}\$/g, ' ')
+    .replace(/\\(?:begin|end)\{[^{}]{1,80}\}/g, ' ')
+    .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]{0,100}\])?/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/[{}_^]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const naturalChars = text.match(/[\p{L}\p{N}\p{Script=Han}]/gu)?.length ?? 0;
+  return naturalChars >= 2 ? text : '';
+}
+
+function normalizeRoutingText(value) {
+  return String(value ?? '').normalize('NFKC').toLocaleLowerCase('und');
+}
+
+/**
+ * A deliberately small, deterministic routing tokenizer. CJK uses character
+ * bigrams (robust without a language dictionary), while longer Latin/number
+ * words also contribute trigrams so a typo can still route to the right shard.
+ */
+export function buildSearchRoutingTokens(value) {
+  const normalized = normalizeRoutingText(value);
+  const tokens = new Set();
+  const words = normalized.match(/\p{Script=Han}+|[\p{L}\p{N}]+/gu) ?? [];
+
+  for (const word of words) {
+    if (/^\p{Script=Han}+$/u.test(word)) {
+      const chars = Array.from(word);
+      if (chars.length === 1) tokens.add(`c:${chars[0]}`);
+      for (let index = 0; index + 1 < chars.length; index += 1) {
+        tokens.add(`c2:${chars[index]}${chars[index + 1]}`);
+      }
+      if (chars.length >= 2 && chars.length <= 8) tokens.add(`cw:${word}`);
+      continue;
+    }
+
+    if (word.length >= 2) tokens.add(`w:${word}`);
+    if (word.length >= 4) {
+      for (let index = 0; index + 2 < word.length; index += 1) {
+        tokens.add(`g:${word.slice(index, index + 3)}`);
+      }
+    }
+  }
+
+  return Array.from(tokens);
+}
+
+export function getSearchScope(relativePath) {
+  const normalized = normalizeSourcePath(relativePath).replace(/\.(md|mdx)$/i, '');
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.at(-1)?.toLowerCase() === 'index') segments.pop();
+
+  if (segments.length === 0) {
+    return { category: 'root', group: 'root' };
+  }
+
+  const category = segments[0];
+  const group = segments.length >= 2 ? `${segments[0]}/${segments[1]}` : category;
+  return { category, group };
+}
+
 export function buildStructuredSearchData(content) {
   let structured;
 
@@ -37,88 +133,186 @@ export function buildStructuredSearchData(content) {
     structured = structure(content, [remarkMdx, remarkMath, remarkMdxMermaid]);
   } catch {
     // Some legacy notes contain raw comparisons such as `A<B` outside code
-    // fences. They are valid Markdown but not valid MDX JSX, so retry with a
-    // Markdown parser instead of dropping those documents from search.
+    // fences. They are valid Markdown but not valid MDX JSX, so retry without
+    // the MDX parser instead of silently dropping those documents from search.
     structured = structure(content, [remarkMath, remarkMdxMermaid]);
   }
 
   return {
-    headings: structured.headings.map((heading) => ({
-      ...heading,
-      content: heading.content.replaceAll('\\<', '<'),
-    })),
-    contents: structured.contents.map((entry) => ({
-      ...entry,
-      content: entry.content.replaceAll('\\<', '<'),
-    })),
+    headings: structured.headings
+      .map((heading) => ({
+        ...heading,
+        content: sanitizeSearchText(heading.content.replaceAll('\\<', '<')),
+      }))
+      .filter((heading) => heading.content.length > 0),
+    contents: structured.contents
+      .map((entry) => ({
+        ...entry,
+        content: sanitizeSearchText(entry.content.replaceAll('\\<', '<')),
+      }))
+      .filter((entry) => entry.content.length > 0),
   };
 }
 
 export function buildZBSearchSourceIndex(relativePath, content) {
   const parsed = frontmatter(content);
   const metadata = getMetadata(parsed.data);
-  const title =
+  const title = sanitizeSearchText(
     typeof metadata.title === 'string' && metadata.title.trim()
       ? metadata.title.trim()
-      : getPathTitle(relativePath);
+      : getPathTitle(relativePath),
+  ) || getPathTitle(relativePath);
   const description =
     typeof metadata.description === 'string' && metadata.description.trim()
-      ? metadata.description.trim()
+      ? trimToCodePoints(sanitizeSearchText(metadata.description), 300)
       : undefined;
   const url = getStaticDocsPageUrl(relativePath);
+  const scope = getSearchScope(relativePath);
 
   return {
     id: url,
+    relativePath: normalizeSourcePath(relativePath),
     title,
     ...(description ? { description } : {}),
     url,
+    ...scope,
     structuredData: buildStructuredSearchData(parsed.content),
   };
 }
 
-/**
- * ZBSearch's advanced Fumadocs index creates one search document for every
- * paragraph/table cell. On this content set that expands beyond 100 MiB. For
- * the static CDN build we keep one simple ZBSearch document per heading:
- * contents under the same heading are concatenated into one searchable record.
- * This preserves heading anchors while substantially reducing index overhead.
- */
-export function buildZBSearchSectionIndexes(page) {
-  const sections = new Map();
-  const rootContent = [];
+function chunkParagraphs(paragraphs, maxChars = ZBSEARCH_MAX_SECTION_CHARS) {
+  const chunks = [];
+  let current = '';
 
-  for (const entry of page.structuredData.contents) {
-    if (entry.heading) {
-      const list = sections.get(entry.heading) ?? [];
-      list.push(entry.content);
-      sections.set(entry.heading, list);
-    } else {
-      rootContent.push(entry.content);
+  const pushCurrent = () => {
+    if (!current) return;
+    chunks.push(current);
+    current = '';
+  };
+
+  for (const paragraph of paragraphs) {
+    const clean = sanitizeSearchText(paragraph);
+    if (!clean) continue;
+
+    const pieces = [];
+    const chars = Array.from(clean);
+    for (let start = 0; start < chars.length; start += maxChars) {
+      pieces.push(chars.slice(start, start + maxChars).join(''));
+    }
+
+    for (const piece of pieces) {
+      if (!current) {
+        current = piece;
+        continue;
+      }
+
+      if (Array.from(current).length + Array.from(piece).length + 2 <= maxChars) {
+        current += `\n\n${piece}`;
+      } else {
+        pushCurrent();
+        current = piece;
+      }
     }
   }
 
-  const result = [
-    {
-      title: page.title,
-      description: page.description,
-      breadcrumbs: [],
-      content: [page.description, ...rootContent].filter(Boolean).join('\n\n'),
-      keywords: page.title,
-      url: page.url,
-    },
-  ];
+  pushCurrent();
+  return chunks;
+}
 
-  for (const heading of page.structuredData.headings) {
-    result.push({
-      title: heading.content,
-      breadcrumbs: [page.title],
-      content: (sections.get(heading.id) ?? []).join('\n\n'),
-      keywords: page.title,
-      url: `${page.url}#${heading.id}`,
-    });
+function makeSectionRecords({ title, breadcrumbs, url, paragraphs, keywords, description }) {
+  const chunks = chunkParagraphs(paragraphs);
+  if (chunks.length === 0) chunks.push('');
+
+  return chunks.map((content, index) => ({
+    title,
+    description: index === 0 ? description : undefined,
+    breadcrumbs,
+    content,
+    keywords,
+    url,
+  }));
+}
+
+/**
+ * Full-text records remain section-aware, but very long sections are chunked
+ * behind the same heading URL. The UI de-duplicates identical URLs, so chunking
+ * preserves search coverage without ever creating one pathological document.
+ */
+export function buildZBSearchSectionIndexes(page) {
+  const sectionTitles = new Map(
+    page.structuredData.headings.map((heading) => [heading.id, heading.content]),
+  );
+  const sections = new Map();
+  const seenBySection = new Map();
+  const rootContent = [];
+  const rootSeen = new Set();
+
+  for (const entry of page.structuredData.contents) {
+    const content = sanitizeSearchText(entry.content);
+    if (!content) continue;
+
+    if (!entry.heading) {
+      if (!rootSeen.has(content)) {
+        rootSeen.add(content);
+        rootContent.push(content);
+      }
+      continue;
+    }
+
+    const seen = seenBySection.get(entry.heading) ?? new Set();
+    if (seen.has(content)) continue;
+    seen.add(content);
+    seenBySection.set(entry.heading, seen);
+
+    const list = sections.get(entry.heading) ?? [];
+    list.push(content);
+    sections.set(entry.heading, list);
+  }
+
+  const result = makeSectionRecords({
+    title: page.title,
+    description: page.description,
+    breadcrumbs: page.category === 'root' ? [] : [page.category],
+    paragraphs: rootContent,
+    keywords: `${page.title} ${page.category}`,
+    url: page.url,
+  });
+
+  const headingIds = new Set([
+    ...page.structuredData.headings.map((heading) => heading.id),
+    ...sections.keys(),
+  ]);
+
+  for (const headingId of headingIds) {
+    const headingTitle = sectionTitles.get(headingId) || page.title;
+    result.push(
+      ...makeSectionRecords({
+        title: headingTitle,
+        breadcrumbs: [page.title],
+        paragraphs: sections.get(headingId) ?? [],
+        keywords: `${page.title} ${headingTitle} ${page.category}`,
+        url: `${page.url}#${headingId}`,
+      }),
+    );
   }
 
   return result;
+}
+
+export function buildZBSearchCoreIndex(page) {
+  const headingSummary = trimToCodePoints(
+    page.structuredData.headings.map((heading) => heading.content).join(' · '),
+    ZBSEARCH_CORE_HEADING_CHARS,
+  );
+
+  return {
+    title: page.title,
+    description: page.description,
+    breadcrumbs: page.category === 'root' ? [] : [page.category],
+    content: headingSummary,
+    keywords: `${page.title} ${page.category} ${page.group}`,
+    url: page.url,
+  };
 }
 
 async function walkFiles(directory) {
@@ -150,15 +344,69 @@ export async function collectZBSearchSourceIndexes(
   );
 }
 
-function stableShardIndex(value, count) {
-  // FNV-1a gives deterministic distribution without moving every document
-  // whenever a new page is added.
-  let hash = 0x811c9dc5;
+function hash32(value, seed = 0x811c9dc5) {
+  let hash = seed >>> 0;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return (hash >>> 0) % count;
+  return hash >>> 0;
+}
+
+function hash32Secondary(value) {
+  let hash = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 0x85ebca6b);
+    hash ^= hash >>> 13;
+  }
+  return (hash | 1) >>> 0;
+}
+
+function nextPowerOfTwo(value) {
+  let result = 1;
+  while (result < value) result *= 2;
+  return result;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function buildBloomRoute(records) {
+  const tokens = new Set();
+  for (const record of records) {
+    const text = [
+      record.title,
+      record.description,
+      record.content,
+      record.keywords,
+      ...(record.breadcrumbs ?? []),
+    ]
+      .filter(Boolean)
+      .join(' ');
+    for (const token of buildSearchRoutingTokens(text)) tokens.add(token);
+  }
+
+  const bitCount = nextPowerOfTwo(
+    clamp(tokens.size * BLOOM_BITS_PER_TOKEN, BLOOM_MIN_BITS, BLOOM_MAX_BITS),
+  );
+  const bytes = Buffer.alloc(bitCount / 8);
+
+  for (const token of tokens) {
+    const first = hash32(token);
+    const second = hash32Secondary(token);
+    for (let index = 0; index < BLOOM_HASHES; index += 1) {
+      const bit = (first + Math.imul(index, second)) & (bitCount - 1);
+      bytes[bit >>> 3] |= 1 << (bit & 7);
+    }
+  }
+
+  return {
+    bits: bitCount,
+    hashes: BLOOM_HASHES,
+    tokens: tokens.size,
+    data: bytes.toString('base64'),
+  };
 }
 
 function compressionSizes(json) {
@@ -173,77 +421,194 @@ function compressionSizes(json) {
   };
 }
 
+function recordSourceChars(record) {
+  return Array.from(
+    [record.title, record.description, record.content, record.keywords]
+      .filter(Boolean)
+      .join(' '),
+  ).length;
+}
+
+function safeFileSegment(value) {
+  return value
+    .toLocaleLowerCase('und')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'root';
+}
+
+function contentDigest(json) {
+  return createHash('sha256').update(json).digest('hex').slice(0, 12);
+}
+
 function formatMiB(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
 }
 
-export async function buildZBSearchIndex({
-  contentRoot = path.resolve('content/docs'),
-  outputFile,
-} = {}) {
-  if (!outputFile) {
-    throw new Error('buildZBSearchIndex requires an outputFile.');
+async function exportSimpleIndex(records) {
+  const server = initSimpleSearch({ indexes: records });
+  return JSON.stringify(await server.export());
+}
+
+function splitStableUnits(units, targetChars, depth = 0, prefix = '') {
+  const totalChars = units.reduce((sum, unit) => sum + unit.chars, 0);
+  if (totalChars <= targetChars || units.length <= 1) {
+    return [{ key: prefix || '0', units }];
   }
 
-  const pages = await collectZBSearchSourceIndexes(contentRoot);
-  const shardIndexes = Array.from({ length: ZBSEARCH_SHARD_COUNT }, () => []);
-  let recordCount = 0;
-
-  for (const page of pages) {
-    const records = buildZBSearchSectionIndexes(page);
-    recordCount += records.length;
-    shardIndexes[stableShardIndex(page.url, ZBSEARCH_SHARD_COUNT)].push(...records);
+  if (depth >= 12) {
+    const sorted = [...units].sort((left, right) => left.key.localeCompare(right.key));
+    const midpoint = Math.ceil(sorted.length / 2);
+    return [
+      ...splitStableUnits(sorted.slice(0, midpoint), targetChars, depth + 1, `${prefix}a`),
+      ...splitStableUnits(sorted.slice(midpoint), targetChars, depth + 1, `${prefix}b`),
+    ];
   }
 
-  const outputDirectory = path.dirname(outputFile);
-  const outputBaseName = path.basename(outputFile, path.extname(outputFile));
-  await mkdir(outputDirectory, { recursive: true });
+  const buckets = Array.from({ length: 4 }, () => []);
+  for (const unit of units) {
+    const bucket = hash32(`${depth}:${unit.key}`) & 3;
+    buckets[bucket].push(unit);
+  }
 
-  const shardResults = [];
-  for (let index = 0; index < shardIndexes.length; index += 1) {
-    const records = shardIndexes[index];
-    const server = initSimpleSearch({ indexes: records });
-    const json = JSON.stringify(await server.export());
-    const sizes = compressionSizes(json);
-    const fileName = `${outputBaseName}-${index}.json`;
-    const filePath = path.join(outputDirectory, fileName);
+  const nonEmpty = buckets.filter((bucket) => bucket.length > 0);
+  if (nonEmpty.length === 1) {
+    return splitStableUnits(units, targetChars, depth + 1, `${prefix}x`);
+  }
 
-    console.log(
-      `[zbsearch] Shard ${index + 1}/${ZBSEARCH_SHARD_COUNT}: ${records.length} records; raw ${formatMiB(sizes.bytes)}; gzip ${formatMiB(sizes.gzipBytes)}; brotli ${formatMiB(sizes.brotliBytes)}.`,
-    );
+  return buckets.flatMap((bucket, index) =>
+    bucket.length === 0
+      ? []
+      : splitStableUnits(bucket, targetChars, depth + 1, `${prefix}${index}`),
+  );
+}
 
-    if (sizes.bytes >= ZBSEARCH_MAX_BYTES) {
-      throw new Error(
-        `ZBSearch shard ${fileName} is ${sizes.bytes} bytes, at or above the EdgeOne 25 MB single-file limit.`,
-      );
+function splitLargePageUnit(unit) {
+  if (unit.chars <= ZBSEARCH_SOURCE_TARGET_CHARS) return [unit];
+
+  const result = [];
+  let records = [];
+  let chars = 0;
+  let part = 0;
+
+  for (const record of unit.records) {
+    const recordChars = recordSourceChars(record);
+    if (records.length > 0 && chars + recordChars > ZBSEARCH_SOURCE_TARGET_CHARS) {
+      result.push({ ...unit, key: `${unit.key}|${part}`, records, chars });
+      records = [];
+      chars = 0;
+      part += 1;
     }
-
-    if (sizes.bytes >= ZBSEARCH_WARNING_BYTES) {
-      console.warn(
-        `[zbsearch] Warning: ${fileName} is ${formatMiB(sizes.bytes)} raw; consider increasing the shard count.`,
-      );
-    }
-
-    await writeFile(filePath, json);
-    shardResults.push({
-      fileName,
-      filePath,
-      records: records.length,
-      ...sizes,
-    });
+    records.push(record);
+    chars += recordChars;
   }
 
-  const manifest = {
-    version: 1,
-    engine: 'zbsearch',
-    mode: 'simple-section-shards',
-    pages: pages.length,
-    records: recordCount,
-    shards: shardResults.map((shard) => `/${shard.fileName}`),
-  };
-  await writeFile(outputFile, JSON.stringify(manifest));
+  if (records.length > 0) {
+    result.push({ ...unit, key: `${unit.key}|${part}`, records, chars });
+  }
 
-  const totals = shardResults.reduce(
+  return result;
+}
+
+function splitRecordsForSafety(records, depth) {
+  const buckets = [[], []];
+  for (const record of records) {
+    const key = `${record.url}\u0000${record.title}\u0000${String(record.content).slice(0, 96)}`;
+    buckets[(hash32(`${depth}:${key}`) >>> depth) & 1].push(record);
+  }
+
+  if (buckets[0].length === 0 || buckets[1].length === 0) {
+    const midpoint = Math.ceil(records.length / 2);
+    return [records.slice(0, midpoint), records.slice(midpoint)];
+  }
+  return buckets;
+}
+
+async function writeCoreShard({ records, key, searchDirectory, depth = 0 }) {
+  const json = await exportSimpleIndex(records);
+  const sizes = compressionSizes(json);
+
+  if (sizes.bytes > ZBSEARCH_SOFT_MAX_BYTES && records.length > 1) {
+    const [left, right] = splitRecordsForSafety(records, depth);
+    return [
+      ...(await writeCoreShard({ records: left, key: `${key}a`, searchDirectory, depth: depth + 1 })),
+      ...(await writeCoreShard({ records: right, key: `${key}b`, searchDirectory, depth: depth + 1 })),
+    ];
+  }
+
+  if (sizes.bytes >= ZBSEARCH_MAX_BYTES) {
+    throw new Error(`Core ZBSearch shard ${key} is ${sizes.bytes} bytes, above the EdgeOne limit.`);
+  }
+
+  const digest = contentDigest(json);
+  const fileName = `core-${safeFileSegment(key)}-${digest}.json`;
+  const filePath = path.join(searchDirectory, fileName);
+  await writeFile(filePath, json);
+
+  return [{
+    url: `/search/${fileName}`,
+    records: records.length,
+    ...sizes,
+  }];
+}
+
+async function writeBodyShard({
+  records,
+  category,
+  group,
+  key,
+  searchDirectory,
+  depth = 0,
+}) {
+  const json = await exportSimpleIndex(records);
+  const sizes = compressionSizes(json);
+
+  if (sizes.bytes > ZBSEARCH_SOFT_MAX_BYTES && records.length > 1) {
+    const [left, right] = splitRecordsForSafety(records, depth);
+    return [
+      ...(await writeBodyShard({
+        records: left,
+        category,
+        group,
+        key: `${key}a`,
+        searchDirectory,
+        depth: depth + 1,
+      })),
+      ...(await writeBodyShard({
+        records: right,
+        category,
+        group,
+        key: `${key}b`,
+        searchDirectory,
+        depth: depth + 1,
+      })),
+    ];
+  }
+
+  if (sizes.bytes >= ZBSEARCH_MAX_BYTES) {
+    throw new Error(`Body ZBSearch shard ${group}/${key} is ${sizes.bytes} bytes, above the EdgeOne limit.`);
+  }
+
+  if (sizes.bytes >= ZBSEARCH_WARNING_BYTES) {
+    console.warn(`[zbsearch] Warning: body shard ${group}/${key} is ${formatMiB(sizes.bytes)} raw.`);
+  }
+
+  const digest = contentDigest(json);
+  const fileName = `body-${safeFileSegment(group)}-${safeFileSegment(key)}-${digest}.json`;
+  const filePath = path.join(searchDirectory, fileName);
+  await writeFile(filePath, json);
+
+  return [{
+    url: `/search/${fileName}`,
+    category,
+    group,
+    records: records.length,
+    route: buildBloomRoute(records),
+    ...sizes,
+  }];
+}
+
+function sumSizes(shards) {
+  return shards.reduce(
     (result, shard) => ({
       bytes: result.bytes + shard.bytes,
       gzipBytes: result.gzipBytes + shard.gzipBytes,
@@ -251,16 +616,126 @@ export async function buildZBSearchIndex({
     }),
     { bytes: 0, gzipBytes: 0, brotliBytes: 0 },
   );
+}
+
+export async function buildZBSearchIndex({
+  contentRoot = path.resolve('content/docs'),
+  outputFile,
+} = {}) {
+  if (!outputFile) throw new Error('buildZBSearchIndex requires an outputFile.');
+
+  const pages = await collectZBSearchSourceIndexes(contentRoot);
+  const outputDirectory = path.dirname(outputFile);
+  const searchDirectory = path.join(outputDirectory, 'search');
+  await mkdir(outputDirectory, { recursive: true });
+  await rm(searchDirectory, { recursive: true, force: true });
+  await mkdir(searchDirectory, { recursive: true });
+
+  const coreRecords = pages.map(buildZBSearchCoreIndex);
+  const coreShards = await writeCoreShard({
+    records: coreRecords,
+    key: 'pages',
+    searchDirectory,
+  });
+
+  const groups = new Map();
+  let bodyRecordCount = 0;
+
+  for (const page of pages) {
+    const records = buildZBSearchSectionIndexes(page);
+    bodyRecordCount += records.length;
+    const baseUnit = {
+      key: page.url,
+      records,
+      chars: records.reduce((sum, record) => sum + recordSourceChars(record), 0),
+      category: page.category,
+      group: page.group,
+    };
+
+    const list = groups.get(page.group) ?? [];
+    list.push(...splitLargePageUnit(baseUnit));
+    groups.set(page.group, list);
+  }
+
+  const bodyShards = [];
+  for (const [group, units] of Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right))) {
+    const plans = splitStableUnits(units, ZBSEARCH_SOURCE_TARGET_CHARS);
+    for (const plan of plans) {
+      const records = plan.units.flatMap((unit) => unit.records);
+      const category = plan.units[0]?.category ?? 'root';
+      bodyShards.push(
+        ...(await writeBodyShard({
+          records,
+          category,
+          group,
+          key: plan.key,
+          searchDirectory,
+        })),
+      );
+    }
+  }
+
+  const coreTotals = sumSizes(coreShards);
+  const bodyTotals = sumSizes(bodyShards);
+  const manifest = {
+    version: SEARCH_MANIFEST_VERSION,
+    engine: 'zbsearch',
+    mode: SEARCH_MANIFEST_MODE,
+    pages: pages.length,
+    records: bodyRecordCount,
+    routing: {
+      algorithm: 'bloom-fnv-v1',
+      tokenizer: 'cjk-bigram-latin-trigram-v1',
+      minScore: 0.5,
+    },
+    core: {
+      ...coreTotals,
+      shards: coreShards,
+    },
+    body: {
+      ...bodyTotals,
+      shards: bodyShards,
+    },
+  };
+
+  const manifestJson = JSON.stringify(manifest);
+  const manifestSizes = compressionSizes(manifestJson);
+  if (manifestSizes.bytes >= ZBSEARCH_MAX_BYTES) {
+    throw new Error(`ZBSearch manifest is ${manifestSizes.bytes} bytes, above the EdgeOne limit.`);
+  }
+  await writeFile(outputFile, manifestJson);
+
+  const total = {
+    bytes: manifestSizes.bytes + coreTotals.bytes + bodyTotals.bytes,
+    gzipBytes: manifestSizes.gzipBytes + coreTotals.gzipBytes + bodyTotals.gzipBytes,
+    brotliBytes: manifestSizes.brotliBytes + coreTotals.brotliBytes + bodyTotals.brotliBytes,
+  };
 
   console.log(
-    `[zbsearch] Total: ${pages.length} pages -> ${recordCount} section records; raw ${formatMiB(totals.bytes)}; gzip ${formatMiB(totals.gzipBytes)}; brotli ${formatMiB(totals.brotliBytes)}.`,
+    `[zbsearch] Core: ${coreShards.length} shard(s), ${coreRecords.length} page records; raw ${formatMiB(coreTotals.bytes)}, brotli ${formatMiB(coreTotals.brotliBytes)}.`,
   );
+  console.log(
+    `[zbsearch] Body: ${bodyShards.length} routed shard(s), ${bodyRecordCount} section chunks; raw ${formatMiB(bodyTotals.bytes)}, brotli ${formatMiB(bodyTotals.brotliBytes)}.`,
+  );
+  console.log(
+    `[zbsearch] Manifest: raw ${formatMiB(manifestSizes.bytes)}, brotli ${formatMiB(manifestSizes.brotliBytes)}.`,
+  );
+
+  for (const shard of bodyShards) {
+    console.log(
+      `[zbsearch] ${shard.group}: ${shard.records} records; raw ${formatMiB(shard.bytes)}; brotli ${formatMiB(shard.brotliBytes)}; route ${Math.round(shard.route.bits / 8 / 1024)} KiB.`,
+    );
+  }
 
   return {
     pages: pages.length,
-    records: recordCount,
-    shards: shardResults,
-    ...totals,
+    records: bodyRecordCount,
+    coreShards,
+    bodyShards,
+    core: coreTotals,
+    body: bodyTotals,
+    manifest: manifestSizes,
+    ...total,
     outputFile,
   };
 }
@@ -269,11 +744,13 @@ async function main() {
   const outputFile = path.resolve(process.argv[2] ?? 'public/search-index.json');
   const result = await buildZBSearchIndex({ outputFile });
 
-  console.log(`[zbsearch] Indexed ${result.pages} pages into ${result.records} section records.`);
-  console.log(`[zbsearch] Raw total: ${formatMiB(result.bytes)}.`);
-  console.log(`[zbsearch] Gzip total estimate: ${formatMiB(result.gzipBytes)}.`);
-  console.log(`[zbsearch] Brotli total estimate: ${formatMiB(result.brotliBytes)}.`);
-  console.log(`[zbsearch] Wrote ${path.relative(process.cwd(), result.outputFile)} plus ${result.shards.length} shards.`);
+  console.log(`[zbsearch] Indexed ${result.pages} pages into ${result.records} searchable section chunks.`);
+  console.log(`[zbsearch] Total raw: ${formatMiB(result.bytes)}.`);
+  console.log(`[zbsearch] Total gzip estimate: ${formatMiB(result.gzipBytes)}.`);
+  console.log(`[zbsearch] Total Brotli estimate: ${formatMiB(result.brotliBytes)}.`);
+  console.log(
+    `[zbsearch] Wrote manifest + ${result.coreShards.length} core shard(s) + ${result.bodyShards.length} routed body shard(s).`,
+  );
 }
 
 const isDirectRun = process.argv[1]
