@@ -113,8 +113,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "${GITHUB_WORKSPACE}/.edgeone-cli/bin" >> "${GITHUB_PATH}"
-          [[ -x "${GITHUB_WORKSPACE}/.edgeone-cli/bin/edgeone" ]] || {
+          edgeone_bin="${GITHUB_WORKSPACE}/.edgeone-cli/bin"
+          echo "${edgeone_bin}" >> "${GITHUB_PATH}"
+          export PATH="${edgeone_bin}:${PATH}"
+          [[ -x "${edgeone_bin}/edgeone" ]] || {
             echo '::error::EdgeOne CLI executable is missing.'
             exit 1
           }
