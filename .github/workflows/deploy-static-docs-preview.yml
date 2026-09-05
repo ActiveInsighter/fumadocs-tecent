@@ -6,6 +6,7 @@ on:
     branches:
       - codex/static-docs-cdn
       - codex/static-build-performance
+      - codex/zbsearch-static
     paths:
       - 'content/docs/**'
       - 'app/**'
@@ -14,6 +15,7 @@ on:
       - 'scripts/build-static-docs.mjs'
       - 'scripts/static-docs-config.mjs'
       - 'scripts/static-docs-markdown.mjs'
+      - 'scripts/zbsearch-index.mjs'
       - 'scripts/static-root-layout.tsx'
       - 'next.config.static.mjs'
       - 'source.config.ts'
@@ -140,8 +142,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -s .static-docs/search-index.json
+
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l)"
+          search_index_bytes="$(stat -c '%s' .static-docs/search-index.json)"
           largest="$(
             find .static-docs -type f -printf '%s %p\n' \
               | awk '{ size = $1; $1 = ""; sub(/^ /, ""); if (size > max) { max = size; path = $0 } } END { print max, path }'
@@ -152,8 +157,13 @@ jobs:
           {
             echo "- Package size: $((package_bytes / 1024 / 1024)) MiB"
             echo "- File count: ${file_count}"
+            echo "- ZBSearch index: ${search_index_bytes} bytes"
             echo "- Largest file: ${largest_file_path} ($((largest_file_size / 1024 / 1024)) MiB)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+          if (( search_index_bytes >= 15000000 )); then
+            echo "::warning::ZBSearch raw index is ${search_index_bytes} bytes; review first-search download performance."
+          fi
 
           if (( largest_file_size >= 25000000 )); then
             echo '::error::A static file is at or above the EdgeOne 25 MB single-file limit.'
@@ -213,9 +223,10 @@ jobs:
           printf '%s\n' \
             '/' \
             '/docs/' \
+            '/search-index.json' \
             '/docs/math/advanced-mathematics/01-limits-continuity/' \
             '/docs/math/advanced-mathematics/01-limits-continuity.md' \
-            | xargs -P 4 -I '{}' bash -c '
+            | xargs -P 5 -I '{}' bash -c '
                 status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w "%{http_code}" "${base_url}$1?${preview_query}")"
                 echo "route $1 -> ${status}"
                 [[ "${status}" == "200" ]]
