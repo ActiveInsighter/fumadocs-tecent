@@ -1,0 +1,36 @@
+name: Validate study module tree
+
+on:
+  push:
+    branches:
+      - fix/fumadocs-module-tree-structural
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install dependencies and generate Fumadocs source
+        run: npm ci
+
+      - name: Run static documentation tests
+        run: npm test -- tests/static-docs-build.test.ts
+
+      - name: Build complete pure-static documentation site
+        env:
+          STATIC_DOCS_BUILD: '1'
+        run: npm run build:static-docs
