@@ -17,21 +17,29 @@ Documentation search uses Fumadocs' built-in ZBSearch engine and remains fully
 static. No Algolia account, search API, Cloud Function, or Edge Function is
 required.
 
-The search build is intentionally tiered so the browser does not have to download
-the full corpus as the documentation grows:
+The search layout is designed so query cost does not grow linearly with the full
+document corpus:
 
-1. `/search-index.json` is a very small root manifest.
-2. A lightweight global core index contains page titles, descriptions, and a
-   bounded heading summary, so useful page results can appear first.
-3. The root manifest points to content-addressed category router files (for
-   example Math, 408, Politics). A normal query loads only the current or most
-   likely categories.
-4. Each category router contains compact Bloom-filter routing metadata for its
-   full-text shards. The browser normally loads only a few body shards that are
-   likely to contain the query.
-5. If the lightweight results cannot identify a category, search progressively
-   expands to more category routers instead of downloading the entire corpus at
-   once.
+1. `/search-index.json` is the only stable search URL. It contains a bounded
+   Bloom-filter summary for each top-level documentation category and points to
+   content-addressed category router files.
+2. The browser scores those tiny category summaries using the current query and
+   current documentation location. It normally loads only the most likely one or
+   two category routers first.
+3. Each category router contains Bloom routing metadata for two independent
+   ZBSearch tiers: lightweight `core` shards (page title, description, bounded
+   heading summary) and full-text `body` shards.
+4. The browser loads a small routed core batch first so page-level results appear
+   quickly, then a small routed body batch for exact heading/full-text matches.
+5. If there are not enough results, search expands progressively. A hard per-query
+   budget caps category routers, core shards, and body shards, so even a very
+   large future category cannot force the browser to download the whole index.
+
+Both core and body storage are automatically sharded. This matters at large
+scale: even the lightweight page index is never treated as one global file that
+must be downloaded in full. Corpus growth primarily creates more immutable
+static shards rather than proportionally increasing every user's first-search
+payload.
 
 Body indexes remain section-aware, so results can link directly to matching
 heading anchors. Very long sections are split into bounded chunks behind the same
@@ -48,8 +56,8 @@ Sharding is automatic rather than fixed. Pages are grouped by documentation
 category/subtree, then stable content-size partitions are created around a target
 search payload. Any exported ZBSearch shard that still grows beyond the soft
 limit is split again automatically. Generated core, router, and body files use
-content hashes in their filenames, which lets unchanged search files keep stable
-cache identities across deployments.
+content hashes in their filenames, which lets unchanged files keep stable browser
+and CDN cache identities across deployments.
 
 `npm run search:build` generates the same hierarchical search layout in `public/`
 for local development. `npm run build:static-docs` generates it directly in the
