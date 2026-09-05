@@ -9,7 +9,7 @@ export const source = loader({
   source: docs.toFumadocsSource(),
   plugins: ({ typedPlugin }) => [
     typedPlugin({
-      name: 'concise-math-question-type-sidebar',
+      name: 'study-module-page-tree',
       transformPageTree: {
         file(node) {
           if (
@@ -20,6 +20,35 @@ export const source = loader({
           ) {
             node.name = node.name.replace(conciseMathModuleTitle, '模块$1：$2');
           }
+          return node;
+        },
+        root(node) {
+          const mathRoot = node.children.find(
+            (child) =>
+              child.type === 'folder' &&
+              child.root === true &&
+              child.index?.url === '/docs/math',
+          );
+          const questionTypesIndex = node.children.findIndex(
+            (child) =>
+              child.type === 'folder' &&
+              child.index?.url === '/docs/math-question-types',
+          );
+
+          if (
+            !mathRoot ||
+            mathRoot.type !== 'folder' ||
+            questionTypesIndex === -1
+          ) {
+            return node;
+          }
+
+          const [questionTypes] = node.children.splice(questionTypesIndex, 1);
+          if (questionTypes?.type === 'folder') {
+            questionTypes.name = '真题题型总结';
+            mathRoot.children.push(questionTypes);
+          }
+
           return node;
         },
       },
