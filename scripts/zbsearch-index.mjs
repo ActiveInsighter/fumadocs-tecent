@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { frontmatter } from 'fumadocs-core/content/md/frontmatter';
 import { remarkMdxMermaid, structure } from 'fumadocs-core/mdx-plugins';
-import { initAdvancedSearch } from 'fumadocs-core/search/server';
+import { initSimpleSearch } from 'fumadocs-core/search/server';
 import remarkMath from 'remark-math';
 import remarkMdx from 'remark-mdx';
 import {
@@ -75,6 +75,52 @@ export function buildZBSearchSourceIndex(relativePath, content) {
   };
 }
 
+/**
+ * ZBSearch's advanced Fumadocs index creates one search document for every
+ * paragraph/table cell. On this content set that expands to >100 MiB. For the
+ * static CDN build we instead keep one simple ZBSearch document per section:
+ * all content under the same heading is concatenated into one searchable
+ * record. Search still lands on the heading anchor, while the number of
+ * records and repeated metadata is drastically smaller.
+ */
+export function buildZBSearchSectionIndexes(page) {
+  const sections = new Map();
+  const rootContent = [];
+
+  for (const entry of page.structuredData.contents) {
+    if (entry.heading) {
+      const list = sections.get(entry.heading) ?? [];
+      list.push(entry.content);
+      sections.set(entry.heading, list);
+    } else {
+      rootContent.push(entry.content);
+    }
+  }
+
+  const result = [
+    {
+      title: page.title,
+      description: page.description,
+      breadcrumbs: [],
+      content: [page.description, ...rootContent].filter(Boolean).join('\n\n'),
+      keywords: page.title,
+      url: page.url,
+    },
+  ];
+
+  for (const heading of page.structuredData.headings) {
+    result.push({
+      title: heading.content,
+      breadcrumbs: [page.title],
+      content: (sections.get(heading.id) ?? []).join('\n\n'),
+      keywords: page.title,
+      url: `${page.url}#${heading.id}`,
+    });
+  }
+
+  return result;
+}
+
 async function walkFiles(directory) {
   const files = [];
 
@@ -112,8 +158,9 @@ export async function buildZBSearchIndex({
     throw new Error('buildZBSearchIndex requires an outputFile.');
   }
 
-  const indexes = await collectZBSearchSourceIndexes(contentRoot);
-  const server = initAdvancedSearch({ indexes });
+  const pages = await collectZBSearchSourceIndexes(contentRoot);
+  const indexes = pages.flatMap(buildZBSearchSectionIndexes);
+  const server = initSimpleSearch({ indexes });
   const exported = await server.export();
   const json = JSON.stringify(exported);
   const bytes = Buffer.byteLength(json);
@@ -128,6 +175,10 @@ export async function buildZBSearchIndex({
     },
   }).byteLength;
 
+  console.log(
+    `[zbsearch] ${pages.length} pages -> ${indexes.length} section records; raw ${(bytes / 1024 / 1024).toFixed(2)} MiB.`,
+  );
+
   if (bytes >= ZBSEARCH_MAX_BYTES) {
     throw new Error(
       `ZBSearch index is ${bytes} bytes, at or above the EdgeOne 25 MB single-file limit.`,
@@ -137,7 +188,7 @@ export async function buildZBSearchIndex({
   if (bytes >= ZBSEARCH_WARNING_BYTES) {
     console.warn(
       `[zbsearch] Warning: raw search index is ${(bytes / 1024 / 1024).toFixed(2)} MiB; ` +
-        'consider moving to a hosted search service before first-search load time becomes excessive.',
+        'consider sharding or a hosted search service before first-search load time becomes excessive.',
     );
   }
 
@@ -145,7 +196,8 @@ export async function buildZBSearchIndex({
   await writeFile(outputFile, json);
 
   return {
-    pages: indexes.length,
+    pages: pages.length,
+    records: indexes.length,
     bytes,
     gzipBytes,
     brotliBytes,
@@ -161,7 +213,7 @@ async function main() {
   const outputFile = path.resolve(process.argv[2] ?? 'public/search-index.json');
   const result = await buildZBSearchIndex({ outputFile });
 
-  console.log(`[zbsearch] Indexed ${result.pages} pages.`);
+  console.log(`[zbsearch] Indexed ${result.pages} pages into ${result.records} sections.`);
   console.log(`[zbsearch] Raw index: ${formatMiB(result.bytes)}.`);
   console.log(`[zbsearch] Gzip estimate: ${formatMiB(result.gzipBytes)}.`);
   console.log(`[zbsearch] Brotli estimate: ${formatMiB(result.brotliBytes)}.`);
