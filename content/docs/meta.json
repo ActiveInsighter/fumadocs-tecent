@@ -2,10 +2,10 @@
   "title": "考研学习",
   "description": "按政治、英语、数学与专业课四个模块组织的考研复习知识库。",
   "pages": [
-    "index",
     "politics",
     "english",
     "math",
+    "math-question-types",
     "408"
   ]
 }
