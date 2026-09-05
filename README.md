@@ -13,34 +13,57 @@ Open `http://localhost:3000/docs`.
 
 ## ZBSearch
 
-Documentation search uses Fumadocs' built-in ZBSearch engine in static mode.
-The production build generates a small `/search-index.json` manifest plus three
-static ZBSearch shards (`/search-index-0.json` through `/search-index-2.json`).
-The browser loads the manifest and shards on first search, then performs all
-queries locally. No Algolia account, API key, server-side search endpoint, Cloud
-Function, or Edge Function is required.
+Documentation search uses Fumadocs' built-in ZBSearch engine and remains fully
+static. No Algolia account, search API, Cloud Function, or Edge Function is
+required.
 
-To keep the index compact while preserving useful deep links, the build creates
-one ZBSearch record per page/heading section instead of one record per paragraph.
-Results can still point directly to the matching heading anchor. The three shards
-are deterministically distributed by page URL so adding a document does not
-reshuffle the entire search corpus.
+The search build is intentionally tiered so the browser does not have to download
+the full corpus as the documentation grows:
 
-The pure-static build keeps `remarkStructure` disabled in the main Fumadocs MDX
-pipeline for build performance. Search structure is generated independently by
-`scripts/zbsearch-index.mjs`, so enabling search does not undo that optimization.
+1. `/search-index.json` is a very small root manifest.
+2. A lightweight global core index contains page titles, descriptions, and a
+   bounded heading summary, so useful page results can appear first.
+3. The root manifest points to content-addressed category router files (for
+   example Math, 408, Politics). A normal query loads only the current or most
+   likely categories.
+4. Each category router contains compact Bloom-filter routing metadata for its
+   full-text shards. The browser normally loads only a few body shards that are
+   likely to contain the query.
+5. If the lightweight results cannot identify a category, search progressively
+   expands to more category routers instead of downloading the entire corpus at
+   once.
 
-`npm run build:static-docs` reports raw, gzip, and Brotli estimates for every
-shard and for the full index. Each shard warns at 15 MB and the build fails if any
-single shard reaches 25,000,000 bytes, matching EdgeOne's single-file limit.
+Body indexes remain section-aware, so results can link directly to matching
+heading anchors. Very long sections are split into bounded chunks behind the same
+anchor and duplicate URLs are merged in the UI.
+
+Before indexing, low-value search payload is removed: large LaTeX formula bodies,
+URLs, MDX syntax, and duplicate section text do not consume the same space as
+natural-language explanations. Fenced code blocks are already excluded by the
+Fumadocs structured-data extractor. Search structure is generated independently
+of the main MDX render pipeline, so the pure-static build can keep
+`remarkStructure` disabled for page-build performance.
+
+Sharding is automatic rather than fixed. Pages are grouped by documentation
+category/subtree, then stable content-size partitions are created around a target
+search payload. Any exported ZBSearch shard that still grows beyond the soft
+limit is split again automatically. Generated core, router, and body files use
+content hashes in their filenames, which lets unchanged search files keep stable
+cache identities across deployments.
+
+`npm run search:build` generates the same hierarchical search layout in `public/`
+for local development. `npm run build:static-docs` generates it directly in the
+EdgeOne deployment artifact and reports raw/gzip/Brotli sizes. The build has a
+10 MB soft split target, warns at 15 MB, and rejects any individual static search
+file at 25,000,000 bytes to stay below EdgeOne's single-file limit.
 
 ## Deployment
 
 Production documentation deployments run in GitHub Actions and are uploaded to
 Tencent EdgeOne Makers. The documentation package is a pure static CDN build:
 
-- HTML, JS, CSS, Markdown downloads, the search manifest, and all ZBSearch shards
-  are static files;
+- HTML, JS, CSS, Markdown downloads, the search manifest, category routers, and
+  ZBSearch indexes are static files;
 - documentation search runs in the browser with ZBSearch;
 - Cloud Functions: 0;
 - Edge Functions: 0.
