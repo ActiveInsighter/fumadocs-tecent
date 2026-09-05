@@ -7,7 +7,7 @@
   },
   "scripts": {
     "postinstall": "fumadocs-mdx",
-    "search:build": "node scripts/zbsearch-index.mjs public/search-index.json",
+    "search:build": "node scripts/build-search-index.mjs public/search-index.json",
     "dev": "npm run search:build && next dev",
     "build": "npm run search:build && next build",
     "build:static-docs": "node scripts/build-static-docs.mjs",
