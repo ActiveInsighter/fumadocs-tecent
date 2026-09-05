@@ -2,7 +2,9 @@
   "title": "数学真题题型总结",
   "pages": [
     "index",
-    "advanced-mathematics"
+    "advanced-mathematics",
+    "linear-algebra",
+    "probability-statistics"
   ],
   "defaultOpen": false
 }
