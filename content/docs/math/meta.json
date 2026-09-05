@@ -6,7 +6,8 @@
     "index",
     "advanced-mathematics",
     "linear-algebra",
-    "probability-statistics"
+    "probability-statistics",
+    "../math-question-types"
   ],
   "defaultOpen": true
 }
