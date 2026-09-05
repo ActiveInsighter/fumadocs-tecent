@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -27,10 +27,8 @@ jobs:
       - name: Install dependencies and generate Fumadocs source
         run: npm ci
 
-      - name: Run static documentation tests
-        run: npm test -- tests/static-docs-build.test.ts
+      - name: Verify generated module tree and static helpers
+        run: npm test -- tests/study-module-tree.test.ts tests/static-docs-build.test.ts
 
-      - name: Build complete pure-static documentation site
-        env:
-          STATIC_DOCS_BUILD: '1'
-        run: npm run build:static-docs
+      - name: Type-check application
+        run: npm run typecheck
