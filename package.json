@@ -10,7 +10,7 @@
     "search:build": "node scripts/build-search-index.mjs public/search-index.json",
     "dev": "npm run search:build && next dev",
     "build": "npm run search:build && next build",
-    "build:static-docs": "node scripts/build-static-docs.mjs",
+    "build:static-docs": "node scripts/build-static-docs.mjs && node scripts/write-docs-entry.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
