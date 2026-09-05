@@ -1,0 +1,59 @@
+/* Study-site refinements kept separate from the base Fumadocs theme. */
+
+/*
+ * `text-wrap: balance` deliberately makes multi-line headings similar in width,
+ * which can force an early break even when the first line still has room.
+ * Documentation headings should use normal greedy wrapping instead.
+ */
+#docs-body :where(h1, h2, h3, h4, h5, h6) {
+  text-wrap: wrap;
+}
+
+/*
+ * Keep wide tables inside the article column. The wrapper scrolls horizontally
+ * only when the table's intrinsic width exceeds the available width, matching
+ * the display-math behavior. The track always uses the page background.
+ */
+#docs-body :where(div):has(> table) {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--background) !important;
+  scrollbar-color: color-mix(in oklch, var(--foreground) 32%, var(--background))
+    var(--background);
+  scrollbar-width: thin;
+}
+
+#docs-body :where(div):has(> table) > table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  background: var(--background) !important;
+}
+
+#docs-body :where(div):has(> table)::-webkit-scrollbar {
+  height: 0.5rem;
+  background: var(--background);
+}
+
+#docs-body :where(div):has(> table)::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+#docs-body :where(div):has(> table)::-webkit-scrollbar-thumb {
+  border: 2px solid var(--background);
+  border-radius: 999px;
+  background-color: color-mix(
+    in oklch,
+    var(--foreground) 32%,
+    var(--background)
+  );
+}
+
+#docs-body :where(div):has(> table)::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(
+    in oklch,
+    var(--foreground) 44%,
+    var(--background)
+  );
+}

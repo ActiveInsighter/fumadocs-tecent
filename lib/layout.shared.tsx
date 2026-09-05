@@ -6,7 +6,7 @@ import type {
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: '考研政治知识点',
+      title: '考研学习',
     },
     githubUrl: 'https://github.com/ActiveInsighter/fumadocs-tecent',
   };
@@ -15,7 +15,7 @@ export function baseOptions(): BaseLayoutProps {
 export const linkItems: LinkItemType[] = [
   {
     type: 'main',
-    text: '知识点',
+    text: '学习',
     url: '/docs',
   },
   {

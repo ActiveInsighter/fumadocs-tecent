@@ -6,7 +6,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "postinstall": "fumadocs-mdx",
+    "postinstall": "node scripts/ensure-git-history.mjs && fumadocs-mdx",
     "search:build": "node scripts/build-search-index.mjs public/search-index.json",
     "dev": "npm run search:build && next dev",
     "build": "npm run search:build && next build",

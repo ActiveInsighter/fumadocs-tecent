@@ -1,5 +1,7 @@
 {
-  "title": "考研政治",
+  "title": "政治",
+  "description": "马原、毛中特、史纲、习思想与思修法基",
+  "root": true,
   "pages": [
     "index",
     "marxism-principles",

@@ -9,6 +9,7 @@ import {
   DocsPage,
   DocsTitle,
   MarkdownCopyButton,
+  PageLastUpdate,
   ViewOptionsPopover,
 } from 'fumadocs-ui/layouts/docs/page';
 
@@ -57,6 +58,7 @@ export default async function Page({ params }: PageParameters) {
           })}
         />
       </DocsBody>
+      {data.lastModified && <PageLastUpdate date={data.lastModified} />}
     </DocsPage>
   );
 }

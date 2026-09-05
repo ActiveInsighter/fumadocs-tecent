@@ -1,5 +1,7 @@
 {
-  "title": "408 计算机统考",
+  "title": "专业课",
+  "description": "408 计算机学科专业基础",
+  "root": true,
   "pages": [
     "index",
     "data-structures",

@@ -1,10 +1,13 @@
 {
-  "title": "考研数学",
+  "title": "数学",
+  "description": "高等数学、线性代数与概率论及数理统计",
+  "root": true,
   "pages": [
     "index",
     "advanced-mathematics",
     "linear-algebra",
-    "probability-statistics"
+    "probability-statistics",
+    "[真题题型总结](/docs/math-question-types)"
   ],
   "defaultOpen": true
 }
