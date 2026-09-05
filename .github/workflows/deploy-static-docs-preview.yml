@@ -85,6 +85,10 @@ jobs:
           npm run postinstall
           echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Run static docs tests
+        shell: bash
+        run: npm test -- tests/static-docs-build.test.ts
+
       - name: Restore Next/Turbopack build cache
         uses: actions/cache@v5
         with:
@@ -142,11 +146,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s .static-docs/search-index.json
+          manifest='.static-docs/search-index.json'
+          test -s "${manifest}"
+          [[ "$(jq -r '.engine' "${manifest}")" == 'zbsearch' ]]
+          [[ "$(jq -r '.mode' "${manifest}")" == 'simple-section-shards' ]]
+
+          shard_count="$(jq '.shards | length' "${manifest}")"
+          [[ "${shard_count}" == '3' ]] || {
+            echo "::error::Expected 3 ZBSearch shards, found ${shard_count}."
+            exit 1
+          }
+
+          search_index_bytes=0
+          while IFS= read -r shard_url; do
+            shard_path=".static-docs${shard_url}"
+            test -s "${shard_path}" || {
+              echo "::error::Missing ZBSearch shard: ${shard_path}"
+              exit 1
+            }
+            shard_bytes="$(stat -c '%s' "${shard_path}")"
+            search_index_bytes="$((search_index_bytes + shard_bytes))"
+            echo "- ${shard_path}: ${shard_bytes} bytes" >> "${GITHUB_STEP_SUMMARY}"
+          done < <(jq -r '.shards[]' "${manifest}")
 
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l)"
-          search_index_bytes="$(stat -c '%s' .static-docs/search-index.json)"
           largest="$(
             find .static-docs -type f -printf '%s %p\n' \
               | awk '{ size = $1; $1 = ""; sub(/^ /, ""); if (size > max) { max = size; path = $0 } } END { print max, path }'
@@ -157,13 +181,9 @@ jobs:
           {
             echo "- Package size: $((package_bytes / 1024 / 1024)) MiB"
             echo "- File count: ${file_count}"
-            echo "- ZBSearch index: ${search_index_bytes} bytes"
+            echo "- ZBSearch shards: ${shard_count}; raw total ${search_index_bytes} bytes"
             echo "- Largest file: ${largest_file_path} ($((largest_file_size / 1024 / 1024)) MiB)"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-          if (( search_index_bytes >= 15000000 )); then
-            echo "::warning::ZBSearch raw index is ${search_index_bytes} bytes; review first-search download performance."
-          fi
 
           if (( largest_file_size >= 25000000 )); then
             echo '::error::A static file is at or above the EdgeOne 25 MB single-file limit.'
@@ -224,9 +244,12 @@ jobs:
             '/' \
             '/docs/' \
             '/search-index.json' \
+            '/search-index-0.json' \
+            '/search-index-1.json' \
+            '/search-index-2.json' \
             '/docs/math/advanced-mathematics/01-limits-continuity/' \
             '/docs/math/advanced-mathematics/01-limits-continuity.md' \
-            | xargs -P 5 -I '{}' bash -c '
+            | xargs -P 8 -I '{}' bash -c '
                 status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w "%{http_code}" "${base_url}$1?${preview_query}")"
                 echo "route $1 -> ${status}"
                 [[ "${status}" == "200" ]]
