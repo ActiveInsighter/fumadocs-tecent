@@ -1,6 +1,7 @@
 import './global.css';
 import 'katex/dist/katex.css';
 import './surface-overrides.css';
+import './study-overrides.css';
 import { SearchProvider } from '@/components/search-provider';
 import type { Metadata } from 'next';
 import { Inter, Source_Serif_4 } from 'next/font/google';
@@ -20,10 +21,10 @@ const sourceSerif4 = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: {
-    default: '考研政治知识点',
-    template: '%s | 考研政治知识点',
+    default: '考研学习',
+    template: '%s | 考研学习',
   },
-  description: '面向考研复习的政治知识点系统讲义，按课程和章节整理。',
+  description: '按政治、英语、数学与专业课组织的考研学习知识库。',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

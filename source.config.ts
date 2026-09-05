@@ -1,6 +1,7 @@
 import { remarkMdxMermaid, remarkStructure } from 'fumadocs-core/mdx-plugins';
 import { pageSchema } from 'fumadocs-core/source/schema';
 import { defineCollections, defineConfig, defineDocs } from 'fumadocs-mdx/config';
+import lastModified from 'fumadocs-mdx/plugins/last-modified';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import { z } from 'zod';
@@ -36,6 +37,7 @@ export const blog = defineCollections({
 });
 
 export default defineConfig({
+  plugins: [lastModified()],
   mdxOptions: {
     // The pure-static CDN build does not consume Fumadocs' generated structure
     // index, so skip that traversal there.
