@@ -18,27 +18,38 @@ import { useEffect, useRef, useState } from 'react';
 
 interface SearchFile {
   url: string;
-  records: number;
+  records?: number;
   bytes: number;
   gzipBytes: number;
   brotliBytes: number;
 }
 
+interface BloomRoute {
+  bits: number;
+  hashes: number;
+  tokens: number;
+  data: string;
+}
+
 interface RoutedSearchShard extends SearchFile {
+  records: number;
   category: string;
   group: string;
-  route: {
-    bits: number;
-    hashes: number;
-    tokens: number;
-    data: string;
-  };
+  route: BloomRoute;
+}
+
+interface SearchCategory {
+  id: string;
+  groups: string[];
+  shards: number;
+  records: number;
+  router: SearchFile;
 }
 
 interface SearchManifest {
-  version: 2;
+  version: 3;
   engine: 'zbsearch';
-  mode: 'tiered-bloom-shards';
+  mode: 'tiered-category-router-shards';
   routing: {
     algorithm: 'bloom-fnv-v1';
     tokenizer: 'cjk-bigram-latin-trigram-v1';
@@ -48,17 +59,27 @@ interface SearchManifest {
     shards: SearchFile[];
   };
   body: {
-    shards: RoutedSearchShard[];
+    categories: SearchCategory[];
   };
 }
 
+interface CategoryRouter {
+  version: 1;
+  engine: 'zbsearch';
+  category: string;
+  shards: RoutedSearchShard[];
+}
+
 const SEARCH_DELAY_MS = 80;
+const CATEGORY_BATCH = 2;
 const INITIAL_BODY_BATCH = 3;
+const MAX_CATEGORY_ROUTERS_PER_QUERY = 8;
 const MAX_BODY_SHARDS_PER_QUERY = 9;
 const BODY_RESULT_TARGET = 18;
 const RESULT_LIMIT = 36;
 
 let manifestPromise: Promise<SearchManifest> | undefined;
+const routerPromiseCache = new Map<string, Promise<CategoryRouter>>();
 const clientCache = new Map<string, ReturnType<typeof staticClient>>();
 const bloomBytesCache = new Map<string, Uint8Array>();
 
@@ -76,20 +97,22 @@ function getStaticClient(url: string, limit: number) {
 }
 
 async function loadManifest() {
-  const response = await fetch('/search-index.json', { cache: 'force-cache' });
+  // The manifest has a stable URL and points to content-addressed files, so it
+  // must be revalidated after a deployment instead of being force-cached.
+  const response = await fetch('/search-index.json', { cache: 'no-cache' });
   if (!response.ok) {
     throw new Error(`Failed to load ZBSearch manifest: HTTP ${response.status}`);
   }
 
   const manifest = (await response.json()) as SearchManifest;
   if (
-    manifest.version !== 2 ||
+    manifest.version !== 3 ||
     manifest.engine !== 'zbsearch' ||
-    manifest.mode !== 'tiered-bloom-shards' ||
+    manifest.mode !== 'tiered-category-router-shards' ||
     !Array.isArray(manifest.core?.shards) ||
     manifest.core.shards.length === 0 ||
-    !Array.isArray(manifest.body?.shards) ||
-    manifest.body.shards.length === 0
+    !Array.isArray(manifest.body?.categories) ||
+    manifest.body.categories.length === 0
   ) {
     throw new Error('Invalid ZBSearch manifest.');
   }
@@ -99,6 +122,33 @@ async function loadManifest() {
 function getManifest() {
   manifestPromise ??= loadManifest();
   return manifestPromise;
+}
+
+async function loadCategoryRouter(category: SearchCategory) {
+  const response = await fetch(category.router.url, { cache: 'force-cache' });
+  if (!response.ok) {
+    throw new Error(`Failed to load search router ${category.id}: HTTP ${response.status}`);
+  }
+
+  const router = (await response.json()) as CategoryRouter;
+  if (
+    router.version !== 1 ||
+    router.engine !== 'zbsearch' ||
+    router.category !== category.id ||
+    !Array.isArray(router.shards)
+  ) {
+    throw new Error(`Invalid search router for ${category.id}.`);
+  }
+  return router;
+}
+
+function getCategoryRouter(category: SearchCategory) {
+  let promise = routerPromiseCache.get(category.router.url);
+  if (!promise) {
+    promise = loadCategoryRouter(category);
+    routerPromiseCache.set(category.router.url, promise);
+  }
+  return promise;
 }
 
 function hash32(value: string, seed = 0x811c9dc5) {
@@ -120,7 +170,7 @@ function hash32Secondary(value: string) {
 }
 
 function routingTokens(value: string) {
-  const normalized = value.normalize('NFKC').toLocaleLowerCase('und');
+  const normalized = value.normalize('NFKC').toLowerCase();
   const tokens = new Set<string>();
   const words = normalized.match(/\p{Script=Han}+|[\p{L}\p{N}]+/gu) ?? [];
 
@@ -187,7 +237,9 @@ function urlScope(url: string) {
 }
 
 function currentScope() {
-  return typeof window === 'undefined' ? { category: 'root', group: 'root' } : urlScope(window.location.pathname);
+  return typeof window === 'undefined'
+    ? { category: 'root', group: 'root' }
+    : urlScope(window.location.pathname);
 }
 
 function mergeRoundRobin(groups: SortedResult[][], limit = RESULT_LIMIT) {
@@ -214,41 +266,66 @@ async function searchFiles(files: SearchFile[], query: string, limitPerFile: num
   return mergeRoundRobin(groups, RESULT_LIMIT);
 }
 
+function coreCategories(results: SortedResult[]) {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const result of results.slice(0, 12)) {
+    const category = urlScope(result.url).category;
+    if (seen.has(category)) continue;
+    seen.add(category);
+    ordered.push(category);
+  }
+  return ordered;
+}
+
+function rankCategories(manifest: SearchManifest, coreResults: SortedResult[]) {
+  const scope = currentScope();
+  const inferred = coreCategories(coreResults);
+  const inferredRank = new Map(inferred.map((category, index) => [category, index]));
+
+  return [...manifest.body.categories].sort((left, right) => {
+    const score = (category: SearchCategory) => {
+      let value = 0;
+      if (category.id === scope.category && scope.category !== 'root') value += 100;
+      const rank = inferredRank.get(category.id);
+      if (rank !== undefined) value += 80 - rank * 5;
+      if (category.id === 'root') value -= 5;
+      value -= Math.min(category.router.brotliBytes / 1_000_000, 4);
+      return value;
+    };
+    return score(right) - score(left);
+  });
+}
+
 function rankBodyShards(
-  manifest: SearchManifest,
+  shards: RoutedSearchShard[],
   query: string,
+  minScore: number,
   coreResults: SortedResult[],
 ) {
   const tokens = routingTokens(query);
   const scope = currentScope();
-  const coreCategories = new Set(coreResults.slice(0, 10).map((result) => urlScope(result.url).category));
+  const inferred = new Set(coreCategories(coreResults));
 
-  return manifest.body.shards
+  return shards
     .map((shard) => {
       const routeScore = bloomScore(shard, tokens);
       let score = routeScore * 2;
       if (shard.group === scope.group) score += 0.8;
       else if (shard.category === scope.category) score += 0.45;
-      if (coreCategories.has(shard.category)) score += 0.3;
+      if (inferred.has(shard.category)) score += 0.3;
       score -= Math.min(shard.brotliBytes / 4_000_000, 0.2);
-
-      return {
-        shard,
-        routeScore,
-        score,
-        contextual:
-          shard.group === scope.group ||
-          shard.category === scope.category ||
-          coreCategories.has(shard.category),
-      };
+      return { shard, routeScore, score };
     })
     .filter((item) => {
-      if (tokens.length === 0) return item.contextual;
-      return item.routeScore > 0 || item.contextual;
+      if (tokens.length === 0) {
+        return item.shard.category === scope.category || inferred.has(item.shard.category);
+      }
+      return item.routeScore > 0 || item.shard.category === scope.category || inferred.has(item.shard.category);
     })
     .sort((left, right) => {
-      const leftStrong = left.routeScore >= manifest.routing.minScore ? 1 : 0;
-      const rightStrong = right.routeScore >= manifest.routing.minScore ? 1 : 0;
+      const leftStrong = left.routeScore >= minScore ? 1 : 0;
+      const rightStrong = right.routeScore >= minScore ? 1 : 0;
       if (leftStrong !== rightStrong) return rightStrong - leftStrong;
       if (left.score !== right.score) return right.score - left.score;
       return left.shard.brotliBytes - right.shard.brotliBytes;
@@ -257,8 +334,6 @@ function rankBodyShards(
 }
 
 function mergeCoreAndBody(core: SortedResult[], body: SortedResult[]) {
-  // Body hits point at exact headings, while core hits give an immediate page
-  // result. Interleaving keeps both useful without letting either tier dominate.
   return mergeRoundRobin([body, core], RESULT_LIMIT);
 }
 
@@ -289,26 +364,52 @@ export function ShardedSearchDialog(props: SharedProps) {
           if (requestRef.current !== requestId) return;
           setItems(coreResults.length > 0 ? coreResults : null);
 
-          const ranked = rankBodyShards(manifest, query, coreResults);
-          if (ranked.length === 0) {
-            setIsLoading(false);
-            return;
-          }
-
+          const categoryQueue = rankCategories(manifest, coreResults);
+          const candidateShards: RoutedSearchShard[] = [];
+          const candidateUrls = new Set<string>();
+          const searchedUrls = new Set<string>();
           let bodyResults: SortedResult[] = [];
-          let loaded = 0;
+          let categoryOffset = 0;
 
           while (
-            loaded < ranked.length &&
-            loaded < MAX_BODY_SHARDS_PER_QUERY &&
+            categoryOffset < categoryQueue.length &&
+            categoryOffset < MAX_CATEGORY_ROUTERS_PER_QUERY &&
+            searchedUrls.size < MAX_BODY_SHARDS_PER_QUERY &&
             bodyResults.length < BODY_RESULT_TARGET
           ) {
-            const batch = ranked.slice(loaded, loaded + INITIAL_BODY_BATCH);
-            const batchResults = await searchFiles(batch, query, 10);
+            const categoryBatch = categoryQueue.slice(
+              categoryOffset,
+              categoryOffset + CATEGORY_BATCH,
+            );
+            categoryOffset += categoryBatch.length;
+
+            const routers = await Promise.all(categoryBatch.map(getCategoryRouter));
             if (requestRef.current !== requestId) return;
 
+            for (const router of routers) {
+              const ranked = rankBodyShards(
+                router.shards,
+                query,
+                manifest.routing.minScore,
+                coreResults,
+              );
+              for (const shard of ranked) {
+                if (candidateUrls.has(shard.url)) continue;
+                candidateUrls.add(shard.url);
+                candidateShards.push(shard);
+              }
+            }
+
+            const nextShards = candidateShards
+              .filter((shard) => !searchedUrls.has(shard.url))
+              .slice(0, Math.min(INITIAL_BODY_BATCH, MAX_BODY_SHARDS_PER_QUERY - searchedUrls.size));
+
+            if (nextShards.length === 0) continue;
+            nextShards.forEach((shard) => searchedUrls.add(shard.url));
+
+            const batchResults = await searchFiles(nextShards, query, 10);
+            if (requestRef.current !== requestId) return;
             bodyResults = mergeRoundRobin([bodyResults, batchResults], RESULT_LIMIT);
-            loaded += batch.length;
             setItems(mergeCoreAndBody(coreResults, bodyResults));
           }
 
