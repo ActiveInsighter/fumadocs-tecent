@@ -16,7 +16,7 @@ export const linkItems: LinkItemType[] = [
   {
     type: 'main',
     text: '学习',
-    url: '/docs',
+    url: '/docs/politics',
   },
   {
     type: 'main',
