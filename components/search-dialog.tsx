@@ -72,7 +72,7 @@ interface CategoryRouter {
 
 const SEARCH_DELAY_MS = 80;
 const CATEGORY_BATCH = 2;
-const INITIAL_BODY_BATCH = 3;
+const BODY_BATCH = 3;
 const MAX_CATEGORY_ROUTERS_PER_QUERY = 8;
 const MAX_BODY_SHARDS_PER_QUERY = 9;
 const BODY_RESULT_TARGET = 18;
@@ -337,6 +337,20 @@ function mergeCoreAndBody(core: SortedResult[], body: SortedResult[]) {
   return mergeRoundRobin([body, core], RESULT_LIMIT);
 }
 
+function takeNextBodyBatch(
+  candidates: RoutedSearchShard[],
+  searchedUrls: Set<string>,
+) {
+  const remainingBudget = MAX_BODY_SHARDS_PER_QUERY - searchedUrls.size;
+  if (remainingBudget <= 0) return [];
+
+  const batch = candidates
+    .filter((shard) => !searchedUrls.has(shard.url))
+    .slice(0, Math.min(BODY_BATCH, remainingBudget));
+  batch.forEach((shard) => searchedUrls.add(shard.url));
+  return batch;
+}
+
 export function ShardedSearchDialog(props: SharedProps) {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<SortedResult[] | null>(null);
@@ -371,6 +385,17 @@ export function ShardedSearchDialog(props: SharedProps) {
           let bodyResults: SortedResult[] = [];
           let categoryOffset = 0;
 
+          const searchNextCandidateBatch = async () => {
+            const nextShards = takeNextBodyBatch(candidateShards, searchedUrls);
+            if (nextShards.length === 0) return false;
+
+            const batchResults = await searchFiles(nextShards, query, 10);
+            if (requestRef.current !== requestId) return false;
+            bodyResults = mergeRoundRobin([bodyResults, batchResults], RESULT_LIMIT);
+            setItems(mergeCoreAndBody(coreResults, bodyResults));
+            return true;
+          };
+
           while (
             categoryOffset < categoryQueue.length &&
             categoryOffset < MAX_CATEGORY_ROUTERS_PER_QUERY &&
@@ -400,17 +425,22 @@ export function ShardedSearchDialog(props: SharedProps) {
               }
             }
 
-            const nextShards = candidateShards
-              .filter((shard) => !searchedUrls.has(shard.url))
-              .slice(0, Math.min(INITIAL_BODY_BATCH, MAX_BODY_SHARDS_PER_QUERY - searchedUrls.size));
-
-            if (nextShards.length === 0) continue;
-            nextShards.forEach((shard) => searchedUrls.add(shard.url));
-
-            const batchResults = await searchFiles(nextShards, query, 10);
+            await searchNextCandidateBatch();
             if (requestRef.current !== requestId) return;
-            bodyResults = mergeRoundRobin([bodyResults, batchResults], RESULT_LIMIT);
-            setItems(mergeCoreAndBody(coreResults, bodyResults));
+          }
+
+          // A single future category may itself contain dozens of shards. If
+          // its first routed batch did not produce enough hits, progressively
+          // consume only the remaining highest-ranked candidates. The hard
+          // shard budget keeps network/memory work bounded regardless of total
+          // corpus size.
+          while (
+            searchedUrls.size < MAX_BODY_SHARDS_PER_QUERY &&
+            bodyResults.length < BODY_RESULT_TARGET
+          ) {
+            const searched = await searchNextCandidateBatch();
+            if (requestRef.current !== requestId) return;
+            if (!searched) break;
           }
 
           setIsLoading(false);
