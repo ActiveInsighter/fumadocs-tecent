@@ -7,6 +7,7 @@ import {
   buildStaticMarkdownDocument,
   isStaticDocSourceFile,
 } from './static-docs-markdown.mjs';
+import { buildZBSearchIndex } from './zbsearch-index.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
@@ -205,6 +206,10 @@ async function summarizeOutput(outputRoot) {
   };
 }
 
+function formatMiB(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
+
 async function main() {
   const stageRoot = staticStageRoot;
 
@@ -220,17 +225,28 @@ async function main() {
 
     await rm(staticOutputRoot, { recursive: true, force: true });
     await cp(path.join(stageRoot, 'out'), staticOutputRoot, { recursive: true });
+
+    const searchIndex = await buildZBSearchIndex({
+      contentRoot: path.join(projectRoot, 'content', 'docs'),
+      outputFile: path.join(staticOutputRoot, 'search-index.json'),
+    });
     const markdownCount = await generateStaticMarkdownRoutes(staticOutputRoot);
     const summary = await summarizeOutput(staticOutputRoot);
 
     console.log(
-      `[static-docs] Published ${summary.files} static files (${(summary.bytes / 1024 / 1024).toFixed(2)} MiB).`,
+      `[static-docs] Published ${summary.files} static files (${formatMiB(summary.bytes)}).`,
     );
     console.log(`[static-docs] Generated ${markdownCount} direct markdown routes.`);
     console.log(
-      `[static-docs] Largest file: ${(
-        summary.largestFile.size / 1024 / 1024
-      ).toFixed(2)} MiB ${path.relative(projectRoot, summary.largestFile.path)}`,
+      `[static-docs] ZBSearch: ${searchIndex.pages} pages; raw ${formatMiB(
+        searchIndex.bytes,
+      )}; gzip ${formatMiB(searchIndex.gzipBytes)}; brotli ${formatMiB(searchIndex.brotliBytes)}.`,
+    );
+    console.log(
+      `[static-docs] Largest file: ${formatMiB(summary.largestFile.size)} ${path.relative(
+        projectRoot,
+        summary.largestFile.path,
+      )}`,
     );
   } finally {
     // Leave only `.next/cache` behind for actions/cache's post-job save step.
