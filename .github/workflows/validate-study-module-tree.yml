@@ -24,11 +24,32 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Install dependencies and generate Fumadocs source
-        run: npm ci
+      - name: Restore project dependency tree
+        id: node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node22-modules-v1-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies on cache miss
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Refresh Fumadocs generated source
+        run: npm run postinstall
 
       - name: Verify module metadata and static helpers
         run: npm test -- tests/study-module-tree.test.ts tests/static-docs-build.test.ts
+
+      - name: Restore production Turbopack build cache
+        uses: actions/cache@v5
+        with:
+          path: .static-docs-stage/.next/cache
+          key: ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-
+            ${{ runner.os }}-static-docs-turbopack-v3-
 
       - name: Build complete pure-static documentation site
         env:
