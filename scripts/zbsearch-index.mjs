@@ -117,10 +117,14 @@ export async function buildZBSearchIndex({
   const exported = await server.export();
   const json = JSON.stringify(exported);
   const bytes = Buffer.byteLength(json);
-  const gzipBytes = gzipSync(json, { level: 9 }).byteLength;
+
+  // These are observability estimates only. Moderate compression levels keep
+  // the measurement cheap enough to run on every build while remaining close
+  // to CDN transfer sizes.
+  const gzipBytes = gzipSync(json, { level: 6 }).byteLength;
   const brotliBytes = brotliCompressSync(json, {
     params: {
-      [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+      [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
     },
   }).byteLength;
 
