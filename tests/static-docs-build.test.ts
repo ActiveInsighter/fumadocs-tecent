@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
-// This no-op test comment intentionally triggers a warm-cache deployment measurement.
 // @ts-expect-error The static build helpers are intentionally Node.js ESM scripts.
 import { getStaticDocsConfig, shouldIncludeInStaticDocsProject } from '../scripts/static-docs-config.mjs';
 // @ts-expect-error The static build helpers are intentionally Node.js ESM scripts.
 import { getStaticMarkdownOutputPath, renderStaticMarkdown } from '../scripts/static-docs-markdown.mjs';
+// @ts-expect-error The static search helpers are intentionally Node.js ESM scripts.
+import {
+  buildSearchRoutingTokens,
+  buildZBSearchSectionIndexes,
+  buildZBSearchSourceIndex,
+  getSearchScope,
+  sanitizeSearchText,
+  ZBSEARCH_MAX_BYTES,
+  ZBSEARCH_MAX_SECTION_CHARS,
+  ZBSEARCH_SOFT_MAX_BYTES,
+  ZBSEARCH_WARNING_BYTES,
+} from '../scripts/zbsearch-index.mjs';
 
 describe('static docs build', () => {
   it('uses a pure static export with Turbopack build caching enabled', () => {
@@ -71,5 +82,99 @@ describe('static docs build', () => {
     expect(markdown).toContain('import { useState } from "react";');
     expect(markdown).not.toContain('./gone');
     expect(markdown).toContain('Tail');
+  });
+
+  it('builds section-aware ZBSearch source records without enabling remarkStructure globally', () => {
+    const index = buildZBSearchSourceIndex(
+      'math/example.mdx',
+      [
+        '---',
+        'title: "示例章节"',
+        'description: "用于测试静态搜索"',
+        '---',
+        '',
+        '# 一阶标题',
+        '',
+        '矩阵相似对角化需要足够多的线性无关特征向量。',
+        '',
+        '## 二阶标题',
+        '',
+        '这里继续解释特征值与特征向量。',
+      ].join('\n'),
+    );
+
+    expect(index.id).toBe('/docs/math/example');
+    expect(index.url).toBe('/docs/math/example');
+    expect(index.title).toBe('示例章节');
+    expect(index.description).toBe('用于测试静态搜索');
+    expect(index.category).toBe('math');
+    expect(index.group).toBe('math/example');
+    expect(index.structuredData.headings.length).toBeGreaterThan(0);
+    expect(index.structuredData.contents.some((item) => item.content.includes('相似对角化'))).toBe(true);
+  });
+
+  it('strips low-value LaTeX while retaining natural-language search terms', () => {
+    const text = sanitizeSearchText(
+      '重要极限 $$\\lim_{x\\to 0} \\frac{\\sin x}{x}=1$$ 可用夹逼准则证明，并参考 https://example.com。',
+    );
+
+    expect(text).toContain('重要极限');
+    expect(text).toContain('夹逼准则');
+    expect(text).not.toContain('\\frac');
+    expect(text).not.toContain('example.com');
+  });
+
+  it('builds deterministic routing tokens for Chinese and typo-tolerant Latin routing', () => {
+    const chinese = buildSearchRoutingTokens('特征值');
+    expect(chinese).toContain('c2:特征');
+    expect(chinese).toContain('c2:征值');
+
+    const latin = buildSearchRoutingTokens('pipeline');
+    expect(latin).toContain('w:pipeline');
+    expect(latin).toContain('g:pip');
+    expect(latin).toContain('g:ine');
+  });
+
+  it('derives stable category and group scopes from documentation paths', () => {
+    expect(getSearchScope('index.md')).toEqual({ category: 'root', group: 'root' });
+    expect(getSearchScope('408/computer-networks/01-network.md')).toEqual({
+      category: '408',
+      group: '408/computer-networks',
+    });
+    expect(getSearchScope('math/advanced-mathematics/index.mdx')).toEqual({
+      category: 'math',
+      group: 'math/advanced-mathematics',
+    });
+  });
+
+  it('chunks oversized section text behind the same heading URL', () => {
+    const page = buildZBSearchSourceIndex(
+      'math/large.mdx',
+      [
+        '---',
+        'title: "长章节"',
+        '---',
+        '',
+        '## 很长的正文',
+        '',
+        `矩阵${'特征值与特征向量'.repeat(ZBSEARCH_MAX_SECTION_CHARS)}`,
+      ].join('\n'),
+    );
+    const records = buildZBSearchSectionIndexes(page);
+    const headingRecords = records.filter((record) => record.url.includes('#'));
+
+    expect(headingRecords.length).toBeGreaterThan(1);
+    expect(new Set(headingRecords.map((record) => record.url)).size).toBe(1);
+    expect(Math.max(...headingRecords.map((record) => Array.from(record.content).length))).toBeLessThanOrEqual(
+      ZBSEARCH_MAX_SECTION_CHARS,
+    );
+  });
+
+  it('keeps automatic shard guardrails safely below the EdgeOne single-file limit', () => {
+    expect(ZBSEARCH_SOFT_MAX_BYTES).toBe(10_000_000);
+    expect(ZBSEARCH_WARNING_BYTES).toBe(15_000_000);
+    expect(ZBSEARCH_MAX_BYTES).toBe(25_000_000);
+    expect(ZBSEARCH_SOFT_MAX_BYTES).toBeLessThan(ZBSEARCH_WARNING_BYTES);
+    expect(ZBSEARCH_WARNING_BYTES).toBeLessThan(ZBSEARCH_MAX_BYTES);
   });
 });

@@ -6,14 +6,18 @@ on:
     branches:
       - codex/static-docs-cdn
       - codex/static-build-performance
+      - codex/zbsearch-static
     paths:
       - 'content/docs/**'
       - 'app/**'
       - 'components/**'
       - 'lib/**'
       - 'scripts/build-static-docs.mjs'
+      - 'scripts/build-search-index.mjs'
+      - 'scripts/search-manifest.mjs'
       - 'scripts/static-docs-config.mjs'
       - 'scripts/static-docs-markdown.mjs'
+      - 'scripts/zbsearch-index.mjs'
       - 'scripts/static-root-layout.tsx'
       - 'next.config.static.mjs'
       - 'source.config.ts'
@@ -83,14 +87,19 @@ jobs:
           npm run postinstall
           echo "- node_modules cache hit: ${{ steps.node-modules-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Run static docs tests
+        shell: bash
+        run: npm test -- tests/static-docs-build.test.ts
+
       - name: Restore Next/Turbopack build cache
         uses: actions/cache@v5
         with:
           path: .static-docs-stage/.next/cache
-          key: ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          key: ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-static-docs-turbopack-v2-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
-            ${{ runner.os }}-static-docs-turbopack-v2-
+            ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-
+            ${{ runner.os }}-static-docs-turbopack-v3-
 
       - name: Restore EdgeOne CLI
         id: edgeone-cache
@@ -140,6 +149,57 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          manifest='.static-docs/search-index.json'
+          test -s "${manifest}"
+          [[ "$(jq -r '.version' "${manifest}")" == '4' ]]
+          [[ "$(jq -r '.engine' "${manifest}")" == 'zbsearch' ]]
+          [[ "$(jq -r '.mode' "${manifest}")" == 'category-bloom-router-shards' ]]
+
+          search_file_count=1
+          search_index_bytes="$(stat -c '%s' "${manifest}")"
+          core_shard_count=0
+          body_shard_count=0
+          router_count=0
+
+          check_search_file() {
+            local relative_url="$1"
+            local file_path=".static-docs${relative_url}"
+            test -s "${file_path}" || {
+              echo "::error::Missing search file: ${file_path}"
+              exit 1
+            }
+            local bytes
+            bytes="$(stat -c '%s' "${file_path}")"
+            if (( bytes >= 25000000 )); then
+              echo "::error::Search file ${file_path} is ${bytes} bytes, at or above the EdgeOne limit."
+              exit 1
+            fi
+            search_index_bytes="$((search_index_bytes + bytes))"
+            search_file_count="$((search_file_count + 1))"
+          }
+
+          while IFS= read -r router_url; do
+            router_count="$((router_count + 1))"
+            check_search_file "${router_url}"
+            router_path=".static-docs${router_url}"
+            [[ "$(jq -r '.version' "${router_path}")" == '2' ]]
+            [[ "$(jq -r '.engine' "${router_path}")" == 'zbsearch' ]]
+
+            while IFS= read -r shard_url; do
+              core_shard_count="$((core_shard_count + 1))"
+              check_search_file "${shard_url}"
+            done < <(jq -r '.core[].url' "${router_path}")
+
+            while IFS= read -r shard_url; do
+              body_shard_count="$((body_shard_count + 1))"
+              check_search_file "${shard_url}"
+            done < <(jq -r '.body[].url' "${router_path}")
+          done < <(jq -r '.categories[].router.url' "${manifest}")
+
+          [[ "${router_count}" -gt 0 ]]
+          [[ "${core_shard_count}" -gt 0 ]]
+          [[ "${body_shard_count}" -gt 0 ]]
+
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l)"
           largest="$(
@@ -152,6 +212,10 @@ jobs:
           {
             echo "- Package size: $((package_bytes / 1024 / 1024)) MiB"
             echo "- File count: ${file_count}"
+            echo "- Search files: ${search_file_count}; raw total ${search_index_bytes} bytes"
+            echo "- Category routers: ${router_count}"
+            echo "- Core shards: ${core_shard_count}"
+            echo "- Body shards: ${body_shard_count}"
             echo "- Largest file: ${largest_file_path} ($((largest_file_size / 1024 / 1024)) MiB)"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -209,13 +273,23 @@ jobs:
             exit 1
           }
 
+          manifest='.static-docs/search-index.json'
+          router_url="$(jq -r '.categories[0].router.url' "${manifest}")"
+          router_path=".static-docs${router_url}"
+          core_url="$(jq -r '.core[0].url' "${router_path}")"
+          body_url="$(jq -r '.body[0].url' "${router_path}")"
+
           export base_url preview_query
           printf '%s\n' \
             '/' \
             '/docs/' \
+            '/search-index.json' \
+            "${router_url}" \
+            "${core_url}" \
+            "${body_url}" \
             '/docs/math/advanced-mathematics/01-limits-continuity/' \
             '/docs/math/advanced-mathematics/01-limits-continuity.md' \
-            | xargs -P 4 -I '{}' bash -c '
+            | xargs -P 8 -I '{}' bash -c '
                 status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w "%{http_code}" "${base_url}$1?${preview_query}")"
                 echo "route $1 -> ${status}"
                 [[ "${status}" == "200" ]]
