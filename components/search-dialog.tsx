@@ -1,5 +1,6 @@
 'use client';
 
+import type { SortedResult } from 'fumadocs-core/search';
 import type { SearchClient } from 'fumadocs-core/search/client';
 import { useDocsSearch } from 'fumadocs-core/search/client';
 import { staticClient } from 'fumadocs-core/search/client/orama-static';
@@ -61,7 +62,7 @@ const shardedZBSearchClient: SearchClient = {
   async search(query) {
     const clients = await getShardClients();
     const groups = await Promise.all(clients.map((client) => client.search(query)));
-    const merged = [];
+    const merged: SortedResult[] = [];
     const seen = new Set<string>();
     const maxLength = Math.max(0, ...groups.map((group) => group.length));
 
