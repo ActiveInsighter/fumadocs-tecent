@@ -95,11 +95,11 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .static-docs-stage/.next/cache
-          key: ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
+          key: ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-static-docs-turbopack-v3-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-${{ hashFiles('package-lock.json', 'next.config.static.mjs', 'source.config.ts', 'tsconfig.json') }}-
+            ${{ runner.os }}-static-docs-turbopack-v4-
             ${{ runner.os }}-static-docs-turbopack-v3-
-            ${{ runner.os }}-static-docs-turbopack-v2-
 
       - name: Restore EdgeOne CLI
         id: edgeone-cache
@@ -151,12 +151,13 @@ jobs:
           set -euo pipefail
           manifest='.static-docs/search-index.json'
           test -s "${manifest}"
-          [[ "$(jq -r '.version' "${manifest}")" == '3' ]]
+          [[ "$(jq -r '.version' "${manifest}")" == '4' ]]
           [[ "$(jq -r '.engine' "${manifest}")" == 'zbsearch' ]]
-          [[ "$(jq -r '.mode' "${manifest}")" == 'tiered-category-router-shards' ]]
+          [[ "$(jq -r '.mode' "${manifest}")" == 'category-bloom-router-shards' ]]
 
           search_file_count=1
           search_index_bytes="$(stat -c '%s' "${manifest}")"
+          core_shard_count=0
           body_shard_count=0
           router_count=0
 
@@ -177,24 +178,26 @@ jobs:
             search_file_count="$((search_file_count + 1))"
           }
 
-          while IFS= read -r core_url; do
-            check_search_file "${core_url}"
-          done < <(jq -r '.core.shards[].url' "${manifest}")
-
           while IFS= read -r router_url; do
             router_count="$((router_count + 1))"
             check_search_file "${router_url}"
             router_path=".static-docs${router_url}"
-            [[ "$(jq -r '.version' "${router_path}")" == '1' ]]
+            [[ "$(jq -r '.version' "${router_path}")" == '2' ]]
             [[ "$(jq -r '.engine' "${router_path}")" == 'zbsearch' ]]
+
+            while IFS= read -r shard_url; do
+              core_shard_count="$((core_shard_count + 1))"
+              check_search_file "${shard_url}"
+            done < <(jq -r '.core[].url' "${router_path}")
 
             while IFS= read -r shard_url; do
               body_shard_count="$((body_shard_count + 1))"
               check_search_file "${shard_url}"
-            done < <(jq -r '.shards[].url' "${router_path}")
-          done < <(jq -r '.body.categories[].router.url' "${manifest}")
+            done < <(jq -r '.body[].url' "${router_path}")
+          done < <(jq -r '.categories[].router.url' "${manifest}")
 
           [[ "${router_count}" -gt 0 ]]
+          [[ "${core_shard_count}" -gt 0 ]]
           [[ "${body_shard_count}" -gt 0 ]]
 
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
@@ -211,6 +214,7 @@ jobs:
             echo "- File count: ${file_count}"
             echo "- Search files: ${search_file_count}; raw total ${search_index_bytes} bytes"
             echo "- Category routers: ${router_count}"
+            echo "- Core shards: ${core_shard_count}"
             echo "- Body shards: ${body_shard_count}"
             echo "- Largest file: ${largest_file_path} ($((largest_file_size / 1024 / 1024)) MiB)"
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -270,17 +274,18 @@ jobs:
           }
 
           manifest='.static-docs/search-index.json'
-          core_url="$(jq -r '.core.shards[0].url' "${manifest}")"
-          router_url="$(jq -r '.body.categories[0].router.url' "${manifest}")"
-          body_url="$(jq -r '.shards[0].url' ".static-docs${router_url}")"
+          router_url="$(jq -r '.categories[0].router.url' "${manifest}")"
+          router_path=".static-docs${router_url}"
+          core_url="$(jq -r '.core[0].url' "${router_path}")"
+          body_url="$(jq -r '.body[0].url' "${router_path}")"
 
           export base_url preview_query
           printf '%s\n' \
             '/' \
             '/docs/' \
             '/search-index.json' \
-            "${core_url}" \
             "${router_url}" \
+            "${core_url}" \
             "${body_url}" \
             '/docs/math/advanced-mathematics/01-limits-continuity/' \
             '/docs/math/advanced-mathematics/01-limits-continuity.md' \
