@@ -204,7 +204,7 @@ jobs:
 
           package_bytes="$(du -sb .static-docs | awk '{print $1}')"
           file_count="$(find .static-docs -type f | wc -l | tr -d ' ')"
-          largest_file="$({ find .static-docs -type f -printf '%s %p\n' | sort -nr | head -n 1; } || true)"
+          largest_file="$(find .static-docs -type f -printf '%s %p\n' | awk '{ size=$1; $1=""; sub(/^ /, ""); if (size > max) { max=size; path=$0 } } END { print max, path }')"
           largest_bytes="${largest_file%% *}"
           (( largest_bytes < 25000000 )) || { echo '::error::A static file is at or above the EdgeOne 25 MB limit.'; exit 1; }
 
@@ -280,13 +280,16 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "console_url=${console_url}" >> "${GITHUB_OUTPUT}"
 
-      - name: Verify production pages and search routes
+      - name: Verify deployment and production propagation
         shell: bash
         run: |
           set -euo pipefail
-          probe_dir="$(mktemp -d)"
-          trap 'rm -rf -- "${probe_dir}"' EXIT
           started="$(date +%s)"
+          deployment_url="${{ steps.deploy.outputs.deployment_url }}"
+          [[ -n "${deployment_url}" ]] || { echo '::error::No deployment URL captured.'; exit 1; }
+          deployment_base="${deployment_url%%\?*}"
+          deployment_query="${deployment_url#*\?}"
+          [[ "${deployment_query}" != "${deployment_url}" ]] || { echo '::error::Deployment URL is missing its access token.'; exit 1; }
 
           manifest='.static-docs/search-index.json'
           router_url="$(jq -r '.categories[0].router.url' "${manifest}")"
@@ -294,43 +297,72 @@ jobs:
           core_url="$(jq -r '.core[0].url' "${router_path}")"
           body_url="$(jq -r '.body[0].url' "${router_path}")"
 
+          verify_deployment_path() {
+            local path="$1"
+            local status
+            status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' "${deployment_base}${path}?${deployment_query}")"
+            echo "deployment ${path} -> ${status}"
+            [[ "${status}" == '200' ]]
+          }
+
+          for path in '/' '/docs/' '/search-index.json' "${router_url}" "${core_url}" "${body_url}" '/docs/math/advanced-mathematics/01-limits-continuity/' '/docs/math/advanced-mathematics/01-limits-continuity.md'; do
+            verify_deployment_path "${path}"
+          done
+
+          wait_for_production_path() {
+            local path="$1"
+            local expected="$2"
+            local attempts="${3:-12}"
+            local delay="${4:-5}"
+            local status=''
+            for attempt in $(seq 1 "${attempts}"); do
+              status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' "https://fumadocs.any1.tech${path}")"
+              echo "production ${path} attempt ${attempt}/${attempts} -> ${status}"
+              if [[ "${status}" == "${expected}" ]]; then return 0; fi
+              sleep "${delay}"
+            done
+            echo "::error::Production route ${path} did not reach HTTP ${expected}; last status ${status}."
+            return 1
+          }
+
+          # New search routes may appear on the project deployment before the
+          # custom domain edge map has propagated. Wait for the stable manifest
+          # first, then validate its immutable router/core/body targets.
+          wait_for_production_path '/search-index.json' '200' 12 5
+
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf -- "${probe_dir}"' EXIT
           pids=()
           start_probe() {
             local name="$1"
             local path="$2"
+            local expected="$3"
             (
-              curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' \
-                "https://fumadocs.any1.tech${path}" > "${probe_dir}/${name}.status"
+              status="$(curl --silent --show-error --max-time 60 -L -o /dev/null -w '%{http_code}' "https://fumadocs.any1.tech${path}")"
+              printf '%s %s\n' "${status}" "${expected}" > "${probe_dir}/${name}.status"
             ) &
             pids+=("$!")
           }
 
-          start_probe home '/'
-          start_probe docs '/docs/'
-          start_probe math '/docs/math/advanced-mathematics/01-limits-continuity/'
-          start_probe markdown '/docs/math/advanced-mathematics/01-limits-continuity.md'
-          start_probe search_manifest '/search-index.json'
-          start_probe search_router "${router_url}"
-          start_probe search_core "${core_url}"
-          start_probe search_body "${body_url}"
-          start_probe retired_upload '/api/blob/upload-url'
-          start_probe retired_ingest '/api/integrations/anyworkflow'
-          start_probe retired_download '/download/tasks/probe/1/probe/md'
+          start_probe home '/' '200'
+          start_probe docs '/docs/' '200'
+          start_probe math '/docs/math/advanced-mathematics/01-limits-continuity/' '200'
+          start_probe markdown '/docs/math/advanced-mathematics/01-limits-continuity.md' '200'
+          start_probe search_router "${router_url}" '200'
+          start_probe search_core "${core_url}" '200'
+          start_probe search_body "${body_url}" '200'
+          start_probe retired_upload '/api/blob/upload-url' '404'
+          start_probe retired_ingest '/api/integrations/anyworkflow' '404'
+          start_probe retired_download '/download/tasks/probe/1/probe/md' '404'
 
           for pid in "${pids[@]}"; do wait "${pid}"; done
-
-          for name in home docs math markdown search_manifest search_router search_core search_body; do
-            status="$(cat "${probe_dir}/${name}.status")"
-            echo "${name}=${status}"
-            [[ "${status}" == '200' ]]
-          done
-          for name in retired_upload retired_ingest retired_download; do
-            status="$(cat "${probe_dir}/${name}.status")"
-            echo "${name}=${status}"
-            [[ "${status}" == '404' ]]
+          for status_file in "${probe_dir}"/*.status; do
+            read -r actual expected < "${status_file}"
+            echo "$(basename "${status_file}" .status)=${actual} expected=${expected}"
+            [[ "${actual}" == "${expected}" ]]
           done
 
-          echo "- Parallel production route verification: $(($(date +%s) - started))s" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Deployment + production propagation verification: $(($(date +%s) - started))s" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Verify CDN compression and cache
         shell: bash
