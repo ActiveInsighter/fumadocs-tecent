@@ -1,12 +1,12 @@
 {
   "title": "线性代数",
   "pages": [
-    "01-行列式",
-    "02-矩阵",
-    "03-秩",
-    "04-向量",
-    "05-线性方程组",
-    "06-特征值与特征向量",
-    "07-相似与相似对角化"
+    "01-determinants",
+    "02-matrices",
+    "03-rank",
+    "04-vectors",
+    "05-linear-equations",
+    "06-eigenvalues-eigenvectors",
+    "07-similarity-diagonalization"
   ]
 }
